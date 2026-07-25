@@ -128,7 +128,6 @@ jobs:
       - name: Build and verify test-signed release
         shell: pwsh
         run: |
-          $directory = ""
           try {
             if ($env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') { throw "GitHub did not provide a full commit SHA." }
             $commitTimestamp = [string](& git show -s --format=%cI $env:GITHUB_SHA)
@@ -144,18 +143,7 @@ jobs:
             ./scripts/test-supply-chain.ps1 -ReleaseDirectory $directory -SkipImage
           } catch {
             $message = $_.Exception.Message -replace '(postgres:\/\/[^:]+:)[^@ ]+@', '$1***@' -replace "[\r\n]+", " "
-            $manifestDiagnostic = ""
-            $manifestPath = Join-Path $directory "release-manifest.json"
-            if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
-              try {
-                $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $manifestPath | ConvertFrom-Json
-                $manifestDiagnostic = " releaseManifestBuiltAt=<$([string] $manifest.builtAt)>"
-              } catch {
-                $manifestDiagnostic = " releaseManifestBuiltAt=<unreadable>"
-              }
-            }
-            $diagnostic = "$message$manifestDiagnostic"
-            Write-Host "::error title=Release acceptance failed::$($diagnostic.Substring(0, [Math]::Min(3500, $diagnostic.Length)))"
+            Write-Host "::error title=Release acceptance failed::$($message.Substring(0, [Math]::Min(3500, $message.Length)))"
             throw
           }
 

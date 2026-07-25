@@ -55,7 +55,12 @@ function Assert-ExactNames {
 function Get-JsonDocument {
   param([Parameter(Mandatory = $true)][string] $Path)
   try {
-    return Get-Content -Raw -Encoding UTF8 -LiteralPath $Path | ConvertFrom-Json
+    $json = Get-Content -Raw -Encoding UTF8 -LiteralPath $Path
+    $converter = Get-Command ConvertFrom-Json -CommandType Cmdlet
+    if ($converter.Parameters.ContainsKey("DateKind")) {
+      return $json | ConvertFrom-Json -DateKind String
+    }
+    return $json | ConvertFrom-Json
   } catch {
     throw "Invalid JSON release file: $Path"
   }
