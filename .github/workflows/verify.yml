@@ -130,8 +130,13 @@ jobs:
         run: |
           try {
             if ($env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') { throw "GitHub did not provide a full commit SHA." }
-            $builtAt = [string](& git show -s --format=%cI $env:GITHUB_SHA)
-            if ($LASTEXITCODE -ne 0 -or -not $builtAt) { throw "Could not resolve the release commit timestamp." }
+            $commitTimestamp = [string](& git show -s --format=%cI $env:GITHUB_SHA)
+            if ($LASTEXITCODE -ne 0 -or -not $commitTimestamp) { throw "Could not resolve the release commit timestamp." }
+            try {
+              $builtAt = [DateTimeOffset]::ParseExact($commitTimestamp.Trim(), "yyyy-MM-dd'T'HH:mm:ssK", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+            } catch {
+              throw "Git did not provide a valid RFC3339 release commit timestamp."
+            }
             $directory = ".build/release-$env:RELEASE_VERSION"
             ./scripts/build-release.ps1 -Version $env:RELEASE_VERSION -Revision $env:GITHUB_SHA -BuiltAt $builtAt.Trim() -SigningMode Test
             ./scripts/verify-release.ps1 -Directory $directory -ExpectedVersion $env:RELEASE_VERSION -ExpectedRevision $env:GITHUB_SHA
@@ -183,8 +188,13 @@ jobs:
           if ($env:RELEASE_REVISION -notmatch '^[0-9a-f]{40}$' -or $env:RELEASE_REVISION -ne $env:GITHUB_SHA) {
             throw "Release revision must equal the full GitHub commit SHA."
           }
-          $builtAt = [string](& git show -s --format=%cI $env:RELEASE_REVISION)
-          if ($LASTEXITCODE -ne 0 -or -not $builtAt) { throw "Could not resolve the release commit timestamp." }
+          $commitTimestamp = [string](& git show -s --format=%cI $env:RELEASE_REVISION)
+          if ($LASTEXITCODE -ne 0 -or -not $commitTimestamp) { throw "Could not resolve the release commit timestamp." }
+          try {
+            $builtAt = [DateTimeOffset]::ParseExact($commitTimestamp.Trim(), "yyyy-MM-dd'T'HH:mm:ssK", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+          } catch {
+            throw "Git did not provide a valid RFC3339 release commit timestamp."
+          }
           $directory = ".build/release-$version"
           ./scripts/build-release.ps1 -Version $version -Revision $env:RELEASE_REVISION -BuiltAt $builtAt.Trim() -SigningMode Keyless
           ./scripts/verify-release.ps1 -Directory $directory -ExpectedVersion $version -ExpectedRevision $env:RELEASE_REVISION -Keyless
