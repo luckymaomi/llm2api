@@ -38,14 +38,14 @@ try {
   Clear-LLM2APIEnvironment
   Invoke-Step "Environment" {
     if ($SkipIntegration -and $SkipDeployment) {
-      & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-environment.ps1 -SkipServices -SkipDockerDaemon
+      & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-environment.ps1 -SkipServices -SkipDockerDaemon
     } else {
-      & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-environment.ps1 -SkipServices
+      & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-environment.ps1 -SkipServices
     }
   }
 
   Invoke-Step "Go formatting" {
-    $unformatted = & gofmt -l .\cmd .\internal .\migrations
+    $unformatted = & gofmt -l ./cmd ./internal ./migrations
     if ($unformatted) {
       $unformatted | Write-Host
       throw "Go files are not formatted."
@@ -55,29 +55,29 @@ try {
   Invoke-Step "Go tests" { go test ./... }
 
   Invoke-Step "sqlc generation" {
-    $before = Get-ChildItem .\internal\store\db -File | Sort-Object FullName | ForEach-Object { "$($_.Name):$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash)" }
+    $before = Get-ChildItem ./internal/store/db -File | Sort-Object FullName | ForEach-Object { "$($_.Name):$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash)" }
     go tool sqlc generate
     if ($LASTEXITCODE -ne 0) { throw "sqlc generation failed with exit code $LASTEXITCODE." }
-    $after = Get-ChildItem .\internal\store\db -File | Sort-Object FullName | ForEach-Object { "$($_.Name):$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash)" }
+    $after = Get-ChildItem ./internal/store/db -File | Sort-Object FullName | ForEach-Object { "$($_.Name):$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash)" }
     if (Compare-Object $before $after) { throw "sqlc generated output drifted." }
   }
 
-  if (Test-Path .\web\package.json) {
-    Invoke-Step "Frontend install integrity" { & $pnpmCommand --dir web install --frozen-lockfile }
-    Invoke-Step "Frontend checks" { & $pnpmCommand --dir web run verify }
+  if (Test-Path ./web/package.json) {
+    Invoke-Step "Frontend install integrity" { & $pnpmCommand --dir ./web install --frozen-lockfile }
+    Invoke-Step "Frontend checks" { & $pnpmCommand --dir ./web run verify }
   }
 
   Invoke-Step "Compose configuration" { docker compose config --quiet }
   if (-not $SkipIntegration) {
-    Invoke-Step "Migration round-trip" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-migrations.ps1 }
-    Invoke-Step "Frontend/backend HTTP contract and core gateway flow" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-core.ps1 }
-    Invoke-Step "Credential rotation and PostgreSQL recovery" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-operations.ps1 }
-    Invoke-Step "Prometheus rules and Grafana dashboard" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-observability.ps1 }
+    Invoke-Step "Migration round-trip" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-migrations.ps1 }
+    Invoke-Step "Frontend/backend HTTP contract and core gateway flow" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-core.ps1 }
+    Invoke-Step "Credential rotation and PostgreSQL recovery" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-operations.ps1 }
+    Invoke-Step "Prometheus rules and Grafana dashboard" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-observability.ps1 }
     if ($env:OS -eq "Windows_NT") {
-      Invoke-Step "Windows SCM production service" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-windows-service.ps1 }
+      Invoke-Step "Windows SCM production service" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-windows-service.ps1 }
       if (-not $SkipDeployment) {
-        Invoke-Step "Production TLS deployment and rolling recovery" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-deployment.ps1 }
-        Invoke-Step "Encrypted empty-environment disaster recovery" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-disaster-recovery.ps1 }
+        Invoke-Step "Production TLS deployment and rolling recovery" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-deployment.ps1 }
+        Invoke-Step "Encrypted empty-environment disaster recovery" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-disaster-recovery.ps1 }
       }
     }
   }
@@ -88,13 +88,13 @@ try {
         @{ OS = "windows"; Arch = "amd64"; Suffix = ".exe" },
         @{ OS = "linux"; Arch = "amd64"; Suffix = "" }
       )
-      New-Item -ItemType Directory -Force .\.build | Out-Null
+      New-Item -ItemType Directory -Force ./.build | Out-Null
       foreach ($target in $targets) {
         $env:GOOS = $target.OS
         $env:GOARCH = $target.Arch
         $env:CGO_ENABLED = "0"
-        $output = ".\.build\llm2api-$($target.OS)-$($target.Arch)$($target.Suffix)"
-        go build -tags webembed -trimpath -o $output .\cmd\gateway
+        $output = "./.build/llm2api-$($target.OS)-$($target.Arch)$($target.Suffix)"
+        go build -tags webembed -trimpath -o $output ./cmd/gateway
         if ($LASTEXITCODE -ne 0) { throw "Go build failed for $($target.OS)/$($target.Arch) with exit code $LASTEXITCODE." }
       }
       Remove-Item Env:GOOS -ErrorAction SilentlyContinue
