@@ -239,7 +239,7 @@ function Save-LLM2APIEnvironment {
 
 function Clear-LLM2APIEnvironment {
   foreach ($item in @(Get-ChildItem Env: | Where-Object { $_.Name -like "LLM2API_*" })) {
-    [Environment]::SetEnvironmentVariable($item.Name, $null, "Process")
+    Remove-Item -LiteralPath "Env:$($item.Name)" -ErrorAction Stop
   }
 }
 
