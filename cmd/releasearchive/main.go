@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/luckymaomi/llmgateway/internal/releasearchive"
+	"github.com/luckymaomi/llm2api/internal/releasearchive"
 )
 
 type entryFlags []string

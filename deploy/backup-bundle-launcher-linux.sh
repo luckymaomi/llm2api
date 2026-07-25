@@ -22,10 +22,10 @@ case "$operation" in
   *) echo "unsupported backup operation" >&2; exit 2 ;;
 esac
 
-active_link=/opt/llmgateway/backup-active
+active_link=/opt/llm2api/backup-active
 [[ -L $active_link ]] || { echo "active backup bundle link is missing or invalid" >&2; exit 1; }
 bundle_directory=$(realpath -e -- "$active_link")
-[[ $bundle_directory =~ ^/opt/llmgateway/backup-bundle-[A-Za-z0-9]{8}$ &&
+[[ $bundle_directory =~ ^/opt/llm2api/backup-bundle-[A-Za-z0-9]{8}$ &&
    -d $bundle_directory && ! -L $bundle_directory &&
    $(stat -c '%u:%g:%a' -- "$bundle_directory") == 0:0:750 ]] || {
   echo "active backup bundle does not satisfy its immutable runtime contract" >&2

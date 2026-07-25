@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/luckymaomi/llmgateway/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/identity"
 )
 
 type Service struct {

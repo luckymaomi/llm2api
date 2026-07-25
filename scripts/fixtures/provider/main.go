@@ -231,7 +231,7 @@ func newCertificate(address net.IP) (tls.Certificate, []byte, error) {
 		return tls.Certificate{}, nil, err
 	}
 	template := x509.Certificate{
-		SerialNumber: serial, Subject: pkix.Name{CommonName: "LLMGateway test Provider"},
+		SerialNumber: serial, Subject: pkix.Name{CommonName: "LLM2API test Provider"},
 		NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true, IsCA: true, IPAddresses: []net.IP{address},

@@ -5,9 +5,9 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/canonical"
-	"github.com/luckymaomi/llmgateway/internal/execution"
-	"github.com/luckymaomi/llmgateway/internal/usage"
+	"github.com/luckymaomi/llm2api/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/execution"
+	"github.com/luckymaomi/llm2api/internal/usage"
 )
 
 type UsageAdapter struct {

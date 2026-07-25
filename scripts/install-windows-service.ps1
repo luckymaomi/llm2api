@@ -8,33 +8,33 @@ param(
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\deployment-environment.ps1"
 
-$serviceName = "LLMGateway"
+$serviceName = "LLM2API"
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-  throw "Installing the LLMGateway Windows service requires an elevated PowerShell session."
+  throw "Installing the LLM2API Windows service requires an elevated PowerShell session."
 }
 if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
-  throw "The LLMGateway Windows service already exists. Uninstall it explicitly before reinstalling."
+  throw "The LLM2API Windows service already exists. Uninstall it explicitly before reinstalling."
 }
 $binary = [IO.Path]::GetFullPath($BinaryPath)
 if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "Gateway binary does not exist: $binary" }
-$values = Read-LLMGatewayEnvironmentFile -Path $EnvironmentFile
-Assert-LLMGatewayFileSecrets -Values $values
-if ($values.LLMGATEWAY_PROFILE -ne "production") { throw "Windows service profile must be production." }
+$values = Read-LLM2APIEnvironmentFile -Path $EnvironmentFile
+Assert-LLM2APIFileSecrets -Values $values
+if ($values.LLM2API_PROFILE -ne "production") { throw "Windows service profile must be production." }
 
 $environmentSnapshot = @{}
 foreach ($item in Get-ChildItem Env:) { $environmentSnapshot[$item.Name] = $item.Value }
 $created = $false
 $eventSourceCreated = $false
 try {
-  Set-LLMGatewayProcessEnvironment -Values $values
+  Set-LLM2APIProcessEnvironment -Values $values
   & $binary --check-config
   if ($LASTEXITCODE -ne 0) { throw "Gateway configuration validation failed." }
 
   & sc.exe create $serviceName "binPath=" $binary "start=" "delayed-auto" "obj=" "NT SERVICE\$serviceName" "depend=" "Tcpip"
   if ($LASTEXITCODE -ne 0) { throw "Windows SCM service creation failed." }
   $created = $true
-  & sc.exe description $serviceName "Production multi-Provider LLMGateway service"
+  & sc.exe description $serviceName "Production multi-Provider LLM2API service"
   if ($LASTEXITCODE -ne 0) { throw "Windows service description update failed." }
   & sc.exe sidtype $serviceName unrestricted
   if ($LASTEXITCODE -ne 0) { throw "Windows service SID configuration failed." }
@@ -87,4 +87,4 @@ try {
   }
 }
 
-Write-Host "LLMGateway Windows service installed with delayed automatic start and bounded restart recovery."
+Write-Host "LLM2API Windows service installed with delayed automatic start and bounded restart recovery."

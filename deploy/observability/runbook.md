@@ -1,4 +1,4 @@
-# LLMGateway 运行告警
+# LLM2API 运行告警
 
 Prometheus 从 backend 网络分别抓取 `gateway-a:8080/metrics` 与 `gateway-b:8080/metrics`。Caddy 对公网 `/metrics` 返回 404。所有查询只使用 route、status、outcome、operation、resource pool、Provider kind 和 canonical error kind；禁止添加用户、API 密钥、模型输入、credential ID 或上游 URL 标签。
 
@@ -40,6 +40,6 @@ Prometheus 从 backend 网络分别抓取 `gateway-a:8080/metrics` 与 `gateway-
 
 ## Backup And Disaster Recovery
 
-每班检查 `llmgateway-backup.timer`、`llmgateway-backup-freshness.timer`、最近一次 service 退出码、最后快照时间和 Restic check。备份每 2 小时调度，单次失败在 10 分钟后重试一次，新鲜度每 15 分钟检查；最后成功恢复点超过 6 小时、远端 backend 不可达或 check 失败立即告警。不要删除共享维护锁、跳过 check 或把本机 staging 当备份。数据库、主密钥与 pepper 同属恢复集合，Restic password 和远端凭据必须在另一保管路径。
+每班检查 `llm2api-backup.timer`、`llm2api-backup-freshness.timer`、最近一次 service 退出码、最后快照时间和 Restic check。备份每 2 小时调度，单次失败在 10 分钟后重试一次，新鲜度每 15 分钟检查；最后成功恢复点超过 6 小时、远端 backend 不可达或 check 失败立即告警。不要删除共享维护锁、跳过 check 或把本机 staging 当备份。数据库、主密钥与 pepper 同属恢复集合，Restic password 和远端凭据必须在另一保管路径。
 
 主机或卷丢失时停止旧入口写流量，先列出快照并记录要恢复的完整 64 位 ID；禁止用 `latest` 隐式选择。在新主机只向空目录恢复经过 manifest 与 checksum 验证的快照，只向新数据库执行 `pg_restore`。依次核对 dump SHA-256、migration version、管理员/成员登录、成员管理 API 403、资源池、套餐版本、服务授权、上游 API Key 可解密、API 密钥、请求和 usage，再启动 Caddy。DNS/TLS 切换后观察 readiness、5xx、usage/recovery 指标和日志至少一个业务窗口。回切使用恢复库和逐实例 readiness；未知副作用请求保持 uncertain，不因灾备自动重放。

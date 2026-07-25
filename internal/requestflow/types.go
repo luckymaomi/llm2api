@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/canonical"
-	"github.com/luckymaomi/llmgateway/internal/execution"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/internal/providers"
-	"github.com/luckymaomi/llmgateway/internal/registry"
+	"github.com/luckymaomi/llm2api/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/execution"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/providers"
+	"github.com/luckymaomi/llm2api/internal/registry"
 )
 
 var (

@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/canonical"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/internal/requestflow"
+	"github.com/luckymaomi/llm2api/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
 )
 
 type fakeIdentity struct {

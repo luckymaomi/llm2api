@@ -1,5 +1,5 @@
 [Unit]
-Description=LLMGateway production Compose stack
+Description=LLM2API production Compose stack
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -7,8 +7,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/opt/llmgateway/deploy
-EnvironmentFile=/etc/llmgateway/deployment.env
+WorkingDirectory=/opt/llm2api/deploy
+EnvironmentFile=/etc/llm2api/deployment.env
 ExecStartPre=/usr/bin/docker compose -f compose.production.yaml config --quiet
 ExecStart=/usr/bin/docker compose -f compose.production.yaml up --detach --wait
 ExecReload=/usr/bin/docker compose -f compose.production.yaml up --detach --wait

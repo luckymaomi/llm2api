@@ -58,7 +58,7 @@ try {
     }
   }
 
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   if ($SkipDockerDaemon) {
     Write-Host "Docker daemon check skipped explicitly."
   } else {
@@ -68,15 +68,15 @@ try {
     }
   }
 
-  Invoke-LLMGatewayDocker compose version
-  Invoke-LLMGatewayDocker compose config --quiet
+  Invoke-LLM2APIDocker compose version
+  Invoke-LLM2APIDocker compose config --quiet
   if ($SkipServices) {
     Write-Host "Shared development service checks skipped explicitly."
   } else {
-    Wait-LLMGatewayContainerHealthy -Container "llmgateway-postgres"
-    Wait-LLMGatewayContainerHealthy -Container "llmgateway-valkey"
-    Test-LLMGatewayPostgres
-    Test-LLMGatewayValkey
+    Wait-LLM2APIContainerHealthy -Container "llm2api-postgres"
+    Wait-LLM2APIContainerHealthy -Container "llm2api-valkey"
+    Test-LLM2APIPostgres
+    Test-LLM2APIValkey
   }
 
   Write-Host "Environment verification passed."

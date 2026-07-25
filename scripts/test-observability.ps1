@@ -15,8 +15,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $rulesPath = [IO.Path]::GetFullPath((Join-Path $root "deploy\observability\prometheus-rules.yaml"))
 $dashboardPath = [IO.Path]::GetFullPath((Join-Path $root "deploy\observability\grafana-dashboard.json"))
 $validationDirectory = [IO.Path]::GetFullPath((Join-Path $root ".build\observability-$([guid]::NewGuid().ToString('N'))"))
-$docker = Get-LLMGatewayDockerCommand
-$containerName = "llmgateway-observability-$([guid]::NewGuid().ToString('N'))"
+$docker = Get-LLM2APIDockerCommand
+$containerName = "llm2api-observability-$([guid]::NewGuid().ToString('N'))"
 $grafanaPort = Get-FreeLoopbackPort
 $grafanaPassword = "observability-$([guid]::NewGuid().ToString('N'))"
 $failure = $null
@@ -48,12 +48,12 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Prometheus rule validation failed." }
 
   $dashboard = Get-Content -Raw -Encoding utf8 -LiteralPath $dashboardPath | ConvertFrom-Json
-  if ($dashboard.uid -ne "llmgateway-operations") {
+  if ($dashboard.uid -ne "llm2api-operations") {
     throw "The Grafana dashboard source does not contain the stable operations UID."
   }
 
   $containerID = [string](& $docker run --detach --rm --name $containerName `
-    --label "llmgateway.test.owner=llmgateway" `
+    --label "llm2api.test.owner=llm2api" `
     --publish "127.0.0.1:${grafanaPort}:3000" `
     --env "GF_SECURITY_ADMIN_PASSWORD=$grafanaPassword" `
     --env "GF_USERS_ALLOW_SIGN_UP=false" `
@@ -75,12 +75,12 @@ try {
   $importBody = @{ dashboard = $dashboard; overwrite = $true } | ConvertTo-Json -Depth 100 -Compress
   $imported = Invoke-RestMethod -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$grafanaPort/api/dashboards/db" `
     -Headers $headers -ContentType "application/json" -Body $importBody -TimeoutSec 10
-  if ($imported.status -ne "success" -or $imported.uid -ne "llmgateway-operations") {
+  if ($imported.status -ne "success" -or $imported.uid -ne "llm2api-operations") {
     throw "Grafana did not import the operations dashboard."
   }
-  $loaded = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$grafanaPort/api/dashboards/uid/llmgateway-operations" `
+  $loaded = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$grafanaPort/api/dashboards/uid/llm2api-operations" `
     -Headers $headers -TimeoutSec 10
-  if ($loaded.dashboard.uid -ne "llmgateway-operations") {
+  if ($loaded.dashboard.uid -ne "llm2api-operations") {
     throw "Grafana did not return the imported dashboard contract."
   }
 } catch {
@@ -94,7 +94,7 @@ try {
   } finally {
     $ErrorActionPreference = $previousErrorPreference
   }
-  if ($inspectionExitCode -eq 0 -and $inspection.Count -eq 1 -and $inspection[0].Config.Labels.'llmgateway.test.owner' -eq "llmgateway") {
+  if ($inspectionExitCode -eq 0 -and $inspection.Count -eq 1 -and $inspection[0].Config.Labels.'llm2api.test.owner' -eq "llm2api") {
     & $docker rm --force $containerName | Out-Null
   }
   $validationRoot = [IO.Path]::GetFullPath((Join-Path $root ".build"))

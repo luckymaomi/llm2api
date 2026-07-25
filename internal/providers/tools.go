@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/luckymaomi/llmgateway/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
 func (a *openAIAdapter) encodeTools(tools []canonical.ToolDefinition) ([]wireTool, error) {

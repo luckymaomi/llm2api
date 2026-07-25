@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/internal/security"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/security"
 )
 
 func TestAccountRecoveryPersistsPasswordSessionAndAuditFacts(t *testing.T) {
@@ -79,7 +79,7 @@ func TestOfflineAdministratorRecoveryRejectsMembersAndRevokesSessions(t *testing
 	memberID := insertRecoveryUser(t, pool, identity.RoleMember, identity.StatusActive)
 	insertRecoverySessions(t, pool, administratorID, 2)
 
-	database, err := sql.Open("pgx", os.Getenv("LLMGATEWAY_CONTROL_TEST_DATABASE_URL"))
+	database, err := sql.Open("pgx", os.Getenv("LLM2API_CONTROL_TEST_DATABASE_URL"))
 	if err != nil {
 		t.Fatal(err)
 	}

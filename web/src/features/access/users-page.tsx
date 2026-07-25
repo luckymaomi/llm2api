@@ -51,6 +51,7 @@ export function UsersPage() {
       {
         accessorKey: 'displayName',
         header: '成员',
+        meta: { align: 'center' },
         cell: ({ row }) => (
           <div>
             <strong>{row.original.displayName}</strong>
@@ -58,7 +59,7 @@ export function UsersPage() {
           </div>
         ),
       },
-      { accessorKey: 'keyCount', header: 'API 密钥', meta: { align: 'right' } },
+      { accessorKey: 'keyCount', header: 'API 密钥', meta: { align: 'center' } },
       {
         accessorKey: 'status',
         header: '状态',
@@ -69,6 +70,7 @@ export function UsersPage() {
         accessorKey: 'createdAt',
         header: '创建时间',
         cell: ({ row }) => formatDateTime(row.original.createdAt),
+        meta: { align: 'center' },
       },
       {
         id: 'actions',

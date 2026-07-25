@@ -1,10 +1,10 @@
-# LLMGateway Agent 工作规约
+# LLM2API Agent 工作规约
 
 本文件是仓库最高工作约束。`spec.md` 拥有产品与系统事实，`dev.md` 拥有长期开发和验收细则；正式实现期间，根目录 `plan.md` 是当前任务唯一执行合同。
 
 ## 1. 产品骨架
 
-LLMGateway 是服务约 200～300 名受控成员的单实例、封闭式商业多 Provider 网关。线下完成交易，线上呈现套餐、订阅、额度、用量和服务状态；它不是公共注册站点、SaaS 多租户平台或没有真实需求的大型系统。
+LLM2API 是服务约 200～300 名受控成员的单实例、封闭式商业多 Provider 网关。线下完成交易，线上呈现套餐、订阅、额度、用量和服务状态；它不是公共注册站点、SaaS 多租户平台或没有真实需求的大型系统。
 
 只有两个业务核心：
 
@@ -34,7 +34,7 @@ LLMGateway 是服务约 200～300 名受控成员的单实例、封闭式商业�
 1. 每次接手先完整读取 `AGENTS.md`、`spec.md`、`dev.md`、命中的项目 Skill 和存在时的 `plan.md`。
 2. 检查 Git、未提交改动、入口、持久状态、测试、文档、运行证据和外部合同。用户输入、历史讨论、参考项目与绿灯都只是证据，不自动等于当前事实。
 3. 先 research，再核验边界和唯一 owner，最后行动；未完成相关核心链路调查前不修改局部实现。
-4. 正式实现先执行 `rapid-iteration`，再执行 `llmgateway-dev`；中大型或跨模块任务同时执行 `plan` 并实时维护 `plan.md`。
+4. 正式实现先执行 `rapid-iteration`，再执行 `llm2api-dev`；中大型或跨模块任务同时执行 `plan` 并实时维护 `plan.md`。
 5. 保护 owner 的现有改动。commit、push、部署和发布只在 owner 明确授权时执行。
 
 始终用简体中文与 owner 交流，仓库文本按 UTF-8 读取。PowerShell 调用 Node 包管理器使用 `npm.cmd`、`npx.cmd`、`pnpm.cmd`。

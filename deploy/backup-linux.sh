@@ -10,10 +10,10 @@ source "$SCRIPT_DIRECTORY/backup-lib.sh"
 load_backup_environment "$1"
 check_backup_freshness >/dev/null || true
 
-configuration_directory=$LLMGATEWAY_CONFIGURATION_DIRECTORY
-deployment_environment_file=$LLMGATEWAY_DEPLOYMENT_ENVIRONMENT_FILE
-staging_root=$LLMGATEWAY_BACKUP_STAGING_ROOT
-success_marker=$LLMGATEWAY_BACKUP_LAST_SUCCESS_MARKER_FILE
+configuration_directory=$LLM2API_CONFIGURATION_DIRECTORY
+deployment_environment_file=$LLM2API_DEPLOYMENT_ENVIRONMENT_FILE
+staging_root=$LLM2API_BACKUP_STAGING_ROOT
+success_marker=$LLM2API_BACKUP_LAST_SUCCESS_MARKER_FILE
 staging=''
 marker_temporary=''
 maintenance_lock_held=false
@@ -35,11 +35,11 @@ cleanup() {
     fi
   fi
   if [[ $maintenance_lock_held == true ]]; then
-    release_llmgateway_maintenance_lock || status=1
+    release_llm2api_maintenance_lock || status=1
     maintenance_lock_held=false
   fi
   if (( status != 0 )); then
-    logger --priority daemon.alert --tag llmgateway-backup "LLMGateway encrypted backup failed" 2>/dev/null || true
+    logger --priority daemon.alert --tag llm2api-backup "LLM2API encrypted backup failed" 2>/dev/null || true
   fi
   exit "$status"
 }
@@ -47,7 +47,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-acquire_llmgateway_maintenance_lock backup
+acquire_llm2api_maintenance_lock backup
 maintenance_lock_held=true
 remove_stale_private_directories "$staging_root" backup.
 staging=$(mktemp -d "$staging_root/backup.XXXXXXXX")
@@ -59,7 +59,7 @@ while IFS= read -r line || [[ -n $line ]]; do
   [[ -z $line || $line == \#* ]] && continue
   key=${line%%=*}
   case "$key" in
-    LLMGATEWAY_BACKUP_*|LLMGATEWAY_RESTIC_*|LLMGATEWAY_DEPLOYMENT_ENVIRONMENT_FILE|LLMGATEWAY_CONFIGURATION_DIRECTORY)
+    LLM2API_BACKUP_*|LLM2API_RESTIC_*|LLM2API_DEPLOYMENT_ENVIRONMENT_FILE|LLM2API_CONFIGURATION_DIRECTORY)
       backup_error "deployment.env must not redefine backup control settings"
       ;;
   esac
@@ -71,24 +71,24 @@ chown -R 0:0 "$staging/configuration"
 find "$staging/configuration" -type d -exec chmod 0700 {} +
 find "$staging/configuration" -type f -exec chmod 0400 {} +
 verify_backup_configuration_tree "$staging/configuration"
-load_llmgateway_environment "$staging/configuration/deployment.env"
+load_llm2api_environment "$staging/configuration/deployment.env"
 require_file_secrets
 require_immutable_gateway_image
 
 require_configuration_bindings "$configuration_directory"
 
 export DEPLOY_DIRECTORY=${DEPLOY_DIRECTORY:-$SCRIPT_DIRECTORY}
-: "${LLMGATEWAY_POSTGRES_USER:=llmgateway}"
-: "${LLMGATEWAY_POSTGRES_DB:=llmgateway}"
+: "${LLM2API_POSTGRES_USER:=llm2api}"
+: "${LLM2API_POSTGRES_DB:=llm2api}"
 migration_version=$(deployment_compose exec -T postgres psql \
-  --username "$LLMGATEWAY_POSTGRES_USER" \
-  --dbname "$LLMGATEWAY_POSTGRES_DB" \
+  --username "$LLM2API_POSTGRES_USER" \
+  --dbname "$LLM2API_POSTGRES_DB" \
   --tuples-only --no-align \
   --command 'SELECT COALESCE(max(version_id), 0) FROM goose_db_version WHERE is_applied')
 [[ $migration_version =~ ^[0-9]+$ ]] || backup_error "could not determine an applied migration version"
 database_size_bytes=$(deployment_compose exec -T postgres psql \
-  --username "$LLMGATEWAY_POSTGRES_USER" \
-  --dbname "$LLMGATEWAY_POSTGRES_DB" \
+  --username "$LLM2API_POSTGRES_USER" \
+  --dbname "$LLM2API_POSTGRES_DB" \
   --tuples-only --no-align \
   --command 'SELECT pg_database_size(current_database())')
 [[ $database_size_bytes =~ ^[0-9]+$ ]] || backup_error "could not determine the PostgreSQL database size"
@@ -104,8 +104,8 @@ required_capacity_bytes=$(( database_size_bytes + capacity_reserve_bytes ))
 }
 recovery_point=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 deployment_compose exec -T postgres pg_dump \
-  --username "$LLMGATEWAY_POSTGRES_USER" \
-  --dbname "$LLMGATEWAY_POSTGRES_DB" \
+  --username "$LLM2API_POSTGRES_USER" \
+  --dbname "$LLM2API_POSTGRES_DB" \
   --format custom --compress 9 > "$staging/postgres.dump"
 [[ -s $staging/postgres.dump ]] || backup_error "PostgreSQL dump is empty"
 deployment_compose exec -T postgres pg_restore --list < "$staging/postgres.dump" >/dev/null
@@ -114,12 +114,12 @@ write_configuration_checksum "$staging/configuration" "$staging/configuration.sh
 postgres_digest=$(sha256sum -- "$staging/postgres.dump" | awk '{print $1}')
 printf '%s  postgres.dump\n' "$postgres_digest" > "$staging/postgres.dump.sha256"
 configuration_digest=$(sha256sum -- "$staging/configuration.sha256" | awk '{print $1}')
-gateway_digest=${LLMGATEWAY_GATEWAY_IMAGE##*@}
+gateway_digest=${LLM2API_GATEWAY_IMAGE##*@}
 printf '%s\n' \
-  'format=llmgateway-backup' \
+  'format=llm2api-backup' \
   "recovery_point_utc=$recovery_point" \
   "migration_version=$migration_version" \
-  "gateway_image=$LLMGATEWAY_GATEWAY_IMAGE" \
+  "gateway_image=$LLM2API_GATEWAY_IMAGE" \
   "gateway_image_digest=$gateway_digest" \
   "configuration_sha256=sha256:$configuration_digest" \
   "postgres_dump_sha256=sha256:$postgres_digest" \
@@ -131,17 +131,17 @@ verify_backup_payload "$staging"
 RESTIC_DATA_MOUNT_SOURCE=$staging
 RESTIC_DATA_MOUNT_TARGET=/backup
 RESTIC_DATA_MOUNT_READONLY=true
-run_restic backup /backup --host llmgateway-production --tag llmgateway-production
+run_restic backup /backup --host llm2api-production --tag llm2api-production
 unset RESTIC_DATA_MOUNT_SOURCE RESTIC_DATA_MOUNT_TARGET RESTIC_DATA_MOUNT_READONLY
 
-run_restic forget --host llmgateway-production --tag llmgateway-production \
+run_restic forget --host llm2api-production --tag llm2api-production \
   --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --prune
-run_restic check --read-data-subset "$LLMGATEWAY_RESTIC_CHECK_SUBSET"
+run_restic check --read-data-subset "$LLM2API_RESTIC_CHECK_SUBSET"
 
 completed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 marker_temporary=$(mktemp "$staging_root/.last-success.XXXXXXXX")
 printf '%s\n' \
-  'format=llmgateway-backup-success' \
+  'format=llm2api-backup-success' \
   "recovery_point_utc=$recovery_point" \
   "completed_at_utc=$completed_at" \
   > "$marker_temporary"
@@ -149,7 +149,7 @@ chown 0:0 "$marker_temporary"
 chmod 0600 "$marker_temporary"
 mv -Tf -- "$marker_temporary" "$success_marker"
 marker_temporary=''
-if [[ $LLMGATEWAY_BACKUP_MODE == production ]]; then
+if [[ $LLM2API_BACKUP_MODE == production ]]; then
   echo "Encrypted remote S3 database and configuration backup completed."
 else
   echo "Encrypted acceptance database and configuration backup completed."

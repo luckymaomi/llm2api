@@ -20,7 +20,7 @@ deployment_environment=$(configured_path "recovered deployment environment" "$1"
 require_root_owned_path_ancestors "recovered deployment environment" "$deployment_environment"
 configuration_directory=$(dirname -- "$deployment_environment")
 verify_runtime_configuration_tree "$configuration_directory"
-load_llmgateway_environment "$deployment_environment"
+load_llm2api_environment "$deployment_environment"
 require_file_secrets
 require_immutable_gateway_image
 require_configuration_bindings "$configuration_directory"
@@ -35,8 +35,8 @@ require_root_owned_path_ancestors "verified backup payload" "$payload"
   echo "unsafe restore database name" >&2
   exit 1
 }
-: "${LLMGATEWAY_POSTGRES_USER:=llmgateway}"
-configured_database=${LLMGATEWAY_POSTGRES_DB:-llmgateway}
+: "${LLM2API_POSTGRES_USER:=llm2api}"
+configured_database=${LLM2API_POSTGRES_DB:-llm2api}
 [[ $target_database == "$configured_database" ]] || { echo "restore target must match the recovered deployment database" >&2; exit 1; }
 
 created=false
@@ -46,13 +46,13 @@ cleanup() {
   trap - EXIT
   cleanup_status=$status
   if [[ $created == true ]]; then
-    if ! deployment_compose exec -T postgres dropdb --if-exists --force --username "$LLMGATEWAY_POSTGRES_USER" "$target_database" >/dev/null 2>&1; then
+    if ! deployment_compose exec -T postgres dropdb --if-exists --force --username "$LLM2API_POSTGRES_USER" "$target_database" >/dev/null 2>&1; then
       echo "failed to remove the incomplete restore database" >&2
       cleanup_status=1
     fi
   fi
-  if [[ $lock_acquired == true ]] && ! release_llmgateway_maintenance_lock; then
-    echo "failed to release the LLMGateway maintenance lock" >&2
+  if [[ $lock_acquired == true ]] && ! release_llm2api_maintenance_lock; then
+    echo "failed to release the LLM2API maintenance lock" >&2
     cleanup_status=1
   fi
   exit "$cleanup_status"
@@ -61,7 +61,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-acquire_llmgateway_maintenance_lock postgres-restore
+acquire_llm2api_maintenance_lock postgres-restore
 lock_acquired=true
 verify_backup_payload "$payload"
 dump=$payload/postgres.dump
@@ -102,11 +102,11 @@ fi
 case "$postgres_state" in
   running) ;;
   absent|created|exited)
-  LLMGATEWAY_POSTGRES_DB=postgres
-  export LLMGATEWAY_POSTGRES_DB
+  LLM2API_POSTGRES_DB=postgres
+  export LLM2API_POSTGRES_DB
   deployment_compose up --detach --wait postgres
-  LLMGATEWAY_POSTGRES_DB=$configured_database
-  export LLMGATEWAY_POSTGRES_DB
+  LLM2API_POSTGRES_DB=$configured_database
+  export LLM2API_POSTGRES_DB
   ;;
   *)
     echo "PostgreSQL container must be absent, created, exited, or running before restore" >&2
@@ -114,18 +114,18 @@ case "$postgres_state" in
     ;;
 esac
 deployment_compose exec -T postgres pg_restore --list <"$dump" >/dev/null
-existing=$(deployment_compose exec -T postgres psql --username "$LLMGATEWAY_POSTGRES_USER" --dbname postgres \
+existing=$(deployment_compose exec -T postgres psql --username "$LLM2API_POSTGRES_USER" --dbname postgres \
   --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname = '$target_database'")
 if [[ $existing == 1 ]]; then
   [[ $replace_incomplete_database == true ]] || { echo "restore target database already exists" >&2; exit 1; }
-  deployment_compose exec -T postgres dropdb --force --username "$LLMGATEWAY_POSTGRES_USER" "$target_database"
+  deployment_compose exec -T postgres dropdb --force --username "$LLM2API_POSTGRES_USER" "$target_database"
 fi
-deployment_compose exec -T postgres createdb --username "$LLMGATEWAY_POSTGRES_USER" "$target_database"
+deployment_compose exec -T postgres createdb --username "$LLM2API_POSTGRES_USER" "$target_database"
 created=true
 deployment_compose exec -T postgres pg_restore --exit-on-error --single-transaction --no-owner --no-privileges \
-  --username "$LLMGATEWAY_POSTGRES_USER" --dbname "$target_database" <"$dump"
+  --username "$LLM2API_POSTGRES_USER" --dbname "$target_database" <"$dump"
 manifest_migration_version=$(awk -F= '$1 == "migration_version" { print $2 }' "$payload/backup-manifest")
-restored_migration_version=$(deployment_compose exec -T postgres psql --username "$LLMGATEWAY_POSTGRES_USER" \
+restored_migration_version=$(deployment_compose exec -T postgres psql --username "$LLM2API_POSTGRES_USER" \
   --dbname "$target_database" --tuples-only --no-align \
   --command 'SELECT COALESCE(max(version_id), 0) FROM goose_db_version WHERE is_applied')
 [[ $restored_migration_version == "$manifest_migration_version" ]] || {

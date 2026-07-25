@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/migrations"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/migrations"
 )
 
 func TestGatewayKeyDeletionIsIdempotentAndAuditedOnce(t *testing.T) {
@@ -143,12 +143,12 @@ WHERE action = 'gateway_key.deleted' AND target_type = 'gateway_key' AND target_
 
 func identityTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	databaseURL := os.Getenv("LLMGATEWAY_CONTROL_TEST_DATABASE_URL")
+	databaseURL := os.Getenv("LLM2API_CONTROL_TEST_DATABASE_URL")
 	if databaseURL == "" {
-		if os.Getenv("LLMGATEWAY_CONTROL_TEST_REQUIRED") == "true" {
-			t.Fatal("LLMGATEWAY_CONTROL_TEST_DATABASE_URL is required for the gateway key deletion repository test")
+		if os.Getenv("LLM2API_CONTROL_TEST_REQUIRED") == "true" {
+			t.Fatal("LLM2API_CONTROL_TEST_DATABASE_URL is required for the gateway key deletion repository test")
 		}
-		t.Skip("LLMGATEWAY_CONTROL_TEST_DATABASE_URL is required for the isolated gateway key deletion repository test")
+		t.Skip("LLM2API_CONTROL_TEST_DATABASE_URL is required for the isolated gateway key deletion repository test")
 	}
 	ctx := context.Background()
 	database, err := sql.Open("pgx", databaseURL)

@@ -119,7 +119,7 @@ class SameOriginApiClient {
       throw new ApiProblem({
         status: 0,
         code: 'network_unavailable',
-        message: '无法连接 LLMGateway',
+        message: '无法连接 LLM2API',
         retryable: true,
       })
     }

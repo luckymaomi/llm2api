@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/execution"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
-	"github.com/luckymaomi/llmgateway/internal/usage"
+	"github.com/luckymaomi/llm2api/internal/execution"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/usage"
 )
 
 const requestTransactionAttempts = 4

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/luckymaomi/llmgateway/internal/execution"
+	"github.com/luckymaomi/llm2api/internal/execution"
 )
 
 func (s *Service) RecoverOnce(ctx context.Context, staleBefore time.Time, batchSize int32) (RecoveryResult, error) {

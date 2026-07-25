@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/providers"
-	"github.com/luckymaomi/llmgateway/internal/registry"
-	"github.com/luckymaomi/llmgateway/internal/security"
+	"github.com/luckymaomi/llm2api/internal/providers"
+	"github.com/luckymaomi/llm2api/internal/registry"
+	"github.com/luckymaomi/llm2api/internal/security"
 )
 
 func TestTransportFailuresProduceActionableProbeResults(t *testing.T) {

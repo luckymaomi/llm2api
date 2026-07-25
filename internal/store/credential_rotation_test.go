@@ -8,16 +8,16 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/luckymaomi/llmgateway/internal/registry"
-	"github.com/luckymaomi/llmgateway/internal/security"
-	"github.com/luckymaomi/llmgateway/migrations"
+	"github.com/luckymaomi/llm2api/internal/registry"
+	"github.com/luckymaomi/llm2api/internal/security"
+	"github.com/luckymaomi/llm2api/migrations"
 )
 
 func TestProviderCredentialMasterKeyRotationIsAtomicAndIdempotent(t *testing.T) {
-	databaseURL := os.Getenv("LLMGATEWAY_OPERATIONS_TEST_DATABASE_URL")
+	databaseURL := os.Getenv("LLM2API_OPERATIONS_TEST_DATABASE_URL")
 	if databaseURL == "" {
-		if os.Getenv("LLMGATEWAY_OPERATIONS_TEST_REQUIRED") == "true" {
-			t.Fatal("LLMGATEWAY_OPERATIONS_TEST_DATABASE_URL is required")
+		if os.Getenv("LLM2API_OPERATIONS_TEST_REQUIRED") == "true" {
+			t.Fatal("LLM2API_OPERATIONS_TEST_DATABASE_URL is required")
 		}
 		t.Skip("isolated PostgreSQL is required for credential rotation")
 	}

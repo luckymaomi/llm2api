@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/registry"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/registry"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
 )
 
 // This protects the business result that Key-scoped discoveries form one pool union

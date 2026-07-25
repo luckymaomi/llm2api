@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/luckymaomi/llmgateway/internal/config"
-	"github.com/luckymaomi/llmgateway/migrations"
+	"github.com/luckymaomi/llm2api/internal/config"
+	"github.com/luckymaomi/llm2api/migrations"
 	"github.com/redis/go-redis/v9"
 )
 

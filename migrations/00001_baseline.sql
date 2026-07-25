@@ -45,7 +45,7 @@ CREATE TABLE site_profile (
     updated_by uuid REFERENCES users(id),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
-INSERT INTO site_profile (singleton, name) VALUES (true, 'LLMGateway');
+INSERT INTO site_profile (singleton, name) VALUES (true, 'LLM2API');
 
 CREATE TABLE member_mutations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

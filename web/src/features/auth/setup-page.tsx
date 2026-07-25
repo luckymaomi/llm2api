@@ -82,7 +82,7 @@ export function SetupPage() {
   }
 
   return (
-    <AuthPanel title="初始化 LLMGateway">
+    <AuthPanel title="初始化 LLM2API">
       <div className="auth-marker">
         <ShieldCheck size={18} />
         系统将生成高熵初始密码并只显示一次

@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/luckymaomi/llmgateway/internal/providers"
-	"github.com/luckymaomi/llmgateway/internal/registry"
-	"github.com/luckymaomi/llmgateway/internal/security"
+	"github.com/luckymaomi/llm2api/internal/providers"
+	"github.com/luckymaomi/llm2api/internal/registry"
+	"github.com/luckymaomi/llm2api/internal/security"
 )
 
 type ProviderFactory struct {

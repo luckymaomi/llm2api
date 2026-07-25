@@ -72,13 +72,13 @@ function Remove-SuccessfulAcceptanceBuild {
 }
 
 $root = Split-Path -Parent $PSScriptRoot
-$runID = New-LLMGatewayTestRunID -Purpose "browser"
+$runID = New-LLM2APITestRunID -Purpose "browser"
 $postgresContainer = ""
 $valkeyContainer = ""
 $providerProcess = $null
 $postgresPassword = "browser-postgres-fixture"
 $valkeyPassword = "browser-valkey-fixture"
-$databaseName = "llmgateway_browser"
+$databaseName = "llm2api_browser"
 $buildDirectory = Join-Path $root ".build\browser-real-$runID"
 $evidenceDirectory = Join-Path $root ".build\acceptance-evidence"
 $runningOnWindows = $env:OS -eq "Windows_NT"
@@ -92,28 +92,28 @@ $providerStderrPath = Join-Path $buildDirectory "provider.stderr.log"
 $gatewayPIDFile = Join-Path $buildDirectory "gateway.pid"
 $pnpmCommand = if ($runningOnWindows) { "pnpm.cmd" } else { "pnpm" }
 $environmentNames = @(
-  "LLMGATEWAY_PROFILE",
-  "LLMGATEWAY_HTTP_ADDRESS",
-  "LLMGATEWAY_DATABASE_URL",
-  "LLMGATEWAY_DATABASE_MIGRATE_ON_START",
-  "LLMGATEWAY_VALKEY_ADDRESS",
-  "LLMGATEWAY_VALKEY_PASSWORD",
-  "LLMGATEWAY_VALKEY_DATABASE",
-  "LLMGATEWAY_MASTER_KEYS",
-  "LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION",
-  "LLMGATEWAY_SESSION_PEPPER",
-  "LLMGATEWAY_API_KEY_PEPPER",
-  "LLMGATEWAY_COOKIE_SECURE",
-  "LLMGATEWAY_ALLOWED_RESOLVED_NETWORKS",
-  "LLMGATEWAY_PROVIDER_CA_BUNDLE_FILE",
-  "LLMGATEWAY_LOG_LEVEL",
-  "LLMGATEWAY_REAL_GATEWAY_BINARY",
-  "LLMGATEWAY_REAL_GATEWAY_URL",
-  "LLMGATEWAY_REAL_GATEWAY_LOG_DIR",
-  "LLMGATEWAY_REAL_GATEWAY_PID_FILE",
-  "LLMGATEWAY_REAL_PROVIDER_BASE_URL",
-  "LLMGATEWAY_REAL_DOCKER_COMMAND",
-  "LLMGATEWAY_REAL_POSTGRES_CONTAINER"
+  "LLM2API_PROFILE",
+  "LLM2API_HTTP_ADDRESS",
+  "LLM2API_DATABASE_URL",
+  "LLM2API_DATABASE_MIGRATE_ON_START",
+  "LLM2API_VALKEY_ADDRESS",
+  "LLM2API_VALKEY_PASSWORD",
+  "LLM2API_VALKEY_DATABASE",
+  "LLM2API_MASTER_KEYS",
+  "LLM2API_ACTIVE_MASTER_KEY_VERSION",
+  "LLM2API_SESSION_PEPPER",
+  "LLM2API_API_KEY_PEPPER",
+  "LLM2API_COOKIE_SECURE",
+  "LLM2API_ALLOWED_RESOLVED_NETWORKS",
+  "LLM2API_PROVIDER_CA_BUNDLE_FILE",
+  "LLM2API_LOG_LEVEL",
+  "LLM2API_REAL_GATEWAY_BINARY",
+  "LLM2API_REAL_GATEWAY_URL",
+  "LLM2API_REAL_GATEWAY_LOG_DIR",
+  "LLM2API_REAL_GATEWAY_PID_FILE",
+  "LLM2API_REAL_PROVIDER_BASE_URL",
+  "LLM2API_REAL_DOCKER_COMMAND",
+  "LLM2API_REAL_POSTGRES_CONTAINER"
 )
 $environmentSnapshot = @{}
 foreach ($name in $environmentNames) {
@@ -131,12 +131,12 @@ $acceptancePassed = $false
 
 Push-Location $root
 try {
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   New-Item -ItemType Directory -Force $buildDirectory | Out-Null
 
-  $postgres = Start-LLMGatewayTestPostgres -RunID $runID -DatabaseName $databaseName -Password $postgresPassword
+  $postgres = Start-LLM2APITestPostgres -RunID $runID -DatabaseName $databaseName -Password $postgresPassword
   $postgresContainer = $postgres.Container
-  $valkey = Start-LLMGatewayTestValkey -RunID $runID -Password $valkeyPassword
+  $valkey = Start-LLM2APITestValkey -RunID $runID -Password $valkeyPassword
   $valkeyContainer = $valkey.Container
   $applicationPorts = @(Get-FreeLoopbackPorts -Count 3)
   $gatewayPort = $applicationPorts[0]
@@ -145,28 +145,28 @@ try {
   $providerBaseURL = "https://127.0.0.1:$providerPort/v1"
   $providerAdminURL = "http://127.0.0.1:$providerAdminPort"
 
-  $env:LLMGATEWAY_PROFILE = "test"
-  $env:LLMGATEWAY_HTTP_ADDRESS = "127.0.0.1:$gatewayPort"
-  $env:LLMGATEWAY_DATABASE_URL = $postgres.DatabaseURL
-  $env:LLMGATEWAY_DATABASE_MIGRATE_ON_START = "true"
-  $env:LLMGATEWAY_VALKEY_ADDRESS = $valkey.Address
-  $env:LLMGATEWAY_VALKEY_PASSWORD = $valkeyPassword
-  $env:LLMGATEWAY_VALKEY_DATABASE = "0"
-  $env:LLMGATEWAY_MASTER_KEYS = "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-  $env:LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION = "1"
-  $env:LLMGATEWAY_SESSION_PEPPER = "llmgateway-browser-session-pepper-000000"
-  $env:LLMGATEWAY_API_KEY_PEPPER = "llmgateway-browser-api-key-pepper-000000"
-  $env:LLMGATEWAY_COOKIE_SECURE = "false"
-  $env:LLMGATEWAY_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15"
-  $env:LLMGATEWAY_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
-  $env:LLMGATEWAY_LOG_LEVEL = "info"
-  $env:LLMGATEWAY_REAL_GATEWAY_BINARY = $binaryPath
-  $env:LLMGATEWAY_REAL_GATEWAY_URL = "http://127.0.0.1:$gatewayPort"
-  $env:LLMGATEWAY_REAL_GATEWAY_LOG_DIR = $buildDirectory
-  $env:LLMGATEWAY_REAL_GATEWAY_PID_FILE = $gatewayPIDFile
-  $env:LLMGATEWAY_REAL_PROVIDER_BASE_URL = $providerBaseURL
-  $env:LLMGATEWAY_REAL_DOCKER_COMMAND = $docker
-  $env:LLMGATEWAY_REAL_POSTGRES_CONTAINER = $postgresContainer
+  $env:LLM2API_PROFILE = "test"
+  $env:LLM2API_HTTP_ADDRESS = "127.0.0.1:$gatewayPort"
+  $env:LLM2API_DATABASE_URL = $postgres.DatabaseURL
+  $env:LLM2API_DATABASE_MIGRATE_ON_START = "true"
+  $env:LLM2API_VALKEY_ADDRESS = $valkey.Address
+  $env:LLM2API_VALKEY_PASSWORD = $valkeyPassword
+  $env:LLM2API_VALKEY_DATABASE = "0"
+  $env:LLM2API_MASTER_KEYS = "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  $env:LLM2API_ACTIVE_MASTER_KEY_VERSION = "1"
+  $env:LLM2API_SESSION_PEPPER = "llm2api-browser-session-pepper-000000"
+  $env:LLM2API_API_KEY_PEPPER = "llm2api-browser-api-key-pepper-000000"
+  $env:LLM2API_COOKIE_SECURE = "false"
+  $env:LLM2API_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15"
+  $env:LLM2API_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
+  $env:LLM2API_LOG_LEVEL = "info"
+  $env:LLM2API_REAL_GATEWAY_BINARY = $binaryPath
+  $env:LLM2API_REAL_GATEWAY_URL = "http://127.0.0.1:$gatewayPort"
+  $env:LLM2API_REAL_GATEWAY_LOG_DIR = $buildDirectory
+  $env:LLM2API_REAL_GATEWAY_PID_FILE = $gatewayPIDFile
+  $env:LLM2API_REAL_PROVIDER_BASE_URL = $providerBaseURL
+  $env:LLM2API_REAL_DOCKER_COMMAND = $docker
+  $env:LLM2API_REAL_POSTGRES_CONTAINER = $postgresContainer
 
   & go build -trimpath -o $providerBinaryPath .\scripts\fixtures\provider
   if ($LASTEXITCODE -ne 0) { throw "Could not build the real browser Provider fixture." }
@@ -209,43 +209,43 @@ try {
     throw "Real headed browser acceptance failed. Gateway logs are in $buildDirectory."
   }
 
-  $catalogFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llmgateway -d $databaseName -Atc `
+  $catalogFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llm2api -d $databaseName -Atc `
     "SELECT count(*) || '|' || min(base_url) FROM providers WHERE catalog_id = 'siliconflow' AND slug = 'siliconflow'"
   if ($LASTEXITCODE -ne 0 -or $catalogFact -ne "1|$providerBaseURL") {
     throw "The code-owned Provider catalog was not synchronized and redirected inside the isolated database: $catalogFact"
   }
-  $poolFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llmgateway -d $databaseName -Atc `
+  $poolFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llm2api -d $databaseName -Atc `
     "SELECT (SELECT count(*) FROM resource_pools pool JOIN providers provider ON provider.id = pool.provider_id WHERE pool.name = 'Browser Pool' AND pool.slug ~ '^pool-[a-f0-9]{32}$' AND pool.status = 'active' AND provider.catalog_id = 'siliconflow') || '|' || (SELECT count(*) FROM resource_pool_models binding JOIN resource_pools pool ON pool.id = binding.resource_pool_id JOIN models model ON model.id = binding.model_id WHERE pool.name = 'Browser Pool' AND model.public_name = 'qwen3.5-9b') || '|' || (SELECT count(*) FROM resource_pool_mutations mutation JOIN resource_pools pool ON pool.id = mutation.resource_pool_id WHERE pool.name = 'Browser Pool' AND mutation.action = 'resource_pool.create') || '|' || (SELECT count(*) FROM audit_events audit WHERE audit.action = 'resource_pool.create' AND audit.target_id = (SELECT id::text FROM resource_pools WHERE name = 'Browser Pool') AND audit.request_id IS NOT NULL)"
   if ($LASTEXITCODE -ne 0 -or $poolFact -ne "1|1|1|1") {
     throw "The browser resource pool did not preserve its Provider, model, mutation, and audit facts: $poolFact"
   }
-  $credentialFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llmgateway -d $databaseName -Atc `
+  $credentialFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llm2api -d $databaseName -Atc `
     "SELECT (SELECT count(*) FROM provider_credentials credential JOIN resource_pools pool ON pool.id = credential.resource_pool_id WHERE credential.name = 'Browser Upstream Key' AND credential.status = 'active' AND pool.name = 'Browser Pool') || '|' || (SELECT count(*) FROM credential_mutations mutation JOIN provider_credentials credential ON credential.id = mutation.credential_id WHERE credential.name = 'Browser Upstream Key' AND mutation.action IN ('credential.create', 'credential.update')) || '|' || (SELECT count(*) FROM credential_models binding JOIN provider_credentials credential ON credential.id = binding.credential_id JOIN models model ON model.id = binding.model_id WHERE credential.name = 'Browser Upstream Key' AND model.public_name = 'qwen3.5-9b') || '|' || (SELECT count(*) FROM audit_events audit WHERE audit.action = 'credential.create' AND audit.target_id = (SELECT id::text FROM provider_credentials WHERE name = 'Browser Upstream Key')) || '|' || (SELECT count(*) FROM audit_events audit WHERE audit.action = 'credential.update' AND audit.target_id = (SELECT id::text FROM provider_credentials WHERE name = 'Browser Upstream Key')) || '|' || (SELECT count(*) FROM audit_events audit WHERE audit.action = 'credential.probed' AND audit.target_id = (SELECT id::text FROM provider_credentials WHERE name = 'Browser Upstream Key') AND audit.request_id IS NOT NULL) || '|' || (SELECT last_probe_status || '|' || last_probe_kind FROM provider_credentials WHERE name = 'Browser Upstream Key') || '|' || (SELECT count(*) FROM credential_mutations mutation JOIN provider_credentials credential ON credential.id = mutation.credential_id WHERE credential.name = 'Browser Upstream Key' AND (mutation.result::text LIKE '%core-upstream-secret%' OR mutation.result::text LIKE '%browser-upstream-secret-replaced%' OR mutation.result::text LIKE '%encrypted_secret%')) || '|' || (SELECT count(*) FROM audit_events audit WHERE audit.target_id = (SELECT id::text FROM provider_credentials WHERE name = 'Browser Upstream Key') AND (audit.detail::text LIKE '%core-upstream-secret%' OR audit.detail::text LIKE '%browser-upstream-secret-replaced%'))"
   if ($LASTEXITCODE -ne 0 -or $credentialFact -ne "1|2|1|1|1|1|succeeded|generation|0|0") {
     throw "The browser upstream API Key did not preserve replacement, probe, routing, audit, and secret boundaries: $credentialFact"
   }
-  $planFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llmgateway -d $databaseName -Atc `
+  $planFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llm2api -d $databaseName -Atc `
     "SELECT (SELECT count(*) FROM service_plans plan JOIN service_plan_versions version ON version.id = plan.current_version_id WHERE plan.name = 'Browser Plan' AND plan.slug ~ '^plan-[a-f0-9]{32}$' AND plan.status = 'active' AND version.version = 1) || '|' || (SELECT count(*) FROM service_plan_version_routes route JOIN service_plan_versions version ON version.id = route.service_plan_version_id JOIN service_plans plan ON plan.id = version.service_plan_id JOIN models model ON model.id = route.model_id JOIN resource_pools pool ON pool.id = route.resource_pool_id WHERE plan.name = 'Browser Plan' AND model.public_name = 'qwen3.5-9b' AND pool.name = 'Browser Pool') || '|' || (SELECT count(*) FROM service_plan_mutations mutation JOIN service_plans plan ON plan.id = mutation.service_plan_id WHERE plan.name = 'Browser Plan' AND mutation.action = 'service_plan.create') || '|' || (SELECT count(*) FROM audit_events audit WHERE audit.action = 'service_plan.create' AND audit.target_id = (SELECT id::text FROM service_plans WHERE name = 'Browser Plan') AND audit.request_id IS NOT NULL)"
   if ($LASTEXITCODE -ne 0 -or $planFact -ne "1|1|1|1") {
     throw "The browser plan did not preserve one immutable published version and route: $planFact"
   }
-  $subscriptionFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llmgateway -d $databaseName -Atc `
+  $subscriptionFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llm2api -d $databaseName -Atc `
     "SELECT (SELECT count(*) FROM users member WHERE lower(member.email) = 'browser-member@example.test' AND member.display_name = 'Browser Member' AND member.role = 'member' AND member.status = 'active') || '|' || (SELECT count(*) FROM member_mutations mutation JOIN users member ON member.id = mutation.user_id WHERE lower(member.email) = 'browser-member@example.test' AND mutation.action = 'member.create') || '|' || (SELECT count(*) FROM audit_events audit WHERE audit.action = 'identity.member_created' AND audit.target_id = (SELECT id::text FROM users WHERE lower(email) = 'browser-member@example.test') AND audit.request_id IS NOT NULL) || '|' || (SELECT count(*) FROM subscriptions subscription JOIN users member ON member.id = subscription.user_id JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id JOIN service_plans plan ON plan.id = version.service_plan_id WHERE lower(member.email) = 'browser-member@example.test' AND plan.name = 'Browser Plan' AND version.version = 1 AND subscription.status = 'active') || '|' || (SELECT count(*) FROM subscription_mutations mutation JOIN subscriptions subscription ON subscription.id = mutation.subscription_id JOIN users member ON member.id = subscription.user_id WHERE lower(member.email) = 'browser-member@example.test' AND mutation.action = 'subscription.create') || '|' || (SELECT count(*) FROM audit_events audit WHERE audit.action = 'subscription.create' AND audit.target_id = (SELECT subscription.id::text FROM subscriptions subscription JOIN users member ON member.id = subscription.user_id WHERE lower(member.email) = 'browser-member@example.test') AND audit.request_id IS NOT NULL)"
   if ($LASTEXITCODE -ne 0 -or $subscriptionFact -ne "1|1|1|1|1|1") {
     throw "The browser member and frozen-version subscription facts were not persisted atomically: $subscriptionFact"
   }
-  $keyFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llmgateway -d $databaseName -Atc `
+  $keyFact = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llm2api -d $databaseName -Atc `
     "SELECT (SELECT count(*) FROM gateway_keys key JOIN users owner ON owner.id = key.user_id WHERE lower(owner.email) = 'browser-member@example.test' AND key.name IN ('Browser Admin-Created Key', 'Browser Member-Created Key') AND key.deleted_at IS NULL) || '|' || (SELECT count(*) FROM gateway_key_mutations mutation JOIN gateway_keys key ON key.id = mutation.gateway_key_id WHERE key.name IN ('Browser Admin-Created Key', 'Browser Member-Created Key')) || '|' || (SELECT count(*) FROM gateway_key_models binding JOIN gateway_keys key ON key.id = binding.gateway_key_id JOIN models model ON model.id = binding.model_id WHERE key.name IN ('Browser Admin-Created Key', 'Browser Member-Created Key') AND model.public_name = 'qwen3.5-9b') || '|' || (SELECT count(*) FROM audit_events audit WHERE audit.action = 'gateway_key.created' AND audit.target_id IN (SELECT id::text FROM gateway_keys WHERE name IN ('Browser Admin-Created Key', 'Browser Member-Created Key')) AND audit.request_id IS NOT NULL) || '|' || (SELECT count(DISTINCT actor.role) FROM audit_events audit JOIN users actor ON actor.id = audit.actor_user_id WHERE audit.action = 'gateway_key.created' AND audit.target_id IN (SELECT id::text FROM gateway_keys WHERE name IN ('Browser Admin-Created Key', 'Browser Member-Created Key'))) || '|' || (SELECT count(*) FROM gateway_key_mutations mutation JOIN gateway_keys key ON key.id = mutation.gateway_key_id WHERE key.name IN ('Browser Admin-Created Key', 'Browser Member-Created Key') AND mutation.result ? 'secret')"
   if ($LASTEXITCODE -ne 0 -or $keyFact -ne "2|2|2|2|2|0") {
     throw "Administrator and member API key creation did not preserve ownership, model scope, audit, and secret boundaries: $keyFact"
   }
-  $gatewayKeyTestFacts = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llmgateway -d $databaseName -Atc `
+  $gatewayKeyTestFacts = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llm2api -d $databaseName -Atc `
     "SELECT count(*) FILTER (WHERE request.status = 'completed') || '|' || count(*) FILTER (WHERE request.status = 'completed' AND (request.input_tokens <> 4 OR request.output_tokens <> 2)) FROM requests request JOIN gateway_keys key ON key.id = request.gateway_key_id WHERE key.name = 'Browser Admin-Created Key' AND request.stream = true"
   $gatewayKeyTestParts = [string]$gatewayKeyTestFacts -split '\|'
   if ($LASTEXITCODE -ne 0 -or $gatewayKeyTestParts.Count -ne 2 -or [int]$gatewayKeyTestParts[0] -lt 1 -or $gatewayKeyTestParts[1] -ne "0") {
     throw "The real browser API key test did not persist completed six-Token usage: $gatewayKeyTestFacts"
   }
-  $activeSessionCount = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llmgateway -d $databaseName -Atc `
+  $activeSessionCount = & $docker exec $postgresContainer psql -v ON_ERROR_STOP=1 -U llm2api -d $databaseName -Atc `
     "SELECT count(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > now()"
   if ($LASTEXITCODE -ne 0 -or $activeSessionCount -ne "0") {
     throw "A browser acceptance session remained active after administrator and member logout."
@@ -307,12 +307,12 @@ try {
     $cleanupFailures.Add("Provider fixture cleanup: $($_.Exception.Message)")
   }
   try {
-    Stop-LLMGatewayTestContainer -Container $valkeyContainer -RunID $runID
+    Stop-LLM2APITestContainer -Container $valkeyContainer -RunID $runID
   } catch {
     $cleanupFailures.Add("Valkey cleanup: $($_.Exception.Message)")
   }
   try {
-    Stop-LLMGatewayTestContainer -Container $postgresContainer -RunID $runID
+    Stop-LLM2APITestContainer -Container $postgresContainer -RunID $runID
   } catch {
     $cleanupFailures.Add("PostgreSQL cleanup: $($_.Exception.Message)")
   }

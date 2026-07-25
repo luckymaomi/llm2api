@@ -5,7 +5,7 @@ import (
 	"crypto/subtle"
 	"net/http"
 
-	"github.com/luckymaomi/llmgateway/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/identity"
 )
 
 type principalContextKey struct{}

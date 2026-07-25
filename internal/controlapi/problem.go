@@ -5,10 +5,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/luckymaomi/llmgateway/internal/httpserver"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/internal/registry"
-	"github.com/luckymaomi/llmgateway/internal/subscription"
+	"github.com/luckymaomi/llm2api/internal/httpserver"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/registry"
+	"github.com/luckymaomi/llm2api/internal/subscription"
 )
 
 type problem struct {

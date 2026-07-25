@@ -33,7 +33,7 @@ $script:ReleaseToolSpecifications = @{
   }
 }
 
-function Install-LLMGatewayReleaseTool {
+function Install-LLM2APIReleaseTool {
   param(
     [Parameter(Mandatory = $true)]
     [ValidateSet("trivy", "gitleaks", "syft", "cosign")]

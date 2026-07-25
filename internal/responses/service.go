@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/security"
+	"github.com/luckymaomi/llm2api/internal/security"
 )
 
 type Service struct {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luckymaomi/llmgateway/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
 func NewGemini() Adapter {

@@ -1,10 +1,10 @@
-# LLMGateway 产品与系统规格
+# LLM2API 产品与系统规格
 
 `spec.md` 是当前产品合同、系统边界、唯一事实 owner 和运行拓扑的规范来源。根目录 `plan.md` 记录断裂式重建的实际完成状态；重建未收口时，以计划中的已验证项判断实现，不能把本规格中的目标合同冒充成已交付事实。
 
 ## 1. 产品定位
 
-LLMGateway 是服务约 200～300 名受控成员的单实例、封闭式商业多 Provider LLM 网关。管理员在线下完成客户交易，在线维护成员、套餐、订阅和上游资源；成员通过一个 Base URL 和自己的 API 密钥调用被授权模型。
+LLM2API 是服务约 200～300 名受控成员的单实例、封闭式商业多 Provider LLM 网关。管理员在线下完成客户交易，在线维护成员、套餐、订阅和上游资源；成员通过一个 Base URL 和自己的 API 密钥调用被授权模型。
 
 产品只有两个业务核心：
 
@@ -44,7 +44,7 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 ```text
 首次创建管理员
   -> 从只读 Provider 目录选择能力并创建资源池
-  -> 逐行粘贴一条或多条上游 API Key，绑定模型并探测
+  -> 逐行粘贴一条或多条上游 API Key，自动探测并保存每把 Key 的真实模型快照
   -> 创建并发布套餐版本
   -> 直接创建成员，保存只显示一次的初始密码
   -> 给成员分配订阅
@@ -65,7 +65,7 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 - Chat Completions 与 Responses 支持非流式、流式、工具调用、reasoning 和 usage；无法无损表达的能力在发送前明确拒绝。
 - Public API 拥有客户端 wire，Canonical Model 拥有内部语义，Provider Adapter 或明确 policy 拥有厂商差异。
 - 当前专用 adapter 为智谱 GLM、Agnes 和 Google Gemini，同时保留受限的通用 OpenAI-compatible adapter。
-- Provider kind、展示名称、builder、权威合同 URL、快照日期、现场验证日期、参考模型、现场能力与状态由 `internal/providers` 唯一拥有；控制 API、探测、资源池和 UI 只投影这份事实。
+- Provider kind、展示名称、builder、权威合同 URL、快照日期、现场验证日期与 wire 能力由 `internal/providers` 唯一拥有；每把上游 API Key 当前可见的模型 ID 由成功的 `/models` 探测快照唯一拥有，控制 API、资源池和 UI 只投影这些事实。
 - 模型、能力、错误和限额是易变外部事实；修改前依据官方资料和隔离 wire 复核。无法权威查询的余额保持未知，不伪造剩余额度。
 
 ### 现场兼容基线
@@ -85,15 +85,15 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 
 ### Provider 与资源池
 
-- Provider catalog 是代码内置的 adapter 能力与校验数据源，只在创建资源池时提供平台和模型选项；控制台不建立独立 Provider 页面、导航或管理状态。
-- 资源池是明确的上游资格边界。管理员选择一个 catalog preset，使用中文、英文或混合名称创建资源池，并维护状态和该池的模型投影；稳定 slug 由服务端自动生成，不作为管理员输入或控制台任务。一个资源池只属于一个 Provider。
-- catalog preset 的端点和模型由代码校验。创建资源池只持久化经过校验的 HTTPS 端点与模型，不发送上游请求；真实探测和请求继续走 SSRF-safe transport。
+- Provider catalog 是代码内置的 adapter 能力、端点与校验数据源，只在创建资源池时提供平台选项；控制台不建立独立 Provider 页面、导航或管理状态。
+- 资源池是明确的上游资格边界。管理员选择一个 Provider，使用中文、英文或混合名称创建资源池；稳定 slug 由服务端自动生成，不作为管理员输入或控制台任务。一个资源池只属于一个 Provider，当前模型集合由活动上游 Key 的成功探测快照并集派生。
+- 创建资源池只持久化经过校验的 Provider 和 HTTPS 端点，不发送上游请求；添加或刷新上游 API Key 时才通过 SSRF-safe transport 调用 `/models`。
 - 停用或退役资源池只阻止新请求，历史 request、attempt 和审计保持可解释引用。
 
 ### 上游 API Key
 
-- 上游 API Key 属于一个资源池，可以绑定池内一个或多个模型；同池合格 Key 等价参与公平选择。
-- 管理员通过唯一的“添加上游 API Key”入口逐行粘贴凭据：一行创建一条，多行批量创建，可使用 `名称,上游 API Key` 或只粘贴 Key。结果逐项返回 created/skipped/rejected，绝不回显 secret；已有 Key 可以替换 secret、编辑名称/模型/限额、探测、启用、停用和退役。
+- 上游 API Key 属于一个资源池。服务端通过该 Key 的 `/models` 响应保存最新成功的模型快照；同池合格 Key 只会参与自己已声明支持的模型的公平选择。
+- 管理员通过唯一的“添加上游 API Key”入口逐行粘贴凭据：一行创建一条，多行批量创建，可使用 `名称,上游 API Key` 或只粘贴 Key。结果逐项返回 created/skipped/rejected，绝不回显 secret；已有 Key 可以替换 secret、编辑名称和限额、轻量探测、深度测试、启用、停用和退役。探测失败保留上一次成功快照。
 - secret 使用版本化 AEAD 加密保存，只在发送边界按需解密。退役会清除调度资格但保留历史脱敏引用。
 - 状态至少区分 active、cooling、disabled、retired。探测记录稳定结果类别、延迟、模型和 Request ID；传输阶段明确区分 `dns_resolution_failed`、`outbound_address_blocked`、`upstream_connection_failed`、`tls_handshake_failed`、`provider_transport_failed` 与 `probe_timeout_or_canceled`，响应不返回上游正文、secret 或敏感 header。
 
@@ -200,14 +200,14 @@ internal/
 
 - 开始：新手指引、仪表盘、运行状态；
 - 上游资源：资源池、上游 API Key；
-- 成员服务：套餐、订阅、成员、API 密钥；
+- 成员服务：套餐、订阅、成员、API 密钥、接口文档；
 - 运营数据：API 日志；
 - 系统：站点设置与账号操作。
 
 成员导航只包含仪表盘、我的订阅、API 密钥、API 日志和账号操作。导航隐藏不代替服务端权限。
 
 - 首屏先显示当前可用性、需要处理的真实问题和唯一下一步；空、加载、失败、冷却、停用、退役和完成状态都有操作出口。
-- Provider 平台与模型能力只在资源池表单中投影；成员、订阅、凭据与请求使用可扫描表格。页面 section 不套装饰卡片，卡片不嵌套。
+- Provider 平台与模型能力只在资源池表单中投影；上游 API Key 列表提供“全部资源池”与按资源池查看的下拉筛选；成员、订阅、凭据与请求使用可扫描表格。页面 section 不套装饰卡片，卡片不嵌套。
 - 表单使用统一 label/control 网格、稳定控件高度和垂直居中容器；状态与操作列居中，文本列左对齐，数字右对齐。宽表格只在自身边界滚动。
 - 控制台只支持桌面浏览器，不维护移动导航、媒体布局或移动验收。
 - 视觉审美由 owner 验收；自动证据只保护结构、尺寸、不溢出、权限、状态和真实操作结果。
@@ -227,4 +227,4 @@ internal/
 - 每个事实只有一个 owner；handler、UI、adapter 和测试不保存第二套身份、套餐、订阅、用量、调度或健康事实。
 - 阶段可以缩小范围，但纳入范围的成功、错误、并发、中断、恢复、安全、可观测性、测试、文档和目标环境验证必须闭环。
 - 最终验收连接真实 Go、PostgreSQL、Valkey、生产前端和目标 Provider，并用有头桌面 Chromium与标准 SDK 覆盖管理员、成员、取消、刷新、重登、强杀与恢复。
-- LLMGateway 使用 MIT License；LGPL/AGPL 或归属不清的参考源码只研究机制和失败经验，不复制到主干。
+- LLM2API 使用 MIT License；LGPL/AGPL 或归属不清的参考源码只研究机制和失败经验，不复制到主干。

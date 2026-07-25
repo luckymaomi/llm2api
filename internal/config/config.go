@@ -122,91 +122,91 @@ type Logging struct {
 }
 
 func Load() (Config, error) {
-	profile := Profile(env("LLMGATEWAY_PROFILE", string(ProfileDevelopment)))
-	databaseURL, err := secretEnv("LLMGATEWAY_DATABASE_URL", developmentSecret(profile, "postgres://llmgateway:llmgateway_dev@127.0.0.1:15432/llmgateway?sslmode=disable"))
+	profile := Profile(env("LLM2API_PROFILE", string(ProfileDevelopment)))
+	databaseURL, err := secretEnv("LLM2API_DATABASE_URL", developmentSecret(profile, "postgres://llm2api:llm2api_dev@127.0.0.1:15432/llm2api?sslmode=disable"))
 	if err != nil {
 		return Config{}, err
 	}
-	valkeyPassword, err := secretEnv("LLMGATEWAY_VALKEY_PASSWORD", developmentSecret(profile, "llmgateway_dev"))
+	valkeyPassword, err := secretEnv("LLM2API_VALKEY_PASSWORD", developmentSecret(profile, "llm2api_dev"))
 	if err != nil {
 		return Config{}, err
 	}
-	masterKeyValue, err := secretEnv("LLMGATEWAY_MASTER_KEYS", developmentSecret(profile, "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))
+	masterKeyValue, err := secretEnv("LLM2API_MASTER_KEYS", developmentSecret(profile, "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))
 	if err != nil {
 		return Config{}, err
 	}
-	sessionPepper, err := secretEnv("LLMGATEWAY_SESSION_PEPPER", developmentSecret(profile, "llmgateway-development-session-pepper"))
+	sessionPepper, err := secretEnv("LLM2API_SESSION_PEPPER", developmentSecret(profile, "llm2api-development-session-pepper"))
 	if err != nil {
 		return Config{}, err
 	}
-	apiKeyPepper, err := secretEnv("LLMGATEWAY_API_KEY_PEPPER", developmentSecret(profile, "llmgateway-development-api-key-pepper"))
+	apiKeyPepper, err := secretEnv("LLM2API_API_KEY_PEPPER", developmentSecret(profile, "llm2api-development-api-key-pepper"))
 	if err != nil {
 		return Config{}, err
 	}
-	coordinationKeyHash, err := secretEnv("LLMGATEWAY_COORDINATION_KEY_HASH_SECRET", developmentSecret(profile, "llmgateway-development-coordination-key-hash-secret"))
+	coordinationKeyHash, err := secretEnv("LLM2API_COORDINATION_KEY_HASH_SECRET", developmentSecret(profile, "llm2api-development-coordination-key-hash-secret"))
 	if err != nil {
 		return Config{}, err
 	}
 	cfg := Config{
 		Profile: profile,
 		HTTP: HTTP{
-			Address:           env("LLMGATEWAY_HTTP_ADDRESS", "127.0.0.1:8080"),
-			ReadHeaderTimeout: durationEnv("LLMGATEWAY_HTTP_READ_HEADER_TIMEOUT", 10*time.Second),
-			IdleTimeout:       durationEnv("LLMGATEWAY_HTTP_IDLE_TIMEOUT", 90*time.Second),
-			ShutdownTimeout:   durationEnv("LLMGATEWAY_HTTP_SHUTDOWN_TIMEOUT", 30*time.Second),
-			MaxBodyBytes:      int64Env("LLMGATEWAY_HTTP_MAX_BODY_BYTES", 4<<20),
+			Address:           env("LLM2API_HTTP_ADDRESS", "127.0.0.1:8080"),
+			ReadHeaderTimeout: durationEnv("LLM2API_HTTP_READ_HEADER_TIMEOUT", 10*time.Second),
+			IdleTimeout:       durationEnv("LLM2API_HTTP_IDLE_TIMEOUT", 90*time.Second),
+			ShutdownTimeout:   durationEnv("LLM2API_HTTP_SHUTDOWN_TIMEOUT", 30*time.Second),
+			MaxBodyBytes:      int64Env("LLM2API_HTTP_MAX_BODY_BYTES", 4<<20),
 		},
 		Database: Database{
 			URL:            databaseURL,
-			MaxConnections: int32(intEnv("LLMGATEWAY_DATABASE_MAX_CONNECTIONS", 20)),
-			MinConnections: int32(intEnv("LLMGATEWAY_DATABASE_MIN_CONNECTIONS", 2)),
-			ConnectTimeout: durationEnv("LLMGATEWAY_DATABASE_CONNECT_TIMEOUT", 10*time.Second),
-			MigrateOnStart: boolEnv("LLMGATEWAY_DATABASE_MIGRATE_ON_START", profile != ProfileProduction),
+			MaxConnections: int32(intEnv("LLM2API_DATABASE_MAX_CONNECTIONS", 20)),
+			MinConnections: int32(intEnv("LLM2API_DATABASE_MIN_CONNECTIONS", 2)),
+			ConnectTimeout: durationEnv("LLM2API_DATABASE_CONNECT_TIMEOUT", 10*time.Second),
+			MigrateOnStart: boolEnv("LLM2API_DATABASE_MIGRATE_ON_START", profile != ProfileProduction),
 		},
 		Valkey: Valkey{
-			Address:        env("LLMGATEWAY_VALKEY_ADDRESS", "127.0.0.1:16380"),
+			Address:        env("LLM2API_VALKEY_ADDRESS", "127.0.0.1:16380"),
 			Password:       valkeyPassword,
-			Database:       intEnv("LLMGATEWAY_VALKEY_DATABASE", 0),
-			ConnectTimeout: durationEnv("LLMGATEWAY_VALKEY_CONNECT_TIMEOUT", 5*time.Second),
+			Database:       intEnv("LLM2API_VALKEY_DATABASE", 0),
+			ConnectTimeout: durationEnv("LLM2API_VALKEY_CONNECT_TIMEOUT", 5*time.Second),
 		},
 		Security: Security{
 			MasterKeys:              masterKeys(masterKeyValue),
-			ActiveMasterKeyVersion:  uint32(intEnv("LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION", 1)),
+			ActiveMasterKeyVersion:  uint32(intEnv("LLM2API_ACTIVE_MASTER_KEY_VERSION", 1)),
 			SessionPepper:           []byte(sessionPepper),
 			APIKeyPepper:            []byte(apiKeyPepper),
 			CoordinationKeyHash:     []byte(coordinationKeyHash),
-			ProviderCABundleFile:    strings.TrimSpace(os.Getenv("LLMGATEWAY_PROVIDER_CA_BUNDLE_FILE")),
-			CookieSecure:            boolEnv("LLMGATEWAY_COOKIE_SECURE", profile == ProfileProduction),
-			TrustedProxy:            strings.TrimSpace(os.Getenv("LLMGATEWAY_TRUSTED_PROXY")),
-			LoginAccountAttempts:    intEnv("LLMGATEWAY_LOGIN_ACCOUNT_ATTEMPTS", 5),
-			LoginAddressAttempts:    intEnv("LLMGATEWAY_LOGIN_ADDRESS_ATTEMPTS", 30),
-			LoginWindow:             durationEnv("LLMGATEWAY_LOGIN_WINDOW", 10*time.Minute),
-			AllowedPrivatePrefixes:  prefixListEnv("LLMGATEWAY_ALLOWED_PRIVATE_NETWORKS"),
-			AllowedResolvedPrefixes: prefixListEnv("LLMGATEWAY_ALLOWED_RESOLVED_NETWORKS"),
+			ProviderCABundleFile:    strings.TrimSpace(os.Getenv("LLM2API_PROVIDER_CA_BUNDLE_FILE")),
+			CookieSecure:            boolEnv("LLM2API_COOKIE_SECURE", profile == ProfileProduction),
+			TrustedProxy:            strings.TrimSpace(os.Getenv("LLM2API_TRUSTED_PROXY")),
+			LoginAccountAttempts:    intEnv("LLM2API_LOGIN_ACCOUNT_ATTEMPTS", 5),
+			LoginAddressAttempts:    intEnv("LLM2API_LOGIN_ADDRESS_ATTEMPTS", 30),
+			LoginWindow:             durationEnv("LLM2API_LOGIN_WINDOW", 10*time.Minute),
+			AllowedPrivatePrefixes:  prefixListEnv("LLM2API_ALLOWED_PRIVATE_NETWORKS"),
+			AllowedResolvedPrefixes: prefixListEnv("LLM2API_ALLOWED_RESOLVED_NETWORKS"),
 		},
 		ProviderProbe: ProviderProbe{
-			Timeout:          durationEnv("LLMGATEWAY_PROVIDER_PROBE_TIMEOUT", 15*time.Second),
-			MaxResponseBytes: int64Env("LLMGATEWAY_PROVIDER_PROBE_MAX_RESPONSE_BYTES", 1<<20),
+			Timeout:          durationEnv("LLM2API_PROVIDER_PROBE_TIMEOUT", 15*time.Second),
+			MaxResponseBytes: int64Env("LLM2API_PROVIDER_PROBE_MAX_RESPONSE_BYTES", 1<<20),
 		},
 		RequestFlow: RequestFlow{
-			MaxResponseBytes:           int64Env("LLMGATEWAY_REQUEST_MAX_RESPONSE_BYTES", 16<<20),
-			ExecutionHeartbeatInterval: durationEnv("LLMGATEWAY_REQUEST_EXECUTION_HEARTBEAT_INTERVAL", 10*time.Second),
-			ExecutionStaleAfter:        durationEnv("LLMGATEWAY_REQUEST_EXECUTION_STALE_AFTER", time.Minute),
-			RecoveryInterval:           durationEnv("LLMGATEWAY_REQUEST_RECOVERY_INTERVAL", 15*time.Second),
-			RecoveryBatchSize:          int32(intEnv("LLMGATEWAY_REQUEST_RECOVERY_BATCH_SIZE", 100)),
-			MaxQueued:                  intEnv("LLMGATEWAY_REQUEST_MAX_QUEUED", 1024),
-			MaxActive:                  intEnv("LLMGATEWAY_REQUEST_MAX_ACTIVE", 256),
-			MaxQueueWait:               durationEnv("LLMGATEWAY_REQUEST_MAX_QUEUE_WAIT", 30*time.Second),
-			AdmissionRetryInterval:     durationEnv("LLMGATEWAY_REQUEST_ADMISSION_RETRY_INTERVAL", 100*time.Millisecond),
-			LeaseTTL:                   durationEnv("LLMGATEWAY_REQUEST_LEASE_TTL", 30*time.Second),
-			RetryMaxAttempts:           intEnv("LLMGATEWAY_REQUEST_RETRY_MAX_ATTEMPTS", 2),
-			RetryMaxElapsed:            durationEnv("LLMGATEWAY_REQUEST_RETRY_MAX_ELAPSED", 30*time.Second),
-			RetryInitialBackoff:        durationEnv("LLMGATEWAY_REQUEST_RETRY_INITIAL_BACKOFF", 100*time.Millisecond),
-			RetryMaximumBackoff:        durationEnv("LLMGATEWAY_REQUEST_RETRY_MAXIMUM_BACKOFF", 2*time.Second),
-			CircuitFailureThreshold:    intEnv("LLMGATEWAY_REQUEST_CIRCUIT_FAILURE_THRESHOLD", 3),
-			CircuitSuccessThreshold:    intEnv("LLMGATEWAY_REQUEST_CIRCUIT_SUCCESS_THRESHOLD", 1),
-			CircuitOpenDuration:        durationEnv("LLMGATEWAY_REQUEST_CIRCUIT_OPEN_DURATION", 30*time.Second),
-			CircuitHalfOpenMaxInFlight: intEnv("LLMGATEWAY_REQUEST_CIRCUIT_HALF_OPEN_MAX_IN_FLIGHT", 1),
+			MaxResponseBytes:           int64Env("LLM2API_REQUEST_MAX_RESPONSE_BYTES", 16<<20),
+			ExecutionHeartbeatInterval: durationEnv("LLM2API_REQUEST_EXECUTION_HEARTBEAT_INTERVAL", 10*time.Second),
+			ExecutionStaleAfter:        durationEnv("LLM2API_REQUEST_EXECUTION_STALE_AFTER", time.Minute),
+			RecoveryInterval:           durationEnv("LLM2API_REQUEST_RECOVERY_INTERVAL", 15*time.Second),
+			RecoveryBatchSize:          int32(intEnv("LLM2API_REQUEST_RECOVERY_BATCH_SIZE", 100)),
+			MaxQueued:                  intEnv("LLM2API_REQUEST_MAX_QUEUED", 1024),
+			MaxActive:                  intEnv("LLM2API_REQUEST_MAX_ACTIVE", 256),
+			MaxQueueWait:               durationEnv("LLM2API_REQUEST_MAX_QUEUE_WAIT", 30*time.Second),
+			AdmissionRetryInterval:     durationEnv("LLM2API_REQUEST_ADMISSION_RETRY_INTERVAL", 100*time.Millisecond),
+			LeaseTTL:                   durationEnv("LLM2API_REQUEST_LEASE_TTL", 30*time.Second),
+			RetryMaxAttempts:           intEnv("LLM2API_REQUEST_RETRY_MAX_ATTEMPTS", 2),
+			RetryMaxElapsed:            durationEnv("LLM2API_REQUEST_RETRY_MAX_ELAPSED", 30*time.Second),
+			RetryInitialBackoff:        durationEnv("LLM2API_REQUEST_RETRY_INITIAL_BACKOFF", 100*time.Millisecond),
+			RetryMaximumBackoff:        durationEnv("LLM2API_REQUEST_RETRY_MAXIMUM_BACKOFF", 2*time.Second),
+			CircuitFailureThreshold:    intEnv("LLM2API_REQUEST_CIRCUIT_FAILURE_THRESHOLD", 3),
+			CircuitSuccessThreshold:    intEnv("LLM2API_REQUEST_CIRCUIT_SUCCESS_THRESHOLD", 1),
+			CircuitOpenDuration:        durationEnv("LLM2API_REQUEST_CIRCUIT_OPEN_DURATION", 30*time.Second),
+			CircuitHalfOpenMaxInFlight: intEnv("LLM2API_REQUEST_CIRCUIT_HALF_OPEN_MAX_IN_FLIGHT", 1),
 			Global:                     capacityEnv("GLOBAL", Capacity{RequestsPerMinute: 12_000, TokensPerMinute: 6_000_000, Concurrency: 256}),
 			ResourcePool:               capacityEnv("RESOURCE_POOL", Capacity{RequestsPerMinute: 9_000, TokensPerMinute: 3_000_000, Concurrency: 128}),
 			Model:                      capacityEnv("MODEL", Capacity{RequestsPerMinute: 9_000, TokensPerMinute: 3_000_000, Concurrency: 128}),
@@ -214,13 +214,13 @@ func Load() (Config, error) {
 			Credential:                 capacityEnv("CREDENTIAL", Capacity{RequestsPerMinute: 60, TokensPerMinute: 100_000, Concurrency: 4}),
 		},
 		Responses: Responses{
-			PollInterval:      durationEnv("LLMGATEWAY_RESPONSES_POLL_INTERVAL", 500*time.Millisecond),
-			HeartbeatInterval: durationEnv("LLMGATEWAY_RESPONSES_HEARTBEAT_INTERVAL", 5*time.Second),
-			StaleAfter:        durationEnv("LLMGATEWAY_RESPONSES_STALE_AFTER", 30*time.Second),
-			RecoveryBatchSize: int32(intEnv("LLMGATEWAY_RESPONSES_RECOVERY_BATCH_SIZE", 100)),
-			MaxWorkers:        intEnv("LLMGATEWAY_RESPONSES_MAX_WORKERS", 8),
+			PollInterval:      durationEnv("LLM2API_RESPONSES_POLL_INTERVAL", 500*time.Millisecond),
+			HeartbeatInterval: durationEnv("LLM2API_RESPONSES_HEARTBEAT_INTERVAL", 5*time.Second),
+			StaleAfter:        durationEnv("LLM2API_RESPONSES_STALE_AFTER", 30*time.Second),
+			RecoveryBatchSize: int32(intEnv("LLM2API_RESPONSES_RECOVERY_BATCH_SIZE", 100)),
+			MaxWorkers:        intEnv("LLM2API_RESPONSES_MAX_WORKERS", 8),
 		},
-		Logging: Logging{Level: env("LLMGATEWAY_LOG_LEVEL", "info")},
+		Logging: Logging{Level: env("LLM2API_LOG_LEVEL", "info")},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -232,22 +232,22 @@ func Load() (Config, error) {
 func (c Config) Validate() error {
 	var problems []error
 	if c.Profile != ProfileDevelopment && c.Profile != ProfileTest && c.Profile != ProfileProduction {
-		problems = append(problems, fmt.Errorf("LLMGATEWAY_PROFILE must be development, test, or production"))
+		problems = append(problems, fmt.Errorf("LLM2API_PROFILE must be development, test, or production"))
 	}
 	if _, _, err := net.SplitHostPort(c.HTTP.Address); err != nil {
-		problems = append(problems, fmt.Errorf("LLMGATEWAY_HTTP_ADDRESS: %w", err))
+		problems = append(problems, fmt.Errorf("LLM2API_HTTP_ADDRESS: %w", err))
 	}
 	if c.Database.URL == "" {
-		problems = append(problems, errors.New("LLMGATEWAY_DATABASE_URL is required"))
+		problems = append(problems, errors.New("LLM2API_DATABASE_URL is required"))
 	}
 	if c.Database.MaxConnections < 1 || c.Database.MinConnections < 0 || c.Database.MinConnections > c.Database.MaxConnections {
 		problems = append(problems, errors.New("database connection bounds are invalid"))
 	}
 	if _, _, err := net.SplitHostPort(c.Valkey.Address); err != nil {
-		problems = append(problems, fmt.Errorf("LLMGATEWAY_VALKEY_ADDRESS: %w", err))
+		problems = append(problems, fmt.Errorf("LLM2API_VALKEY_ADDRESS: %w", err))
 	}
 	if len(c.Security.MasterKeys) == 0 {
-		problems = append(problems, errors.New("LLMGATEWAY_MASTER_KEYS must contain at least one versioned key"))
+		problems = append(problems, errors.New("LLM2API_MASTER_KEYS must contain at least one versioned key"))
 	}
 	for version, key := range c.Security.MasterKeys {
 		if version == 0 || len(key) != 32 {
@@ -255,25 +255,25 @@ func (c Config) Validate() error {
 		}
 	}
 	if _, ok := c.Security.MasterKeys[c.Security.ActiveMasterKeyVersion]; !ok {
-		problems = append(problems, errors.New("LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION must select a configured key"))
+		problems = append(problems, errors.New("LLM2API_ACTIVE_MASTER_KEY_VERSION must select a configured key"))
 	}
 	if len(c.Security.SessionPepper) < 32 {
-		problems = append(problems, errors.New("LLMGATEWAY_SESSION_PEPPER must contain at least 32 bytes"))
+		problems = append(problems, errors.New("LLM2API_SESSION_PEPPER must contain at least 32 bytes"))
 	}
 	if len(c.Security.APIKeyPepper) < 32 {
-		problems = append(problems, errors.New("LLMGATEWAY_API_KEY_PEPPER must contain at least 32 bytes"))
+		problems = append(problems, errors.New("LLM2API_API_KEY_PEPPER must contain at least 32 bytes"))
 	}
 	if len(c.Security.CoordinationKeyHash) < 32 {
-		problems = append(problems, errors.New("LLMGATEWAY_COORDINATION_KEY_HASH_SECRET must contain at least 32 bytes"))
+		problems = append(problems, errors.New("LLM2API_COORDINATION_KEY_HASH_SECRET must contain at least 32 bytes"))
 	}
 	if c.Security.LoginAccountAttempts < 1 || c.Security.LoginAddressAttempts < c.Security.LoginAccountAttempts || c.Security.LoginWindow < time.Minute {
 		problems = append(problems, errors.New("login rate limit settings are invalid"))
 	}
 	if c.Security.AllowedPrivatePrefixes == nil {
-		problems = append(problems, errors.New("LLMGATEWAY_ALLOWED_PRIVATE_NETWORKS contains an invalid CIDR"))
+		problems = append(problems, errors.New("LLM2API_ALLOWED_PRIVATE_NETWORKS contains an invalid CIDR"))
 	}
 	if c.Security.AllowedResolvedPrefixes == nil {
-		problems = append(problems, errors.New("LLMGATEWAY_ALLOWED_RESOLVED_NETWORKS contains an invalid CIDR"))
+		problems = append(problems, errors.New("LLM2API_ALLOWED_RESOLVED_NETWORKS contains an invalid CIDR"))
 	}
 	if c.ProviderProbe.Timeout <= 0 || c.ProviderProbe.Timeout > 5*time.Minute || c.ProviderProbe.MaxResponseBytes < 1024 || c.ProviderProbe.MaxResponseBytes > 16<<20 {
 		problems = append(problems, errors.New("provider probe bounds are invalid"))
@@ -286,7 +286,7 @@ func (c Config) Validate() error {
 			problems = append(problems, errors.New("secure cookies are required in production"))
 		}
 		if c.Valkey.Password == "" {
-			problems = append(problems, errors.New("LLMGATEWAY_VALKEY_PASSWORD is required in production"))
+			problems = append(problems, errors.New("LLM2API_VALKEY_PASSWORD is required in production"))
 		}
 	}
 	if c.RequestFlow.MaxResponseBytes < 1024 || c.RequestFlow.ExecutionHeartbeatInterval <= 0 ||
@@ -436,7 +436,7 @@ func int64Env(key string, fallback int64) int64 {
 }
 
 func capacityEnv(scope string, fallback Capacity) Capacity {
-	prefix := "LLMGATEWAY_REQUEST_" + scope + "_"
+	prefix := "LLM2API_REQUEST_" + scope + "_"
 	return Capacity{
 		RequestsPerMinute: int64Env(prefix+"RPM", fallback.RequestsPerMinute),
 		TokensPerMinute:   int64Env(prefix+"TPM", fallback.TokensPerMinute),

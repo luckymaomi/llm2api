@@ -1,5 +1,6 @@
 import {
   Activity,
+  BookOpen,
   CircleUserRound,
   KeyRound,
   LayoutDashboard,
@@ -65,6 +66,7 @@ const administratorNavigation: NavigationGroup[] = [
       },
       { label: '成员', to: '/members', capability: 'members:write', icon: UsersRound },
       { label: 'API 密钥', to: '/api-keys', capability: 'keys:write', icon: KeyRound },
+      { label: '接口文档', to: '/api-docs', capability: 'keys:write', icon: BookOpen },
     ],
   },
   {
@@ -98,6 +100,7 @@ const memberNavigation: NavigationGroup[] = [
         icon: WalletCards,
       },
       { label: 'API 密钥', to: '/api-keys', capability: 'keys:write', icon: KeyRound },
+      { label: '接口文档', to: '/api-docs', capability: 'keys:write', icon: BookOpen },
       { label: 'API 日志', to: '/api-logs', capability: 'usage:read', icon: ScrollText },
       {
         label: '账号操作',

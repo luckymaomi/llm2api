@@ -23,7 +23,7 @@ const roleLabel = {
 export function AppShell() {
   const session = useSession()
   const siteProfile = useQuery(siteProfileQuery)
-  const siteName = siteProfile.data?.name ?? 'LLMGateway'
+  const siteName = siteProfile.data?.name ?? 'LLM2API'
   const navigation = navigationFor(session)
   const [passwordOpen, setPasswordOpen] = useState(false)
   const pathname = useRouterState({ select: (state) => state.location.pathname })

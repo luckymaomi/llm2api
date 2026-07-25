@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
-	"github.com/luckymaomi/llmgateway/internal/subscription"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/subscription"
 )
 
 type SubscriptionRepository struct {

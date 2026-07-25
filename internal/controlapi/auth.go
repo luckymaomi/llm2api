@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luckymaomi/llmgateway/internal/httpserver"
-	"github.com/luckymaomi/llmgateway/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/httpserver"
+	"github.com/luckymaomi/llm2api/internal/identity"
 )
 
 type bootstrapRequest struct {

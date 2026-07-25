@@ -2,7 +2,7 @@
 	admin off
 }
 
-{$LLMGATEWAY_SITE_ADDRESS} {
+{$LLM2API_SITE_ADDRESS} {
 	tls internal
 	encode zstd gzip
 	@metrics path /metrics

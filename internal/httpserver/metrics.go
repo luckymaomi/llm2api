@@ -17,13 +17,13 @@ type HTTPMetrics struct {
 func NewHTTPMetrics(registry prometheus.Registerer) *HTTPMetrics {
 	metrics := &HTTPMetrics{
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "llmgateway",
+			Namespace: "llm2api",
 			Subsystem: "http",
 			Name:      "requests_total",
 			Help:      "Completed HTTP requests.",
 		}, []string{"method", "route", "status"}),
 		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: "llmgateway",
+			Namespace: "llm2api",
 			Subsystem: "http",
 			Name:      "request_duration_seconds",
 			Help:      "HTTP request duration in seconds.",

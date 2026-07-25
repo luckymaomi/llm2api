@@ -8,8 +8,8 @@ export const memberReplacementPassword = 'browser-member-replacement-password'
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 export function gatewayEndpoint(pathname: string): string {
-  const baseURL = process.env.LLMGATEWAY_REAL_GATEWAY_URL
-  if (!baseURL) throw new Error('LLMGATEWAY_REAL_GATEWAY_URL is required')
+  const baseURL = process.env.LLM2API_REAL_GATEWAY_URL
+  if (!baseURL) throw new Error('LLM2API_REAL_GATEWAY_URL is required')
   return new URL(pathname, baseURL).toString()
 }
 

@@ -1,0 +1,29 @@
+[Unit]
+Description=LLM2API encrypted remote S3 backup
+Requires=docker.service
+Wants=network-online.target
+After=docker.service network-online.target llm2api-compose.service
+RequiresMountsFor=/opt/llm2api /etc/llm2api /etc/llm2api-backup /var/lib/llm2api-backup
+
+[Service]
+Type=oneshot
+ExecStart=/opt/llm2api/backup-bundle-launcher-linux.sh scheduled-backup /etc/llm2api-backup/backup.env
+TimeoutStartSec=85m
+User=root
+Group=root
+UMask=0077
+RuntimeDirectory=llm2api-restic
+RuntimeDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/etc/llm2api /etc/llm2api-backup /opt/llm2api
+ReadWritePaths=/var/lib/llm2api-backup /run/lock /run/llm2api-restic
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native

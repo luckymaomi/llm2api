@@ -1,5 +1,5 @@
 param(
-  [string] $GatewayImage = "llmgateway:disaster-recovery",
+  [string] $GatewayImage = "llm2api:disaster-recovery",
   [switch] $SkipBuild
 )
 
@@ -7,17 +7,17 @@ $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\isolated-services.ps1"
 
 $root = Split-Path -Parent $PSScriptRoot
-$runID = New-LLMGatewayTestRunID -Purpose "dr"
-$project = "llmgateway-$runID"
-$controllerName = "llmgateway-dr-controller-$runID"
-$controllerImage = "llmgateway:dr-controller"
-$dataVolume = "llmgateway-dr-data-$runID"
+$runID = New-LLM2APITestRunID -Purpose "dr"
+$project = "llm2api-$runID"
+$controllerName = "llm2api-dr-controller-$runID"
+$controllerImage = "llm2api:dr-controller"
+$dataVolume = "llm2api-dr-data-$runID"
 $linuxRoot = ""
 $buildDirectory = Join-Path $root ".build\disaster-recovery-$runID"
 $seedDirectory = Join-Path $buildDirectory "seed"
 $evidenceDirectory = Join-Path $root ".build\acceptance-evidence"
-$docker = Get-LLMGatewayDockerCommand
-$environmentSnapshot = Save-LLMGatewayEnvironment
+$docker = Get-LLM2APIDockerCommand
+$environmentSnapshot = Save-LLM2APIEnvironment
 $controller = ""
 $failure = $null
 $activeLock = $null
@@ -122,8 +122,8 @@ function Wait-HTTPSReady([string] $URL) {
 }
 
 function Invoke-HeadedJourney([string] $Mode, [string] $URL) {
-  $env:LLMGATEWAY_DEPLOYMENT_MODE = $Mode
-  $env:LLMGATEWAY_DEPLOYMENT_URL = $URL
+  $env:LLM2API_DEPLOYMENT_MODE = $Mode
+  $env:LLM2API_DEPLOYMENT_URL = $URL
   pnpm.cmd --dir web exec playwright test --config playwright.deployment.config.ts
   if ($LASTEXITCODE -ne 0) { throw "The $Mode disaster-recovery browser journey failed." }
   $report.headedBrowserJourneys++
@@ -139,23 +139,23 @@ function New-ResticOwner([string] $Operation) {
 }
 
 function Use-ResticOwner([string] $Owner, [string] $Command) {
-  return "export LLMGATEWAY_RESTIC_RUN_OWNER='$Owner'; $Command"
+  return "export LLM2API_RESTIC_RUN_OWNER='$Owner'; $Command"
 }
 
 function Start-MaintenanceLock([string] $LinuxPath) {
   $readyFile = "$LinuxPath/maintenance-lock.ready"
   $pidFile = "$LinuxPath/maintenance-lock.pid"
-  $command = "rm -f '$readyFile' '$pidFile'; flock --nonblock --close /run/lock/llmgateway-maintenance.lock bash -c 'umask 077; printf ready > $readyFile; exec sleep 90' >/dev/null 2>&1 & printf '%s\n' `$! > '$pidFile'"
+  $command = "rm -f '$readyFile' '$pidFile'; flock --nonblock --close /run/lock/llm2api-maintenance.lock bash -c 'umask 077; printf ready > $readyFile; exec sleep 90' >/dev/null 2>&1 & printf '%s\n' `$! > '$pidFile'"
   Invoke-Controller $command -Quiet | Out-Null
   Wait-ControllerCondition "test -s '$readyFile' -a -s '$pidFile'" "The maintenance lock holder did not start."
-  Assert-ControllerFailure "flock --nonblock /run/lock/llmgateway-maintenance.lock true" "The maintenance lock was not observably held."
+  Assert-ControllerFailure "flock --nonblock /run/lock/llm2api-maintenance.lock true" "The maintenance lock was not observably held."
   return [pscustomobject]@{ ReadyFile = $readyFile; PIDFile = $pidFile }
 }
 
 function Stop-MaintenanceLock($Lock) {
   if ($null -eq $Lock) { return }
   Invoke-Controller "xargs -r kill -- < '$($Lock.PIDFile)' || true" -Quiet | Out-Null
-  Wait-ControllerCondition "flock --nonblock /run/lock/llmgateway-maintenance.lock true" "The maintenance lock was not released."
+  Wait-ControllerCondition "flock --nonblock /run/lock/llm2api-maintenance.lock true" "The maintenance lock was not released."
   Invoke-Controller "rm -f '$($Lock.ReadyFile)' '$($Lock.PIDFile)'" -Quiet | Out-Null
 }
 
@@ -168,7 +168,7 @@ function Contains-Secret([string] $Text, [string[]] $Secrets) {
 
 Push-Location $root
 try {
-  Clear-LLMGatewayEnvironment
+  Clear-LLM2APIEnvironment
   [IO.Directory]::CreateDirectory($seedDirectory) | Out-Null
   [IO.Directory]::CreateDirectory($evidenceDirectory) | Out-Null
 
@@ -187,17 +187,17 @@ try {
     $postgresPassword, $valkeyPassword, $masterKey, $sessionPepper,
     $apiKeyPepper, $coordinationSecret, $resticPassword, $wrongResticPassword
   )
-  $httpPort = Get-LLMGatewayFreeLoopbackPort
-  $httpsPort = Get-LLMGatewayFreeLoopbackPort
+  $httpPort = Get-LLM2APIFreeLoopbackPort
+  $httpsPort = Get-LLM2APIFreeLoopbackPort
   $deploymentURL = "https://localhost:$httpsPort"
-  $storedGatewayImage = "registry.example.invalid/llmgateway@sha256:$('0' * 64)"
+  $storedGatewayImage = "registry.example.invalid/llm2api@sha256:$('0' * 64)"
   $storedCaddyImage = "registry.example.invalid/caddy@sha256:$('1' * 64)"
-  $upgradeCandidateImage = "registry.example.invalid/llmgateway@sha256:$('2' * 64)"
+  $upgradeCandidateImage = "registry.example.invalid/llm2api@sha256:$('2' * 64)"
 
-  & $docker volume create --label "llmgateway.test.owner=llmgateway-isolated-tests" --label "llmgateway.test.run=$runID" $dataVolume | Out-Null
+  & $docker volume create --label "llm2api.test.owner=llm2api-isolated-tests" --label "llm2api.test.run=$runID" $dataVolume | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Could not create the isolated Linux recovery volume." }
   $linuxRoot = ([string](& $docker volume inspect --format '{{.Mountpoint}}' $dataVolume)).Trim()
-  if ($LASTEXITCODE -ne 0 -or $linuxRoot -notmatch '^/var/lib/docker/volumes/llmgateway-dr-data-[a-z0-9-]+/_data$') {
+  if ($LASTEXITCODE -ne 0 -or $linuxRoot -notmatch '^/var/lib/docker/volumes/llm2api-dr-data-[a-z0-9-]+/_data$') {
     throw "Docker returned an unsafe recovery-volume mountpoint."
   }
 
@@ -212,55 +212,55 @@ try {
   $restoredConfigurationRoot = "$restoredPayloadRoot/configuration"
   $recoveredConfigurationRoot = "$linuxRoot/recovered-configuration"
   $runtimeEnvironment = @"
-LLMGATEWAY_COMPOSE_PROJECT=$project
-LLMGATEWAY_GATEWAY_IMAGE=$storedGatewayImage
-LLMGATEWAY_POSTGRES_IMAGE=postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
-LLMGATEWAY_VALKEY_IMAGE=valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02
-LLMGATEWAY_CADDY_IMAGE=$storedCaddyImage
-LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION=1
-LLMGATEWAY_SITE_ADDRESS=https://localhost
-LLMGATEWAY_ACME_EMAIL=staging@example.invalid
-LLMGATEWAY_HTTP_PORT=$httpPort
-LLMGATEWAY_HTTPS_PORT=$httpsPort
-LLMGATEWAY_POSTGRES_DB=llmgateway
-LLMGATEWAY_POSTGRES_USER=llmgateway
-LLMGATEWAY_POSTGRES_PASSWORD_FILE=$secretRoot/postgres-password
-LLMGATEWAY_DATABASE_URL_FILE=$secretRoot/database-url
-LLMGATEWAY_VALKEY_PASSWORD_FILE=$secretRoot/valkey-password
-LLMGATEWAY_VALKEY_ACL_FILE=$secretRoot/valkey-acl
-LLMGATEWAY_MASTER_KEYS_FILE=$secretRoot/master-keys
-LLMGATEWAY_SESSION_PEPPER_FILE=$secretRoot/session-pepper
-LLMGATEWAY_API_KEY_PEPPER_FILE=$secretRoot/api-key-pepper
-LLMGATEWAY_COORDINATION_KEY_HASH_SECRET_FILE=$secretRoot/coordination-secret
+LLM2API_COMPOSE_PROJECT=$project
+LLM2API_GATEWAY_IMAGE=$storedGatewayImage
+LLM2API_POSTGRES_IMAGE=postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+LLM2API_VALKEY_IMAGE=valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02
+LLM2API_CADDY_IMAGE=$storedCaddyImage
+LLM2API_ACTIVE_MASTER_KEY_VERSION=1
+LLM2API_SITE_ADDRESS=https://localhost
+LLM2API_ACME_EMAIL=staging@example.invalid
+LLM2API_HTTP_PORT=$httpPort
+LLM2API_HTTPS_PORT=$httpsPort
+LLM2API_POSTGRES_DB=llm2api
+LLM2API_POSTGRES_USER=llm2api
+LLM2API_POSTGRES_PASSWORD_FILE=$secretRoot/postgres-password
+LLM2API_DATABASE_URL_FILE=$secretRoot/database-url
+LLM2API_VALKEY_PASSWORD_FILE=$secretRoot/valkey-password
+LLM2API_VALKEY_ACL_FILE=$secretRoot/valkey-acl
+LLM2API_MASTER_KEYS_FILE=$secretRoot/master-keys
+LLM2API_SESSION_PEPPER_FILE=$secretRoot/session-pepper
+LLM2API_API_KEY_PEPPER_FILE=$secretRoot/api-key-pepper
+LLM2API_COORDINATION_KEY_HASH_SECRET_FILE=$secretRoot/coordination-secret
 "@
   $backupEnvironment = @"
-LLMGATEWAY_BACKUP_MODE=acceptance
-LLMGATEWAY_RESTIC_IMAGE=restic/restic@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
-LLMGATEWAY_RESTIC_REPOSITORY_FILE=$backupControlRoot/repository
-LLMGATEWAY_RESTIC_PASSWORD_FILE=$backupControlRoot/password
-LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY=$repositoryRoot
-LLMGATEWAY_DEPLOYMENT_ENVIRONMENT_FILE=$configurationRoot/deployment.env
-LLMGATEWAY_CONFIGURATION_DIRECTORY=$configurationRoot
-LLMGATEWAY_BACKUP_STAGING_ROOT=$stagingRoot
-LLMGATEWAY_BACKUP_LAST_SUCCESS_MARKER_FILE=$stagingRoot/last-success
-LLMGATEWAY_RESTIC_CHECK_SUBSET=100%
+LLM2API_BACKUP_MODE=acceptance
+LLM2API_RESTIC_IMAGE=restic/restic@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+LLM2API_RESTIC_REPOSITORY_FILE=$backupControlRoot/repository
+LLM2API_RESTIC_PASSWORD_FILE=$backupControlRoot/password
+LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY=$repositoryRoot
+LLM2API_DEPLOYMENT_ENVIRONMENT_FILE=$configurationRoot/deployment.env
+LLM2API_CONFIGURATION_DIRECTORY=$configurationRoot
+LLM2API_BACKUP_STAGING_ROOT=$stagingRoot
+LLM2API_BACKUP_LAST_SUCCESS_MARKER_FILE=$stagingRoot/last-success
+LLM2API_RESTIC_CHECK_SUBSET=100%
 "@
   $wrongBackupEnvironment = $backupEnvironment.Replace(
-    "LLMGATEWAY_RESTIC_PASSWORD_FILE=$backupControlRoot/password",
-    "LLMGATEWAY_RESTIC_PASSWORD_FILE=$backupControlRoot/wrong-password"
+    "LLM2API_RESTIC_PASSWORD_FILE=$backupControlRoot/password",
+    "LLM2API_RESTIC_PASSWORD_FILE=$backupControlRoot/wrong-password"
   )
   $nonRootRepositoryEnvironment = $backupEnvironment.Replace(
-    "LLMGATEWAY_RESTIC_REPOSITORY_FILE=$backupControlRoot/repository",
-    "LLMGATEWAY_RESTIC_REPOSITORY_FILE=$backupControlRoot/nonroot-repository"
+    "LLM2API_RESTIC_REPOSITORY_FILE=$backupControlRoot/repository",
+    "LLM2API_RESTIC_REPOSITORY_FILE=$backupControlRoot/nonroot-repository"
   )
   $productionLocalEnvironment = $backupEnvironment.Replace(
-    "LLMGATEWAY_BACKUP_MODE=acceptance",
-    "LLMGATEWAY_BACKUP_MODE=production"
+    "LLM2API_BACKUP_MODE=acceptance",
+    "LLM2API_BACKUP_MODE=production"
   )
 
   Write-SeedFile "configuration\deployment.env" $runtimeEnvironment
   Write-SeedFile "configuration\secrets\postgres-password" $postgresPassword
-  Write-SeedFile "configuration\secrets\database-url" "postgres://llmgateway:$postgresPassword@postgres:5432/llmgateway?sslmode=disable"
+  Write-SeedFile "configuration\secrets\database-url" "postgres://llm2api:$postgresPassword@postgres:5432/llm2api?sslmode=disable"
   Write-SeedFile "configuration\secrets\valkey-password" $valkeyPassword
   Write-SeedFile "configuration\secrets\valkey-acl" "user default on >$valkeyPassword ~* &* +@all"
   Write-SeedFile "configuration\secrets\master-keys" "1:$masterKey"
@@ -275,8 +275,8 @@ LLMGATEWAY_RESTIC_CHECK_SUBSET=100%
   Write-SeedFile "backup-control\wrong.env" $wrongBackupEnvironment
   Write-SeedFile "backup-control\nonroot.env" $nonRootRepositoryEnvironment
   Write-SeedFile "backup-control\production-local.env" $productionLocalEnvironment
-  Write-SeedFile "restore-control\new-database-url" "postgres://llmgateway:$postgresPassword@postgres:5432/llmgateway_restored?sslmode=disable"
-  Write-SeedFile "restore-control\wrong-database-url" "postgres://llmgateway:$postgresPassword@postgres:5432/wrong_database?sslmode=disable"
+  Write-SeedFile "restore-control\new-database-url" "postgres://llm2api:$postgresPassword@postgres:5432/llm2api_restored?sslmode=disable"
+  Write-SeedFile "restore-control\wrong-database-url" "postgres://llm2api:$postgresPassword@postgres:5432/wrong_database?sslmode=disable"
 
   if (-not $SkipBuild) {
     & $docker build --build-arg RELEASE_VERSION=disaster-recovery --tag $GatewayImage .
@@ -286,7 +286,7 @@ LLMGATEWAY_RESTIC_CHECK_SUBSET=100%
   if ($LASTEXITCODE -ne 0) { throw "The fixed disaster-recovery controller image build failed." }
 
   $controllerOutput = & $docker run --detach --rm --name $controllerName `
-    --label "llmgateway.test.owner=llmgateway-isolated-tests" --label "llmgateway.test.run=$runID" `
+    --label "llm2api.test.owner=llm2api-isolated-tests" --label "llm2api.test.run=$runID" `
     --mount "type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock" `
     --mount "type=volume,source=$dataVolume,target=$linuxRoot" `
     --mount "type=bind,source=$root,target=/workspace,readonly" `
@@ -313,7 +313,7 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   Invoke-Controller $prepareCommand -Quiet | Out-Null
   Invoke-Controller "source /workspace/deploy/backup-lib.sh; verify_runtime_configuration_tree '$configurationRoot'" -Quiet | Out-Null
 
-  $sourceCompose = "source /workspace/deploy/lib.sh; load_llmgateway_environment '$configurationRoot/deployment.env'; export LLMGATEWAY_GATEWAY_IMAGE='$GatewayImage' LLMGATEWAY_CADDY_IMAGE='caddy:2.10.2-alpine' DEPLOY_DIRECTORY='$linuxRoot/deployment'; deployment_compose --file '$linuxRoot/deployment/compose.acceptance.yaml'"
+  $sourceCompose = "source /workspace/deploy/lib.sh; load_llm2api_environment '$configurationRoot/deployment.env'; export LLM2API_GATEWAY_IMAGE='$GatewayImage' LLM2API_CADDY_IMAGE='caddy:2.10.2-alpine' DEPLOY_DIRECTORY='$linuxRoot/deployment'; deployment_compose --file '$linuxRoot/deployment/compose.acceptance.yaml'"
   $sourceStorage = Invoke-Controller "$sourceCompose up --detach --wait postgres valkey" -AllowFailure
   if ($sourceStorage.ExitCode -ne 0) {
     Invoke-Controller "$sourceCompose logs --no-color postgres valkey" -AllowFailure | Out-Null
@@ -333,7 +333,7 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   Assert-ControllerFailure "bash /workspace/deploy/list-backups-linux.sh '$backupControlRoot/nonroot.env'" "Backup controls accepted a non-root repository file."
   Invoke-Controller "install -o 0 -g 0 -m 0600 '$backupControlRoot/backup.env' '$configurationRoot/overlap.env'" -Quiet | Out-Null
   Assert-ControllerFailure "bash /workspace/deploy/list-backups-linux.sh '$configurationRoot/overlap.env'" "Backup controls accepted a file inside the runtime configuration tree."
-  Invoke-Controller "rm '$configurationRoot/overlap.env'; install -o 0 -g 0 -m 0600 '$configurationRoot/deployment.env' '$backupControlRoot/deployment.env.saved'; printf '\nLLMGATEWAY_POSTGRES_DB=llmgateway\n' >> '$configurationRoot/deployment.env'" -Quiet | Out-Null
+  Invoke-Controller "rm '$configurationRoot/overlap.env'; install -o 0 -g 0 -m 0600 '$configurationRoot/deployment.env' '$backupControlRoot/deployment.env.saved'; printf '\nLLM2API_POSTGRES_DB=llm2api\n' >> '$configurationRoot/deployment.env'" -Quiet | Out-Null
   Assert-ControllerFailure $backupCommand "Backup accepted a duplicate deployment environment key."
   Invoke-Controller "install -o 0 -g 0 -m 0640 '$backupControlRoot/deployment.env.saved' '$configurationRoot/deployment.env'" -Quiet | Out-Null
   $stagingResidueCheck = '[[ -z $(find ''' + $stagingRoot + ''' -mindepth 1 -maxdepth 1 -name ''backup.*'' -print -quit) ]]'
@@ -351,7 +351,7 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
     throw "The independent backup freshness check did not report a valid recovery-point age."
   }
   $markerLines = @(Invoke-Controller "cat '$stagingRoot/last-success'" -Quiet).Output
-  if ($markerLines.Count -ne 3 -or $markerLines[0] -ne 'format=llmgateway-backup-success' -or $markerLines[1] -notmatch '^recovery_point_utc=(.+)$') {
+  if ($markerLines.Count -ne 3 -or $markerLines[0] -ne 'format=llm2api-backup-success' -or $markerLines[1] -notmatch '^recovery_point_utc=(.+)$') {
     throw "The backup success marker is invalid."
   }
   $markerRecoveryPoint = $Matches[1]
@@ -365,11 +365,11 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   }
   $snapshotID = [string]$snapshotDocuments[0].id
   $report.explicitSnapshotSelection = $true
-  Invoke-Controller '[[ -z $(docker ps --all --quiet --filter label=com.llmgateway.restic.owner) ]]' -Quiet | Out-Null
-  Invoke-Controller '[[ -z $(find /run/llmgateway-restic -mindepth 1 -maxdepth 1 -print -quit) ]]' -Quiet | Out-Null
+  Invoke-Controller '[[ -z $(docker ps --all --quiet --filter label=com.llm2api.restic.owner) ]]' -Quiet | Out-Null
+  Invoke-Controller '[[ -z $(find /run/llm2api-restic -mindepth 1 -maxdepth 1 -print -quit) ]]' -Quiet | Out-Null
   $report.resticContainerCleanup = $true
 
-  Invoke-Controller "install -d -o 0 -g 0 -m 0750 /etc/llmgateway; install -o 0 -g 0 -m 0640 '$configurationRoot/deployment.env' /etc/llmgateway/deployment.env" -Quiet | Out-Null
+  Invoke-Controller "install -d -o 0 -g 0 -m 0750 /etc/llm2api; install -o 0 -g 0 -m 0640 '$configurationRoot/deployment.env' /etc/llm2api/deployment.env" -Quiet | Out-Null
   $activeLock = Start-MaintenanceLock $linuxRoot
   Assert-ControllerFailure $backupCommand "Backup ignored the shared maintenance lock."
   $report.maintenanceLockConflicts++
@@ -388,7 +388,7 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
 
   $recoveryStartedAt = Get-Date
   Invoke-Controller "$sourceCompose down --volumes --remove-orphans --timeout 30" -Quiet | Out-Null
-  Invoke-Controller "rm -rf -- '$configurationRoot' '$stagingRoot' /etc/llmgateway; install -d -o 0 -g 0 -m 0700 '$stagingRoot'" -Quiet | Out-Null
+  Invoke-Controller "rm -rf -- '$configurationRoot' '$stagingRoot' /etc/llm2api; install -d -o 0 -g 0 -m 0700 '$stagingRoot'" -Quiet | Out-Null
   $volumeCheck = '[[ -z $(docker volume ls --quiet --filter label=com.docker.compose.project=' + $project + ') ]]'
   Invoke-Controller $volumeCheck -Quiet | Out-Null
   $report.sourceVolumesDestroyed = $true
@@ -405,16 +405,16 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   $wrongSnapshotID = 'e' * 64
   $wrongSnapshotOwner = New-ResticOwner "wrong-snapshot"
   Assert-ControllerFailure (Use-ResticOwner $wrongSnapshotOwner "bash /workspace/deploy/restore-backup-linux.sh '$backupControlRoot/backup.env' '$wrongSnapshotID' '$linuxRoot/wrong-snapshot' --confirm-disaster-restore") "Snapshot restore accepted an unknown full snapshot ID."
-  Invoke-Controller "install -d -o 0 -g 0 -m 0700 '$linuxRoot/.llmgateway-restore.ABCDEFGH'; printf residue > '$linuxRoot/.llmgateway-restore.ABCDEFGH/residue'; chmod 0600 '$linuxRoot/.llmgateway-restore.ABCDEFGH/residue'" -Quiet | Out-Null
+  Invoke-Controller "install -d -o 0 -g 0 -m 0700 '$linuxRoot/.llm2api-restore.ABCDEFGH'; printf residue > '$linuxRoot/.llm2api-restore.ABCDEFGH/residue'; chmod 0600 '$linuxRoot/.llm2api-restore.ABCDEFGH/residue'" -Quiet | Out-Null
   $restoreOwner = New-ResticOwner "restore"
   Invoke-Controller (Use-ResticOwner $restoreOwner "bash /workspace/deploy/restore-backup-linux.sh '$backupControlRoot/backup.env' '$snapshotID' '$restoreRoot' --confirm-disaster-restore") -Quiet | Out-Null
-  Invoke-Controller "test ! -e '$linuxRoot/.llmgateway-restore.ABCDEFGH'" -Quiet | Out-Null
+  Invoke-Controller "test ! -e '$linuxRoot/.llm2api-restore.ABCDEFGH'" -Quiet | Out-Null
   $report.staleRestoreRecovered = $true
   $report.confirmationGuards = $true
 
   Invoke-Controller "source /workspace/deploy/backup-lib.sh; verify_backup_payload '$restoredPayloadRoot'" -Quiet | Out-Null
   $manifestLines = @(Invoke-Controller "cat '$restoredPayloadRoot/backup-manifest'" -Quiet).Output
-  if ($manifestLines.Count -ne 7 -or $manifestLines[0] -ne 'format=llmgateway-backup' -or $manifestLines[1] -notmatch '^recovery_point_utc=(.+)$') {
+  if ($manifestLines.Count -ne 7 -or $manifestLines[0] -ne 'format=llm2api-backup' -or $manifestLines[1] -notmatch '^recovery_point_utc=(.+)$') {
     throw "The restored backup manifest is invalid."
   }
   $manifestRecoveryPoint = $Matches[1]
@@ -432,16 +432,16 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   $report.recoveryPointAgeSeconds = $recoveryPointAge
   $report.manifestValidated = $true
 
-  Assert-ControllerFailure "bash /workspace/deploy/install-restored-configuration-linux.sh '$restoredConfigurationRoot' '$recoveredConfigurationRoot' '$restoreControlRoot/new-database-url' llmgateway_restored" "Restored configuration installation succeeded without confirmation."
-  Assert-ControllerFailure "bash /workspace/deploy/install-restored-configuration-linux.sh '$restoredConfigurationRoot' '$restoredConfigurationRoot/overlap-target' '$restoreControlRoot/new-database-url' llmgateway_restored --confirm-restored-configuration-install" "Restored configuration accepted overlapping source and target paths."
-  Assert-ControllerFailure "bash /workspace/deploy/install-restored-configuration-linux.sh '$restoredConfigurationRoot' '$linuxRoot/wrong-configuration' '$restoreControlRoot/wrong-database-url' llmgateway_restored --confirm-restored-configuration-install" "Restored configuration accepted a database URL for another database."
-  Invoke-Controller "bash /workspace/deploy/install-restored-configuration-linux.sh '$restoredConfigurationRoot' '$recoveredConfigurationRoot' '$restoreControlRoot/new-database-url' llmgateway_restored --confirm-restored-configuration-install" -Quiet | Out-Null
+  Assert-ControllerFailure "bash /workspace/deploy/install-restored-configuration-linux.sh '$restoredConfigurationRoot' '$recoveredConfigurationRoot' '$restoreControlRoot/new-database-url' llm2api_restored" "Restored configuration installation succeeded without confirmation."
+  Assert-ControllerFailure "bash /workspace/deploy/install-restored-configuration-linux.sh '$restoredConfigurationRoot' '$restoredConfigurationRoot/overlap-target' '$restoreControlRoot/new-database-url' llm2api_restored --confirm-restored-configuration-install" "Restored configuration accepted overlapping source and target paths."
+  Assert-ControllerFailure "bash /workspace/deploy/install-restored-configuration-linux.sh '$restoredConfigurationRoot' '$linuxRoot/wrong-configuration' '$restoreControlRoot/wrong-database-url' llm2api_restored --confirm-restored-configuration-install" "Restored configuration accepted a database URL for another database."
+  Invoke-Controller "bash /workspace/deploy/install-restored-configuration-linux.sh '$restoredConfigurationRoot' '$recoveredConfigurationRoot' '$restoreControlRoot/new-database-url' llm2api_restored --confirm-restored-configuration-install" -Quiet | Out-Null
   Invoke-Controller "source /workspace/deploy/backup-lib.sh; verify_runtime_configuration_tree '$recoveredConfigurationRoot'; verify_backup_payload '$restoredPayloadRoot'" -Quiet | Out-Null
   $report.configurationRestored = $true
 
   $recoveredEnvironment = "$recoveredConfigurationRoot/deployment.env"
-  $recoveredCompose = "source /workspace/deploy/lib.sh; load_llmgateway_environment '$recoveredEnvironment'; export LLMGATEWAY_GATEWAY_IMAGE='$GatewayImage' LLMGATEWAY_CADDY_IMAGE='caddy:2.10.2-alpine' DEPLOY_DIRECTORY='$linuxRoot/deployment'; deployment_compose --file '$linuxRoot/deployment/compose.acceptance.yaml'"
-  $restoreDatabaseCommand = "export DEPLOY_DIRECTORY='$linuxRoot/deployment'; bash /workspace/deploy/restore-postgres-linux.sh '$recoveredEnvironment' '$restoredPayloadRoot' llmgateway_restored"
+  $recoveredCompose = "source /workspace/deploy/lib.sh; load_llm2api_environment '$recoveredEnvironment'; export LLM2API_GATEWAY_IMAGE='$GatewayImage' LLM2API_CADDY_IMAGE='caddy:2.10.2-alpine' DEPLOY_DIRECTORY='$linuxRoot/deployment'; deployment_compose --file '$linuxRoot/deployment/compose.acceptance.yaml'"
+  $restoreDatabaseCommand = "export DEPLOY_DIRECTORY='$linuxRoot/deployment'; bash /workspace/deploy/restore-postgres-linux.sh '$recoveredEnvironment' '$restoredPayloadRoot' llm2api_restored"
   Assert-ControllerFailure $restoreDatabaseCommand "Database restore succeeded without confirmation."
   $activeLock = Start-MaintenanceLock $linuxRoot
   Assert-ControllerFailure "$restoreDatabaseCommand --confirm-new-database-restore" "Database restore ignored the shared maintenance lock."
@@ -452,19 +452,19 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   Assert-ControllerFailure "$restoreDatabaseCommand --confirm-new-database-restore" "Repeated database restore overwrote the target."
   $report.repeatedDatabaseRestoreRejected = $true
 
-  Invoke-Controller "$recoveredCompose exec -T postgres dropdb --force --username llmgateway llmgateway_restored; $recoveredCompose exec -T postgres createdb --username llmgateway llmgateway_restored; $recoveredCompose exec -T postgres psql --username llmgateway --dbname llmgateway_restored --command 'CREATE TABLE incomplete_restore_marker (id integer PRIMARY KEY)'" -Quiet | Out-Null
+  Invoke-Controller "$recoveredCompose exec -T postgres dropdb --force --username llm2api llm2api_restored; $recoveredCompose exec -T postgres createdb --username llm2api llm2api_restored; $recoveredCompose exec -T postgres psql --username llm2api --dbname llm2api_restored --command 'CREATE TABLE incomplete_restore_marker (id integer PRIMARY KEY)'" -Quiet | Out-Null
   Invoke-Controller "$recoveredCompose up --detach --wait valkey" -Quiet | Out-Null
   $valkeyContainer = ([string]((Invoke-Controller "$recoveredCompose ps --quiet valkey" -Quiet).Output | Select-Object -First 1)).Trim()
   if ($valkeyContainer -notmatch '^[a-f0-9]{12,64}$') { throw "Compose returned an invalid Valkey container ID." }
   Invoke-Controller "docker pause '$valkeyContainer'" -Quiet | Out-Null
   Assert-ControllerFailure "$restoreDatabaseCommand --confirm-new-database-restore --confirm-incomplete-database-replacement" "Database restore accepted a paused non-PostgreSQL service."
-  $incompleteMarkerCommand = $recoveredCompose + ' exec -T postgres psql --username llmgateway --dbname llmgateway_restored --tuples-only --no-align --command=''SELECT coalesce(to_regclass($$public.incomplete_restore_marker$$)::text, $$$$) <> $$$$'''
+  $incompleteMarkerCommand = $recoveredCompose + ' exec -T postgres psql --username llm2api --dbname llm2api_restored --tuples-only --no-align --command=''SELECT coalesce(to_regclass($$public.incomplete_restore_marker$$)::text, $$$$) <> $$$$'''
   $incompleteMarker = (Invoke-Controller $incompleteMarkerCommand -Quiet).Output -join ""
   if ($incompleteMarker.Trim() -ne 't') { throw "Unsafe-state rejection changed the incomplete target database." }
   $report.nonPostgresUnsafeStateRejected = $true
   Invoke-Controller "docker unpause '$valkeyContainer'; $recoveredCompose stop valkey" -Quiet | Out-Null
   Invoke-Controller "$restoreDatabaseCommand --confirm-new-database-restore --confirm-incomplete-database-replacement" -Quiet | Out-Null
-  $restoredMarkerCommand = $recoveredCompose + ' exec -T postgres psql --username llmgateway --dbname llmgateway_restored --tuples-only --no-align --command=''SELECT coalesce(to_regclass($$public.incomplete_restore_marker$$)::text, $$$$) = $$$$'''
+  $restoredMarkerCommand = $recoveredCompose + ' exec -T postgres psql --username llm2api --dbname llm2api_restored --tuples-only --no-align --command=''SELECT coalesce(to_regclass($$public.incomplete_restore_marker$$)::text, $$$$) = $$$$'''
   $restoredMarker = (Invoke-Controller $restoredMarkerCommand -Quiet).Output -join ""
   if ($restoredMarker.Trim() -ne 't') { throw "Explicit incomplete-database replacement did not restore the backup." }
   $report.incompleteDatabaseReplacement = $true
@@ -522,20 +522,20 @@ sync -f "$pack_file"
     }
     try {
       $inspection = @(& $docker inspect $controller | ConvertFrom-Json)
-      if ($inspection.Count -ne 1 -or $inspection[0].Config.Labels.'llmgateway.test.run' -ne $runID) { throw "Controller ownership does not match." }
+      if ($inspection.Count -ne 1 -or $inspection[0].Config.Labels.'llm2api.test.run' -ne $runID) { throw "Controller ownership does not match." }
       $cleanupCompose = @"
 source /workspace/deploy/lib.sh
 if [[ -f '$recoveredConfigurationRoot/deployment.env' ]]; then
-  load_llmgateway_environment '$recoveredConfigurationRoot/deployment.env'
+  load_llm2api_environment '$recoveredConfigurationRoot/deployment.env'
 elif [[ -f '$configurationRoot/deployment.env' ]]; then
-  load_llmgateway_environment '$configurationRoot/deployment.env'
+  load_llm2api_environment '$configurationRoot/deployment.env'
 else
-  export LLMGATEWAY_GATEWAY_IMAGE=cleanup LLMGATEWAY_POSTGRES_IMAGE=cleanup LLMGATEWAY_VALKEY_IMAGE=cleanup LLMGATEWAY_CADDY_IMAGE=cleanup
-  export LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION=1 LLMGATEWAY_SITE_ADDRESS=https://localhost LLMGATEWAY_ACME_EMAIL=cleanup@example.invalid
-  export LLMGATEWAY_POSTGRES_PASSWORD_FILE=/dev/null LLMGATEWAY_DATABASE_URL_FILE=/dev/null LLMGATEWAY_VALKEY_PASSWORD_FILE=/dev/null LLMGATEWAY_VALKEY_ACL_FILE=/dev/null
-  export LLMGATEWAY_MASTER_KEYS_FILE=/dev/null LLMGATEWAY_SESSION_PEPPER_FILE=/dev/null LLMGATEWAY_API_KEY_PEPPER_FILE=/dev/null LLMGATEWAY_COORDINATION_KEY_HASH_SECRET_FILE=/dev/null
+  export LLM2API_GATEWAY_IMAGE=cleanup LLM2API_POSTGRES_IMAGE=cleanup LLM2API_VALKEY_IMAGE=cleanup LLM2API_CADDY_IMAGE=cleanup
+  export LLM2API_ACTIVE_MASTER_KEY_VERSION=1 LLM2API_SITE_ADDRESS=https://localhost LLM2API_ACME_EMAIL=cleanup@example.invalid
+  export LLM2API_POSTGRES_PASSWORD_FILE=/dev/null LLM2API_DATABASE_URL_FILE=/dev/null LLM2API_VALKEY_PASSWORD_FILE=/dev/null LLM2API_VALKEY_ACL_FILE=/dev/null
+  export LLM2API_MASTER_KEYS_FILE=/dev/null LLM2API_SESSION_PEPPER_FILE=/dev/null LLM2API_API_KEY_PEPPER_FILE=/dev/null LLM2API_COORDINATION_KEY_HASH_SECRET_FILE=/dev/null
 fi
-export LLMGATEWAY_COMPOSE_PROJECT='$project' DEPLOY_DIRECTORY='$linuxRoot/deployment'
+export LLM2API_COMPOSE_PROJECT='$project' DEPLOY_DIRECTORY='$linuxRoot/deployment'
 if [[ -f '$linuxRoot/deployment/compose.production.yaml' ]]; then
   deployment_compose --file '$linuxRoot/deployment/compose.acceptance.yaml' down --volumes --remove-orphans --timeout 30
 fi
@@ -548,7 +548,7 @@ fi
   try {
     $volumeFacts = @(& $docker volume inspect $dataVolume 2>$null | ConvertFrom-Json)
     if ($volumeFacts.Count -eq 1) {
-      if ($volumeFacts[0].Labels.'llmgateway.test.run' -ne $runID) { throw "Recovery-volume ownership does not match." }
+      if ($volumeFacts[0].Labels.'llm2api.test.run' -ne $runID) { throw "Recovery-volume ownership does not match." }
       & $docker volume rm $dataVolume *> $null
       if ($LASTEXITCODE -ne 0) { throw "Could not remove the isolated Linux recovery volume." }
     }
@@ -559,7 +559,7 @@ fi
     if (-not $resolved.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "Unsafe local recovery path." }
     if ([IO.Directory]::Exists($resolved)) { [IO.Directory]::Delete($resolved, $true) }
   } catch { $cleanupFailures += $_.Exception.Message }
-  try { Restore-LLMGatewayEnvironment $environmentSnapshot; Pop-Location } catch { $cleanupFailures += $_.Exception.Message }
+  try { Restore-LLM2APIEnvironment $environmentSnapshot; Pop-Location } catch { $cleanupFailures += $_.Exception.Message }
   if ($failure) {
     if ($cleanupFailures.Count) { throw "Disaster recovery failed: $($failure.Exception.Message) Cleanup also failed: $($cleanupFailures -join '; ')" }
     throw $failure

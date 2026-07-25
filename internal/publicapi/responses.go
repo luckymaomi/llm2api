@@ -15,11 +15,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/canonical"
-	"github.com/luckymaomi/llmgateway/internal/httpserver"
-	"github.com/luckymaomi/llmgateway/internal/protocol"
-	"github.com/luckymaomi/llmgateway/internal/requestflow"
-	responseowner "github.com/luckymaomi/llmgateway/internal/responses"
+	"github.com/luckymaomi/llm2api/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/httpserver"
+	"github.com/luckymaomi/llm2api/internal/protocol"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
+	responseowner "github.com/luckymaomi/llm2api/internal/responses"
 )
 
 func (a *API) createResponse(w http.ResponseWriter, r *http.Request) {

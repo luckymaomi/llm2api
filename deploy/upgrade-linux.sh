@@ -22,11 +22,11 @@ health_url=${3:-}
 
 DEPLOY_DIRECTORY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$DEPLOY_DIRECTORY/lib.sh"
-environment_file=/etc/llmgateway/deployment.env
-load_llmgateway_environment "$environment_file"
+environment_file=/etc/llm2api/deployment.env
+load_llm2api_environment "$environment_file"
 require_file_secrets
 require_immutable_gateway_image
-old_image=$LLMGATEWAY_GATEWAY_IMAGE
+old_image=$LLM2API_GATEWAY_IMAGE
 [[ "$new_image" =~ @sha256:[a-f0-9]{64}$ ]] || { echo "new image must be an immutable sha256 reference" >&2; exit 1; }
 
 require_safe_backup_ancestors() {
@@ -133,7 +133,7 @@ cleanup_upgrade() {
     fi
   fi
   if [[ $maintenance_lock_held == true ]]; then
-    release_llmgateway_maintenance_lock || status=1
+    release_llm2api_maintenance_lock || status=1
   fi
   exit "$status"
 }
@@ -143,7 +143,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-acquire_llmgateway_maintenance_lock upgrade
+acquire_llm2api_maintenance_lock upgrade
 maintenance_lock_held=true
 
 backup_directory=$(dirname -- "$backup_path")
@@ -157,7 +157,7 @@ backup_directory_device=$(stat -c '%d' -- "$backup_directory")
 staged_backup="$backup_path.partial"
 remove_stale_upgrade_backup "$staged_backup" "$backup_directory_device"
 
-database_bytes=$(deployment_compose exec -T postgres psql --username "$LLMGATEWAY_POSTGRES_USER" --dbname "$LLMGATEWAY_POSTGRES_DB" --tuples-only --no-align --command 'SELECT pg_database_size(current_database())')
+database_bytes=$(deployment_compose exec -T postgres psql --username "$LLM2API_POSTGRES_USER" --dbname "$LLM2API_POSTGRES_DB" --tuples-only --no-align --command 'SELECT pg_database_size(current_database())')
 available_kib=$(df -Pk "$backup_directory" | awk 'NR==2 {print $4}')
 [[ "$database_bytes" =~ ^[0-9]+$ && "$available_kib" =~ ^[0-9]+$ ]] || { echo "could not measure backup capacity" >&2; exit 1; }
 (( available_kib * 1024 >= database_bytes * 2 )) || { echo "backup target has less than twice the database size available" >&2; exit 1; }
@@ -178,8 +178,8 @@ staged_backup_identity=$(stat -Lc '%d:%i' -- "/proc/$$/fd/$backup_output_fd")
 require_safe_backup_file "staged upgrade backup" "$staged_backup" 600 "$backup_directory_device"
 
 deployment_compose exec -T postgres pg_dump \
-  --username "$LLMGATEWAY_POSTGRES_USER" \
-  --dbname "$LLMGATEWAY_POSTGRES_DB" \
+  --username "$LLM2API_POSTGRES_USER" \
+  --dbname "$LLM2API_POSTGRES_DB" \
   --format custom --compress 9 >&"$backup_output_fd"
 exec {backup_output_fd}>&-
 backup_output_fd=''
@@ -214,15 +214,15 @@ staged_backup_identity=''
 
 migration_version() {
   deployment_compose exec -T postgres psql \
-    --username "$LLMGATEWAY_POSTGRES_USER" \
-    --dbname "$LLMGATEWAY_POSTGRES_DB" \
+    --username "$LLM2API_POSTGRES_USER" \
+    --dbname "$LLM2API_POSTGRES_DB" \
     --tuples-only --no-align \
     --command 'SELECT COALESCE(max(version_id), 0) FROM goose_db_version WHERE is_applied'
 }
 
 before_version=$(migration_version)
 docker pull "$new_image"
-export LLMGATEWAY_GATEWAY_IMAGE=$new_image
+export LLM2API_GATEWAY_IMAGE=$new_image
 deployment_compose config --quiet
 deployment_compose --profile migration run --rm migrate
 after_version=$(migration_version)
@@ -238,7 +238,7 @@ rollback_application() {
     echo "keep the healthy instance, restore $backup_path into a new database, then switch the database URL file" >&2
     return 1
   fi
-  export LLMGATEWAY_GATEWAY_IMAGE=$old_image
+  export LLM2API_GATEWAY_IMAGE=$old_image
   deployment_compose up --detach --no-deps --force-recreate --wait "$failed_service"
   check_public_health
 }
@@ -257,8 +257,8 @@ done
 temporary_environment="$environment_file.partial"
 found_image=false
 while IFS= read -r line || [[ -n "$line" ]]; do
-  if [[ "$line" == LLMGATEWAY_GATEWAY_IMAGE=* ]]; then
-    printf 'LLMGATEWAY_GATEWAY_IMAGE=%s\n' "$new_image"
+  if [[ "$line" == LLM2API_GATEWAY_IMAGE=* ]]; then
+    printf 'LLM2API_GATEWAY_IMAGE=%s\n' "$new_image"
     found_image=true
   else
     printf '%s\n' "$line"
@@ -268,7 +268,7 @@ $found_image || { rm -f -- "$temporary_environment"; echo "environment file has 
 chown --reference="$environment_file" "$temporary_environment"
 chmod --reference="$environment_file" "$temporary_environment"
 mv -- "$temporary_environment" "$environment_file"
-systemctl reload llmgateway-compose.service
-release_llmgateway_maintenance_lock
+systemctl reload llm2api-compose.service
+release_llm2api_maintenance_lock
 maintenance_lock_held=false
-echo "LLMGateway rolling upgrade completed; pre-upgrade backup: $backup_path"
+echo "LLM2API rolling upgrade completed; pre-upgrade backup: $backup_path"

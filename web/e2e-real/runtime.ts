@@ -21,10 +21,10 @@ class GatewayProcess implements GatewayRuntime {
   private child: ChildProcess | undefined
   private generation = 0
   private launchError: Error | undefined
-  private readonly binary = requiredEnvironment('LLMGATEWAY_REAL_GATEWAY_BINARY')
-  private readonly gatewayURL = requiredEnvironment('LLMGATEWAY_REAL_GATEWAY_URL')
-  private readonly logDirectory = requiredEnvironment('LLMGATEWAY_REAL_GATEWAY_LOG_DIR')
-  private readonly pidFile = requiredEnvironment('LLMGATEWAY_REAL_GATEWAY_PID_FILE')
+  private readonly binary = requiredEnvironment('LLM2API_REAL_GATEWAY_BINARY')
+  private readonly gatewayURL = requiredEnvironment('LLM2API_REAL_GATEWAY_URL')
+  private readonly logDirectory = requiredEnvironment('LLM2API_REAL_GATEWAY_LOG_DIR')
+  private readonly pidFile = requiredEnvironment('LLM2API_REAL_GATEWAY_PID_FILE')
 
   async start(): Promise<void> {
     if (this.child && this.child.exitCode === null && this.child.signalCode === null) {
@@ -110,9 +110,9 @@ class GatewayProcess implements GatewayRuntime {
   }
 
   private redirectCatalogToFixture(): void {
-    const docker = requiredEnvironment('LLMGATEWAY_REAL_DOCKER_COMMAND')
-    const container = requiredEnvironment('LLMGATEWAY_REAL_POSTGRES_CONTAINER')
-    const providerBaseURL = requiredEnvironment('LLMGATEWAY_REAL_PROVIDER_BASE_URL')
+    const docker = requiredEnvironment('LLM2API_REAL_DOCKER_COMMAND')
+    const container = requiredEnvironment('LLM2API_REAL_POSTGRES_CONTAINER')
+    const providerBaseURL = requiredEnvironment('LLM2API_REAL_PROVIDER_BASE_URL')
     const sql = `UPDATE providers SET base_url = '${providerBaseURL}' WHERE catalog_id = 'siliconflow'; UPDATE models SET upstream_name = 'fixture-chat' WHERE provider_id = (SELECT id FROM providers WHERE catalog_id = 'siliconflow');`
     const result = spawnSync(
       docker,
@@ -123,9 +123,9 @@ class GatewayProcess implements GatewayRuntime {
         '-v',
         'ON_ERROR_STOP=1',
         '-U',
-        'llmgateway',
+        'llm2api',
         '-d',
-        'llmgateway_browser',
+        'llm2api_browser',
         '-c',
         sql,
       ],
@@ -215,7 +215,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 export function acceptanceArtifactPath(fileName: string): string {
   if (path.basename(fileName) !== fileName)
     throw new Error('acceptance artifact must be a file name')
-  return path.join(requiredEnvironment('LLMGATEWAY_REAL_GATEWAY_LOG_DIR'), fileName)
+  return path.join(requiredEnvironment('LLM2API_REAL_GATEWAY_LOG_DIR'), fileName)
 }
 
 function formatResponseProblem(response: Response): string {
@@ -260,21 +260,21 @@ function gatewayEnvironment(): NodeJS.ProcessEnv {
     'TEMP',
     'TMP',
     'TZ',
-    'LLMGATEWAY_PROFILE',
-    'LLMGATEWAY_HTTP_ADDRESS',
-    'LLMGATEWAY_DATABASE_URL',
-    'LLMGATEWAY_DATABASE_MIGRATE_ON_START',
-    'LLMGATEWAY_VALKEY_ADDRESS',
-    'LLMGATEWAY_VALKEY_PASSWORD',
-    'LLMGATEWAY_VALKEY_DATABASE',
-    'LLMGATEWAY_MASTER_KEYS',
-    'LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION',
-    'LLMGATEWAY_SESSION_PEPPER',
-    'LLMGATEWAY_API_KEY_PEPPER',
-    'LLMGATEWAY_COOKIE_SECURE',
-    'LLMGATEWAY_ALLOWED_RESOLVED_NETWORKS',
-    'LLMGATEWAY_PROVIDER_CA_BUNDLE_FILE',
-    'LLMGATEWAY_LOG_LEVEL',
+    'LLM2API_PROFILE',
+    'LLM2API_HTTP_ADDRESS',
+    'LLM2API_DATABASE_URL',
+    'LLM2API_DATABASE_MIGRATE_ON_START',
+    'LLM2API_VALKEY_ADDRESS',
+    'LLM2API_VALKEY_PASSWORD',
+    'LLM2API_VALKEY_DATABASE',
+    'LLM2API_MASTER_KEYS',
+    'LLM2API_ACTIVE_MASTER_KEY_VERSION',
+    'LLM2API_SESSION_PEPPER',
+    'LLM2API_API_KEY_PEPPER',
+    'LLM2API_COOKIE_SECURE',
+    'LLM2API_ALLOWED_RESOLVED_NETWORKS',
+    'LLM2API_PROVIDER_CA_BUNDLE_FILE',
+    'LLM2API_LOG_LEVEL',
   ]) {
     const value = process.env[name]
     if (value !== undefined) environment[name] = value

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/internal/usage"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/usage"
 )
 
 type requestLogView struct {

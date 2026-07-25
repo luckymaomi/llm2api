@@ -8,17 +8,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/canonical"
-	"github.com/luckymaomi/llmgateway/internal/config"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/internal/registry"
-	"github.com/luckymaomi/llmgateway/internal/requestflow"
-	"github.com/luckymaomi/llmgateway/internal/subscription"
+	"github.com/luckymaomi/llm2api/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/config"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/registry"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
+	"github.com/luckymaomi/llm2api/internal/subscription"
 )
 
 const (
-	sessionCookieName = "llmgateway_session"
-	csrfCookieName    = "llmgateway_csrf"
+	sessionCookieName = "llm2api_session"
+	csrfCookieName    = "llm2api_csrf"
 )
 
 type identityService interface {

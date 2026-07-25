@@ -1,51 +1,51 @@
 groups:
-  - name: llmgateway
+  - name: llm2api
     rules:
-      - alert: LLMGatewayNotReady
-        expr: sum(rate(llmgateway_http_requests_total{route="/health/ready",status!="200"}[5m])) > 0
+      - alert: LLM2APINotReady
+        expr: sum(rate(llm2api_http_requests_total{route="/health/ready",status!="200"}[5m])) > 0
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: LLMGateway storage readiness is failing
-          runbook_url: https://github.com/luckymaomi/llmgateway/blob/main/deploy/observability/runbook.md#not-ready
-      - alert: LLMGatewayAdmissionSaturated
-        expr: sum(rate(llmgateway_admission_requests_total{outcome=~"queue_full|timeout|capacity_exhausted"}[10m])) > 1
+          summary: LLM2API storage readiness is failing
+          runbook_url: https://github.com/luckymaomi/llm2api/blob/main/deploy/observability/runbook.md#not-ready
+      - alert: LLM2APIAdmissionSaturated
+        expr: sum(rate(llm2api_admission_requests_total{outcome=~"queue_full|timeout|capacity_exhausted"}[10m])) > 1
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: LLMGateway admission is persistently saturated
-          runbook_url: https://github.com/luckymaomi/llmgateway/blob/main/deploy/observability/runbook.md#admission-saturated
-      - alert: LLMGatewayProviderFailureRatio
-        expr: sum by (provider_kind) (rate(llmgateway_provider_attempts_total{outcome=~"failed|uncertain"}[10m])) / clamp_min(sum by (provider_kind) (rate(llmgateway_provider_attempts_total[10m])), 0.001) > 0.2
+          summary: LLM2API admission is persistently saturated
+          runbook_url: https://github.com/luckymaomi/llm2api/blob/main/deploy/observability/runbook.md#admission-saturated
+      - alert: LLM2APIProviderFailureRatio
+        expr: sum by (provider_kind) (rate(llm2api_provider_attempts_total{outcome=~"failed|uncertain"}[10m])) / clamp_min(sum by (provider_kind) (rate(llm2api_provider_attempts_total[10m])), 0.001) > 0.2
         for: 10m
         labels:
           severity: warning
         annotations:
           summary: Provider attempts exceed the failure ratio threshold
-          runbook_url: https://github.com/luckymaomi/llmgateway/blob/main/deploy/observability/runbook.md#provider-failures
-      - alert: LLMGatewayUncertainOutcome
-        expr: increase(llmgateway_provider_attempts_total{outcome="uncertain"}[5m]) > 0 or increase(llmgateway_request_recovery_results_total{outcome="uncertain"}[5m]) > 0
+          runbook_url: https://github.com/luckymaomi/llm2api/blob/main/deploy/observability/runbook.md#provider-failures
+      - alert: LLM2APIUncertainOutcome
+        expr: increase(llm2api_provider_attempts_total{outcome="uncertain"}[5m]) > 0 or increase(llm2api_request_recovery_results_total{outcome="uncertain"}[5m]) > 0
         for: 0m
         labels:
           severity: critical
         annotations:
           summary: An upstream side effect is uncertain
-          runbook_url: https://github.com/luckymaomi/llmgateway/blob/main/deploy/observability/runbook.md#uncertain-outcomes
-      - alert: LLMGatewayUsagePersistenceFailure
-        expr: increase(llmgateway_usage_operations_total{outcome="failed"}[5m]) > 0
+          runbook_url: https://github.com/luckymaomi/llm2api/blob/main/deploy/observability/runbook.md#uncertain-outcomes
+      - alert: LLM2APIUsagePersistenceFailure
+        expr: increase(llm2api_usage_operations_total{outcome="failed"}[5m]) > 0
         for: 0m
         labels:
           severity: critical
         annotations:
           summary: A request usage persistence operation failed
-          runbook_url: https://github.com/luckymaomi/llmgateway/blob/main/deploy/observability/runbook.md#usage-persistence-failures
-      - alert: LLMGatewayBackgroundFailureRatio
-        expr: sum(rate(llmgateway_background_responses_total{outcome=~"failed|uncertain|recovered_failed|recovered_uncertain"}[15m])) / clamp_min(sum(rate(llmgateway_background_responses_total{outcome=~"completed|failed|canceled|uncertain|recovered_.+"}[15m])), 0.001) > 0.1
+          runbook_url: https://github.com/luckymaomi/llm2api/blob/main/deploy/observability/runbook.md#usage-persistence-failures
+      - alert: LLM2APIBackgroundFailureRatio
+        expr: sum(rate(llm2api_background_responses_total{outcome=~"failed|uncertain|recovered_failed|recovered_uncertain"}[15m])) / clamp_min(sum(rate(llm2api_background_responses_total{outcome=~"completed|failed|canceled|uncertain|recovered_.+"}[15m])), 0.001) > 0.1
         for: 15m
         labels:
           severity: warning
         annotations:
           summary: Background Responses failure ratio is elevated
-          runbook_url: https://github.com/luckymaomi/llmgateway/blob/main/deploy/observability/runbook.md#background-failures
+          runbook_url: https://github.com/luckymaomi/llm2api/blob/main/deploy/observability/runbook.md#background-failures

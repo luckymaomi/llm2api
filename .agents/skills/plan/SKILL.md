@@ -1,6 +1,6 @@
 ---
 name: plan
-description: 在 LLMGateway 正式实现阶段编写和执行单文件 plan.md。适用于中大型开发、跨模块修改、产品边界调整、架构硬化、生产级验收和任何不能靠一次小补丁完成的任务；单纯初始化或讨论阶段不创建 plan.md。
+description: 在 LLM2API 正式实现阶段编写和执行单文件 plan.md。适用于中大型开发、跨模块修改、产品边界调整、架构硬化、生产级验收和任何不能靠一次小补丁完成的任务；单纯初始化或讨论阶段不创建 plan.md。
 ---
 
 # Plan
@@ -10,7 +10,7 @@ description: 在 LLMGateway 正式实现阶段编写和执行单文件 plan.md�
 ## 触发后先做
 
 1. 读取根目录 `AGENTS.md`。
-2. 读取 `.agents/skills/llmgateway-dev/SKILL.md`。
+2. 读取 `.agents/skills/llm2api-dev/SKILL.md`。
 3. 完整读取 `spec.md` 与 `dev.md`，调查当前仓库、工作区、实现、持久状态、测试、文档和运行事实。
 4. 已有 `plan.md` 属于当前任务时更新；不属于时先向 owner 确认是否替换。
 5. 没有当前计划时，以 `plan.example.md` 为结构参考创建根目录 `plan.md`。

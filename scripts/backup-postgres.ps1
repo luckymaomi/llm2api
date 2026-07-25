@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)][string] $OutputPath,
-  [string] $Container = "llmgateway-postgres",
+  [string] $Container = "llm2api-postgres",
   [string] $DatabaseName = "",
   [string] $DatabaseUser = "",
   [string] $ExpectedComposeProject = "",
@@ -13,16 +13,16 @@ $ErrorActionPreference = "Stop"
 
 function Get-ContainerFacts {
   param([string] $Name)
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   $labels = (& $docker inspect --format '{{json .Config.Labels}}' $Name | ConvertFrom-Json)
   if ($LASTEXITCODE -ne 0) { throw "Could not inspect PostgreSQL container $Name." }
   if ($ExpectedComposeProject -and $ExpectedComposeProject -notmatch '^[a-z0-9][a-z0-9_-]{1,62}$') {
     throw "Expected Compose project name is invalid."
   }
-  $allowedProjects = if ($ExpectedComposeProject) { @($ExpectedComposeProject) } else { @('llmgateway', 'llmgateway-production') }
+  $allowedProjects = if ($ExpectedComposeProject) { @($ExpectedComposeProject) } else { @('llm2api', 'llm2api-production') }
   $owned = $labels.'com.docker.compose.project' -in $allowedProjects -and $labels.'com.docker.compose.service' -eq 'postgres'
-  $isolated = $AllowIsolatedTestContainer -and $labels.'llmgateway.test.owner' -eq 'llmgateway-isolated-tests'
-  if (-not $owned -and -not $isolated) { throw "Refusing to back up a PostgreSQL container not owned by LLMGateway." }
+  $isolated = $AllowIsolatedTestContainer -and $labels.'llm2api.test.owner' -eq 'llm2api-isolated-tests'
+  if (-not $owned -and -not $isolated) { throw "Refusing to back up a PostgreSQL container not owned by LLM2API." }
   $values = @{}
   foreach ($entry in @(& $docker inspect --format '{{json .Config.Env}}' $Name | ConvertFrom-Json)) {
     $parts = [string]$entry -split '=', 2
@@ -31,7 +31,7 @@ function Get-ContainerFacts {
   return $values
 }
 
-$docker = Get-LLMGatewayDockerCommand
+$docker = Get-LLM2APIDockerCommand
 $facts = Get-ContainerFacts -Name $Container
 if (-not $DatabaseName) { $DatabaseName = [string]$facts.POSTGRES_DB }
 if (-not $DatabaseUser) { $DatabaseUser = [string]$facts.POSTGRES_USER }
@@ -43,7 +43,7 @@ $parent = Split-Path -Parent $resolvedOutput
 if (-not $parent) { throw "Backup output must include a parent directory." }
 New-Item -ItemType Directory -Force -Path $parent | Out-Null
 
-$containerArchive = "/tmp/llmgateway-backup-$([guid]::NewGuid().ToString('N')).dump"
+$containerArchive = "/tmp/llm2api-backup-$([guid]::NewGuid().ToString('N')).dump"
 try {
   & $docker exec $Container pg_dump --username $DatabaseUser --dbname $DatabaseName --format custom --compress 9 --file $containerArchive
   if ($LASTEXITCODE -ne 0) { throw "pg_dump failed." }

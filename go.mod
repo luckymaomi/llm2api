@@ -1,4 +1,4 @@
-module github.com/luckymaomi/llmgateway
+module github.com/luckymaomi/llm2api
 
 go 1.26.0
 

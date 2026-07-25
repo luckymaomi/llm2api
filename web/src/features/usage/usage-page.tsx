@@ -75,35 +75,44 @@ export function UsagePage() {
         accessorKey: 'acceptedAt',
         header: '时间',
         cell: ({ row }) => formatDateTime(row.original.acceptedAt),
+        meta: { align: 'center' },
       },
       ...(session.role === 'member'
         ? []
-        : [{ accessorKey: 'userName', header: '成员' } as ColumnDef<RequestLog, unknown>]),
+        : [
+            {
+              accessorKey: 'userName',
+              header: '成员',
+              meta: { align: 'center' },
+            } as ColumnDef<RequestLog, unknown>,
+          ]),
       {
         accessorKey: 'keyPrefix',
         header: 'API 密钥',
         cell: ({ row }) => <code>{row.original.keyPrefix}…</code>,
+        meta: { align: 'center' },
       },
-      { accessorKey: 'modelAlias', header: '模型' },
+      { accessorKey: 'modelAlias', header: '模型', meta: { align: 'center' } },
       ...(session.role === 'member'
         ? []
         : [
             {
               accessorKey: 'resourcePoolName',
               header: '资源池',
+              meta: { align: 'center' },
             } as ColumnDef<RequestLog, unknown>,
           ]),
       {
         id: 'tokens',
         header: 'Token',
         cell: ({ row }) => tokenSummary(row.original),
-        meta: { align: 'right' },
+        meta: { align: 'center' },
       },
       {
         id: 'latency',
         header: '耗时',
         cell: ({ row }) => formatDuration(requestDuration(row.original)),
-        meta: { align: 'right' },
+        meta: { align: 'center' },
       },
       {
         accessorKey: 'status',
@@ -115,6 +124,7 @@ export function UsagePage() {
         accessorKey: 'requestId',
         header: 'Request ID',
         cell: ({ row }) => <code>{row.original.requestId}</code>,
+        meta: { align: 'center' },
       },
     ],
     [session.role],
@@ -314,8 +324,10 @@ function RequestDetail({
                         <Fact label="已发送" value={formatDateTime(attempt.sentAt)} />
                         <Fact label="首字节" value={formatDateTime(attempt.firstByteAt)} />
                         <Fact label="完成" value={formatDateTime(attempt.completedAt)} />
-                        <Fact label="HTTP" value={attempt.httpStatus?.toString() ?? '—'} />
-                        <Fact label="错误" value={attempt.errorKind ?? '—'} mono />
+                        <Fact label="HTTP" value={formatHttpStatus(attempt.httpStatus)} />
+                        {attempt.errorKind ? (
+                          <Fact label="错误" value={attempt.errorKind} mono />
+                        ) : null}
                       </dl>
                     </div>
                   </li>
@@ -360,6 +372,40 @@ function tokenSummary(request: RequestLog): string {
 
 function tokenValue(value: number | undefined): string {
   return value === undefined ? '未知' : formatNumber(value)
+}
+
+function formatHttpStatus(status: number | undefined): string {
+  if (status === undefined) return '未收到响应'
+  const descriptions: Record<number, string> = {
+    200: '成功',
+    201: '创建成功',
+    204: '成功，无响应内容',
+    400: '上游拒绝请求',
+    401: '上游认证失败',
+    403: '上游拒绝访问',
+    404: '上游接口或模型不存在',
+    408: '上游请求超时',
+    409: '上游请求冲突',
+    413: '请求体过大',
+    422: '请求参数无法处理',
+    429: '上游限流',
+    500: '上游内部错误',
+    502: '上游网关错误',
+    503: '上游服务不可用',
+    504: '上游响应超时',
+  }
+  const description =
+    descriptions[status] ??
+    (status >= 200 && status < 300
+      ? '成功'
+      : status >= 300 && status < 400
+        ? '上游重定向'
+        : status >= 400 && status < 500
+          ? '上游拒绝请求'
+          : status >= 500
+            ? '上游服务错误'
+            : '非标准响应')
+  return `${status} · ${description}`
 }
 
 function isTerminal(status: RequestLog['status']): boolean {

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/luckymaomi/llmgateway/internal/security"
+	"github.com/luckymaomi/llm2api/internal/security"
 )
 
 func TestProviderFactorySharesOneSSRFSafeTransportAcrossAttempts(t *testing.T) {

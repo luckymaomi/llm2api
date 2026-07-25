@@ -3,7 +3,7 @@ package providers
 import (
 	"testing"
 
-	"github.com/luckymaomi/llmgateway/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
 func TestZhipuStreamFinishKindsDriveCanonicalBehavior(t *testing.T) {

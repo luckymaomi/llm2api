@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/luckymaomi/llmgateway/internal/buildinfo"
+	"github.com/luckymaomi/llm2api/internal/buildinfo"
 )
 
 func main() {

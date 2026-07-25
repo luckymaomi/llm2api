@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/migrations"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/migrations"
 )
 
 func TestIdentityRepositoryCommitsBootstrapAndPasswordChangeAsIdentityFacts(t *testing.T) {
@@ -224,12 +224,12 @@ VALUES ($1, $2, $3, 'fixture-hash', 'administrator', 'active')`, user.id, "displ
 
 func identityDisplayNameTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	databaseURL := os.Getenv("LLMGATEWAY_CONTROL_TEST_DATABASE_URL")
+	databaseURL := os.Getenv("LLM2API_CONTROL_TEST_DATABASE_URL")
 	if databaseURL == "" {
-		if os.Getenv("LLMGATEWAY_CONTROL_TEST_REQUIRED") == "true" {
-			t.Fatal("LLMGATEWAY_CONTROL_TEST_DATABASE_URL is required for the identity display-name repository test")
+		if os.Getenv("LLM2API_CONTROL_TEST_REQUIRED") == "true" {
+			t.Fatal("LLM2API_CONTROL_TEST_DATABASE_URL is required for the identity display-name repository test")
 		}
-		t.Skip("LLMGATEWAY_CONTROL_TEST_DATABASE_URL is required for the isolated identity display-name repository test")
+		t.Skip("LLM2API_CONTROL_TEST_DATABASE_URL is required for the isolated identity display-name repository test")
 	}
 	ctx := context.Background()
 	database, err := sql.Open("pgx", databaseURL)

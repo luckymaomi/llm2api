@@ -14,6 +14,7 @@ import { Page, PageHeader, PageSection } from '@/components/layout'
 import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { NativeSelect } from '@/components/ui/field'
 import { FormProblem } from '@/features/auth/form-problem'
 import { formatDateTime, formatNumber } from '@/lib/format'
 
@@ -36,6 +37,7 @@ export function CredentialsPage() {
     status: CredentialStatus
   } | null>(null)
   const [retiring, setRetiring] = useState<Credential | null>(null)
+  const [resourcePoolId, setResourcePoolId] = useState('')
   const query = useQuery({
     queryKey: ['credentials'],
     queryFn: ({ signal }) => catalogApi.credentials(true, signal),
@@ -64,16 +66,10 @@ export function CredentialsPage() {
   })
   const probeAllMutation = useMutation({
     mutationFn: async () => {
-      const candidates = (query.data ?? []).filter(
-        (credential) => credential.status === 'active',
-      )
+      const candidates = (query.data ?? []).filter((credential) => credential.status === 'active')
       const outcomes = await Promise.allSettled(
         candidates.map((credential) =>
-          catalogApi.probeCredential(
-            credential.id,
-            credential.updatedAt,
-            crypto.randomUUID(),
-          ),
+          catalogApi.probeCredential(credential.id, credential.updatedAt, crypto.randomUUID()),
         ),
       )
       return outcomes.reduce(
@@ -91,6 +87,22 @@ export function CredentialsPage() {
       await queryClient.invalidateQueries({ queryKey: ['credentials'] })
     },
   })
+  const resourcePools = useMemo(() => {
+    const unique = new Map<string, string>()
+    for (const credential of query.data ?? []) {
+      unique.set(credential.resourcePoolId, credential.resourcePoolName)
+    }
+    return Array.from(unique, ([id, name]) => ({ id, name })).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    )
+  }, [query.data])
+  const visibleCredentials = useMemo(
+    () =>
+      resourcePoolId
+        ? (query.data ?? []).filter((credential) => credential.resourcePoolId === resourcePoolId)
+        : (query.data ?? []),
+    [query.data, resourcePoolId],
+  )
   const columns = useMemo<ColumnDef<Credential, unknown>[]>(
     () => [
       {
@@ -243,9 +255,25 @@ export function CredentialsPage() {
             已完成模型探测：成功 {probeAllResult.succeeded} 把，失败 {probeAllResult.failed} 把。
           </p>
         ) : null}
+        <div className="table-toolbar">
+          <div className="table-toolbar__filters">
+            <NativeSelect
+              aria-label="资源池筛选"
+              value={resourcePoolId}
+              onChange={(event) => setResourcePoolId(event.target.value)}
+            >
+              <option value="">全部资源池</option>
+              {resourcePools.map((pool) => (
+                <option key={pool.id} value={pool.id}>
+                  {pool.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+        </div>
         <DataTable
           ariaLabel="上游 API Key 列表"
-          data={query.data ?? []}
+          data={visibleCredentials}
           columns={columns}
           getRowId={(item) => item.id}
           loading={query.isLoading}
@@ -254,8 +282,8 @@ export function CredentialsPage() {
           onRetry={() => void query.refetch()}
           emptyLabel="还没有上游 API Key"
           page={1}
-          pageSize={Math.max(query.data?.length ?? 0, 1)}
-          total={query.data?.length ?? 0}
+          pageSize={Math.max(visibleCredentials.length, 1)}
+          total={visibleCredentials.length}
           onPageChange={() => undefined}
         />
       </PageSection>

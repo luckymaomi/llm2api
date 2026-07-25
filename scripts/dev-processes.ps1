@@ -1,4 +1,4 @@
-function Test-LLMGatewayCommandLineContains {
+function Test-LLM2APICommandLineContains {
   param(
     [string] $CommandLine,
     [Parameter(Mandatory = $true)][string] $Expected
@@ -8,7 +8,7 @@ function Test-LLMGatewayCommandLineContains {
     $CommandLine.IndexOf($Expected, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
 }
 
-function Get-LLMGatewayDevelopmentProcesses {
+function Get-LLM2APIDevelopmentProcesses {
   param([Parameter(Mandatory = $true)][string] $Root)
 
   $resolvedRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\')
@@ -38,10 +38,10 @@ function Get-LLMGatewayDevelopmentProcesses {
         $role = "gateway"
       }
     } elseif ($name -ieq "node.exe" -and
-        (Test-LLMGatewayCommandLineContains -CommandLine $commandLine -Expected $viteEntry)) {
+        (Test-LLM2APICommandLineContains -CommandLine $commandLine -Expected $viteEntry)) {
       $role = "web"
     } elseif ($name -in @("powershell.exe", "pwsh.exe") -and
-        (Test-LLMGatewayCommandLineContains -CommandLine $commandLine -Expected $devScript)) {
+        (Test-LLM2APICommandLineContains -CommandLine $commandLine -Expected $devScript)) {
       $role = "dev-launcher"
     }
 
@@ -80,7 +80,7 @@ function Get-LLMGatewayDevelopmentProcesses {
       continue
     }
     if ([string] $parent.Name -notin @("python.exe", "pythonw.exe") -or
-        -not (Test-LLMGatewayCommandLineContains `
+        -not (Test-LLM2APICommandLineContains `
           -CommandLine ([string] $parent.CommandLine) -Expected "start_dev.py")) {
       continue
     }
@@ -95,12 +95,12 @@ function Get-LLMGatewayDevelopmentProcesses {
   return @($owned.Values)
 }
 
-function Stop-LLMGatewayDevelopmentProcesses {
+function Stop-LLM2APIDevelopmentProcesses {
   param([Parameter(Mandatory = $true)][string] $Root)
 
-  $owned = @(Get-LLMGatewayDevelopmentProcesses -Root $Root)
+  $owned = @(Get-LLM2APIDevelopmentProcesses -Root $Root)
   if ($owned.Count -eq 0) {
-    Write-Host "No LLMGateway development processes are running."
+    Write-Host "No LLM2API development processes are running."
   } else {
     $workloads = @($owned | Where-Object {
         $_.Role -notin @("dev-launcher", "start-launcher")
@@ -113,7 +113,7 @@ function Stop-LLMGatewayDevelopmentProcesses {
       if ($null -eq $process) {
         continue
       }
-      Write-Host "Stopping LLMGateway $($fact.Role) (PID $($fact.ProcessID))..."
+      Write-Host "Stopping LLM2API $($fact.Role) (PID $($fact.ProcessID))..."
       Stop-Process -Id $fact.ProcessID -ErrorAction SilentlyContinue
     }
 
@@ -129,22 +129,22 @@ function Stop-LLMGatewayDevelopmentProcesses {
     } while ((Get-Date) -lt $deadline)
 
     foreach ($fact in $remaining) {
-      Write-Host "Force stopping LLMGateway $($fact.Role) (PID $($fact.ProcessID))..."
+      Write-Host "Force stopping LLM2API $($fact.Role) (PID $($fact.ProcessID))..."
       Stop-Process -Id $fact.ProcessID -Force -ErrorAction SilentlyContinue
     }
 
     Start-Sleep -Milliseconds 200
-    $survivors = @(Get-LLMGatewayDevelopmentProcesses -Root $Root)
+    $survivors = @(Get-LLM2APIDevelopmentProcesses -Root $Root)
     if ($survivors.Count -gt 0) {
       $identifiers = ($survivors | ForEach-Object { "$($_.ProcessID):$($_.Role)" }) -join ", "
-      throw "Could not stop all LLMGateway development processes: $identifiers"
+      throw "Could not stop all LLM2API development processes: $identifiers"
     }
   }
 
-  Remove-LLMGatewayDevelopmentRunDirectories -Root $Root
+  Remove-LLM2APIDevelopmentRunDirectories -Root $Root
 }
 
-function Remove-LLMGatewayDevelopmentRunDirectories {
+function Remove-LLM2APIDevelopmentRunDirectories {
   param([Parameter(Mandatory = $true)][string] $Root)
 
   $buildRoot = [System.IO.Path]::GetFullPath((Join-Path $Root ".build")).TrimEnd('\')

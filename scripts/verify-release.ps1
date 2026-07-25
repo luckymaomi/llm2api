@@ -148,11 +148,11 @@ if ($Keyless) {
 $Directory = [IO.Path]::GetFullPath($Directory)
 if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { throw "Release directory does not exist." }
 $version = $ExpectedVersion
-$windowsZipName = "llmgateway-$version-windows-amd64.zip"
-$linuxZipName = "llmgateway-$version-linux-amd64.zip"
-$imageTarName = "llmgateway-$version-linux-amd64.oci.tar"
-$spdxName = "llmgateway-$version-image.spdx.json"
-$cycloneDXName = "llmgateway-$version-artifacts.cdx.json"
+$windowsZipName = "llm2api-$version-windows-amd64.zip"
+$linuxZipName = "llm2api-$version-linux-amd64.zip"
+$imageTarName = "llm2api-$version-linux-amd64.oci.tar"
+$spdxName = "llm2api-$version-image.spdx.json"
+$cycloneDXName = "llm2api-$version-artifacts.cdx.json"
 $payloadNames = @(
   $windowsZipName,
   $linuxZipName,
@@ -193,11 +193,11 @@ foreach ($line in $checksumLines) {
 Assert-ExactNames -Actual @($checksums.Keys) -Expected $payloadNames -Label "SHA256SUMS"
 
 $manifest = Get-JsonDocument -Path (Join-Path $Directory "release-manifest.json")
-if ($manifest.format -cne "llmgateway-release-manifest" -or
+if ($manifest.format -cne "llm2api-release-manifest" -or
     $manifest.version -cne $version -or
     $manifest.revision -cne $ExpectedRevision -or
     $manifest.signingMode -cne $(if ($Keyless) { "Keyless" } else { "Test" }) -or
-    $manifest.image -cne "llmgateway:release-$($version.ToLowerInvariant())" -or
+    $manifest.image -cne "llm2api:release-$($version.ToLowerInvariant())" -or
     $manifest.imageId -notmatch '^sha256:[0-9a-f]{64}$') {
   throw "Release manifest identity does not match the expected version, revision, or signing mode."
 }
@@ -216,12 +216,12 @@ if ($frontendDigest -notmatch '^[0-9a-f]{64}$' -or [int] $manifest.frontendTree.
 }
 
 $expectedBinaryNames = @(
-  "linux-amd64/llmgateway",
-  "linux-amd64/llmgateway-dbtool",
-  "linux-amd64/llmgateway-healthcheck",
-  "windows-amd64/llmgateway.exe",
-  "windows-amd64/llmgateway-dbtool.exe",
-  "windows-amd64/llmgateway-healthcheck.exe"
+  "linux-amd64/llm2api",
+  "linux-amd64/llm2api-dbtool",
+  "linux-amd64/llm2api-healthcheck",
+  "windows-amd64/llm2api.exe",
+  "windows-amd64/llm2api-dbtool.exe",
+  "windows-amd64/llm2api-healthcheck.exe"
 )
 $manifestBinaries = @($manifest.verifiedBinaries | ForEach-Object {
   if ($_.name -notmatch '^(?:linux-amd64|windows-amd64)/[A-Za-z0-9.-]+$' -or $_.sha256 -notmatch '^[0-9a-f]{64}$') {
@@ -277,7 +277,7 @@ function Assert-ReleaseArchive {
   }
 }
 foreach ($archiveEvidence in $manifestArchives) {
-  $binaryNames = if ($archiveEvidence.name -eq $windowsZipName) { @("llmgateway.exe", "llmgateway-dbtool.exe", "llmgateway-healthcheck.exe") } else { @("llmgateway", "llmgateway-dbtool", "llmgateway-healthcheck") }
+  $binaryNames = if ($archiveEvidence.name -eq $windowsZipName) { @("llm2api.exe", "llm2api-dbtool.exe", "llm2api-healthcheck.exe") } else { @("llm2api", "llm2api-dbtool", "llm2api-healthcheck") }
   $platform = if ($archiveEvidence.name -eq $windowsZipName) { "windows-amd64" } else { "linux-amd64" }
   Assert-ReleaseArchive -Path (Join-Path $Directory $archiveEvidence.name) -BinaryNames $binaryNames -ExpectedEntries $archiveEvidence.entries -Platform $platform
 }
@@ -295,7 +295,7 @@ if ($provenance._type -cne "https://in-toto.io/Statement/v1" -or $provenance.pre
   throw "Release provenance type is invalid."
 }
 $external = $provenance.predicate.buildDefinition.externalParameters
-if ($provenance.predicate.buildDefinition.buildType -cne "https://github.com/luckymaomi/llmgateway/release-build" -or
+if ($provenance.predicate.buildDefinition.buildType -cne "https://github.com/luckymaomi/llm2api/release-build" -or
     $external.version -cne $version -or
     $external.revision -cne $ExpectedRevision -or
     $external.builtAt -cne $builtAt -or
@@ -311,12 +311,12 @@ $dependencies = @($provenance.predicate.buildDefinition.resolvedDependencies)
 if ($ExpectedRevision -eq "working-tree") {
   if ($dependencies.Count -ne 0) { throw "working-tree provenance must not claim a Git dependency digest." }
 } elseif ($dependencies.Count -ne 1 -or
-          $dependencies[0].uri -cne "git+https://github.com/luckymaomi/llmgateway@$ExpectedRevision" -or
+          $dependencies[0].uri -cne "git+https://github.com/luckymaomi/llm2api@$ExpectedRevision" -or
           $dependencies[0].digest.gitCommit -cne $ExpectedRevision) {
   throw "Release provenance Git dependency does not match ExpectedRevision."
 }
-$expectedWorkflowIdentity = "https://github.com/luckymaomi/llmgateway/.github/workflows/verify.yml@refs/tags/v$version"
-$expectedBuilder = if ($Keyless) { $expectedWorkflowIdentity } else { "https://github.com/luckymaomi/llmgateway/local-release-acceptance" }
+$expectedWorkflowIdentity = "https://github.com/luckymaomi/llm2api/.github/workflows/verify.yml@refs/tags/v$version"
+$expectedBuilder = if ($Keyless) { $expectedWorkflowIdentity } else { "https://github.com/luckymaomi/llm2api/local-release-acceptance" }
 $metadata = $provenance.predicate.runDetails.metadata
 if ($provenance.predicate.runDetails.builder.id -cne $expectedBuilder -or
     $metadata.reproducible -ne $false -or
@@ -341,13 +341,13 @@ foreach ($subject in $expectedSubjects) {
   if ($matches.Count -ne 1 -or $matches[0].sha256 -cne $subject.sha256) { throw "Provenance subject does not match manifest: $($subject.name)" }
 }
 
-$verificationDirectory = Join-Path ([IO.Path]::GetTempPath()) "llmgateway-release-verify-$([guid]::NewGuid().ToString('N'))"
+$verificationDirectory = Join-Path ([IO.Path]::GetTempPath()) "llm2api-release-verify-$([guid]::NewGuid().ToString('N'))"
 try {
   $windowsExtract = Join-Path $verificationDirectory "windows"
   $linuxExtract = Join-Path $verificationDirectory "linux"
   Expand-ArchiveSafely -ArchivePath (Join-Path $Directory $windowsZipName) -Destination $windowsExtract
   Expand-ArchiveSafely -ArchivePath (Join-Path $Directory $linuxZipName) -Destination $linuxExtract
-  foreach ($binary in @("llmgateway", "llmgateway-dbtool", "llmgateway-healthcheck")) {
+  foreach ($binary in @("llm2api", "llm2api-dbtool", "llm2api-healthcheck")) {
     $linuxName = "linux-amd64/$binary"
     $windowsName = "windows-amd64/$binary.exe"
     $linuxHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $linuxExtract $binary)).Hash.ToLowerInvariant()
@@ -363,7 +363,7 @@ try {
 $bundlePath = Join-Path $Directory "SHA256SUMS.sigstore.json"
 $bundle = Get-JsonDocument -Path $bundlePath
 if ($null -eq $bundle) { throw "Signature bundle is empty." }
-$cosign = Install-LLMGatewayReleaseTool -Name cosign
+$cosign = Install-LLM2APIReleaseTool -Name cosign
 if ($Keyless) {
   & $cosign verify-blob --bundle $bundlePath --certificate-identity $expectedWorkflowIdentity --certificate-oidc-issuer "https://token.actions.githubusercontent.com" $checksumPath | Out-Null
 } else {

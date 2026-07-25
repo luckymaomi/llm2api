@@ -1,4 +1,4 @@
-r"""LLMGateway 唯一人工测试入口。
+r"""LLM2API 唯一人工测试入口。
 
 用法（全部命令都会实时显示输出，并写入 `.build/test-logs/`）：
 
@@ -65,7 +65,7 @@ def powershell_command() -> str | None:
 def select_mode() -> str:
     if not sys.stdin.isatty():
         raise ValueError("非交互环境必须显式指定测试档位，例如：python start_test.py daily")
-    print("请选择要运行的 LLMGateway 测试：")
+    print("请选择要运行的 LLM2API 测试：")
     for index, (mode, description, duration) in enumerate(MODE_MENU, start=1):
         print(f"  {index}. {mode:<10} {description}（{duration}）")
     print("  0. 退出，不运行测试")
@@ -221,7 +221,7 @@ def run_logged(command: Sequence[str], log: BinaryIO) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="运行 LLMGateway 统一测试并实时写日志",
+        description="运行 LLM2API 统一测试并实时写日志",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -257,7 +257,7 @@ def main() -> int:
     commands = test_commands(mode, powershell, args.capacity_duration_seconds, run_id)
 
     with log_path.open("xb") as log:
-        write_line(log, f"LLMGateway test mode: {mode}")
+        write_line(log, f"LLM2API test mode: {mode}")
         write_line(log, f"Started at (UTC): {started_at.isoformat()}")
         display_log_path = log_path.relative_to(ROOT)
         write_line(log, f"Log: {display_log_path}")

@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/security"
+	"github.com/luckymaomi/llm2api/internal/security"
 )
 
 const (
@@ -252,7 +252,7 @@ func (s *Service) createGatewayKey(ctx context.Context, actor Principal, userID 
 }
 
 func (s *Service) deriveGatewayKeySecret(actorID, idempotencyKey uuid.UUID) (string, error) {
-	material := "llmgateway:gateway-key-secret:" + actorID.String() + ":" + idempotencyKey.String()
+	material := "llm2api:gateway-key-secret:" + actorID.String() + ":" + idempotencyKey.String()
 	derived, err := security.HMACSHA256(s.apiKeyPepper, []byte(material))
 	if err != nil {
 		return "", err
@@ -333,7 +333,7 @@ func (s *Service) deriveMemberPassword(actorID, idempotencyKey uuid.UUID) (strin
 	if actorID == uuid.Nil || idempotencyKey == uuid.Nil {
 		return "", ErrInvalidInput
 	}
-	material := "llmgateway:member-initial-password:" + actorID.String() + ":" + idempotencyKey.String()
+	material := "llm2api:member-initial-password:" + actorID.String() + ":" + idempotencyKey.String()
 	derived, err := security.HMACSHA256(s.sessionPepper, []byte(material))
 	if err != nil {
 		return "", err
@@ -398,7 +398,7 @@ func (s *Service) ResetMemberPassword(ctx context.Context, actor Principal, user
 	if err != nil {
 		return SessionRevocation{}, err
 	}
-	fingerprint, err := security.HMACSHA256(s.sessionPepper, []byte("llmgateway:member-password-reset:"+userID.String()+"\x00"+password))
+	fingerprint, err := security.HMACSHA256(s.sessionPepper, []byte("llm2api:member-password-reset:"+userID.String()+"\x00"+password))
 	password = ""
 	if err != nil {
 		return SessionRevocation{}, err

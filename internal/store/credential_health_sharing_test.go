@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/luckymaomi/llmgateway/internal/requestflow"
-	"github.com/luckymaomi/llmgateway/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
+	"github.com/luckymaomi/llm2api/internal/store/db"
 )
 
 func TestCredentialRecoveryPermitIsSharedAndFencedAcrossRepositories(t *testing.T) {

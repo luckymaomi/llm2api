@@ -27,12 +27,12 @@ require_root_owned_path_ancestors "restore directory" "$target"
 
 protected_paths=(
   "$(realpath -e -- "$1")"
-  "$LLMGATEWAY_RESTIC_REPOSITORY_FILE"
-  "$LLMGATEWAY_RESTIC_PASSWORD_FILE"
-  "$LLMGATEWAY_CONFIGURATION_DIRECTORY"
-  "$LLMGATEWAY_BACKUP_STAGING_ROOT"
+  "$LLM2API_RESTIC_REPOSITORY_FILE"
+  "$LLM2API_RESTIC_PASSWORD_FILE"
+  "$LLM2API_CONFIGURATION_DIRECTORY"
+  "$LLM2API_BACKUP_STAGING_ROOT"
 )
-for variable in LLMGATEWAY_RESTIC_AWS_CREDENTIALS_FILE LLMGATEWAY_RESTIC_AWS_CONFIG_FILE LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY; do
+for variable in LLM2API_RESTIC_AWS_CREDENTIALS_FILE LLM2API_RESTIC_AWS_CONFIG_FILE LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY; do
   if [[ -n ${!variable:-} ]]; then protected_paths+=("${!variable}"); fi
 done
 for protected_path in "${protected_paths[@]}"; do
@@ -63,25 +63,25 @@ cleanup() {
   local status=$?
   trap - EXIT
   if [[ -n $restore_stage && -d $restore_stage && ! -L $restore_stage ]]; then rm -rf -- "$restore_stage" || status=1; fi
-  if [[ $lock_acquired == true ]] && ! release_llmgateway_maintenance_lock; then status=1; fi
+  if [[ $lock_acquired == true ]] && ! release_llm2api_maintenance_lock; then status=1; fi
   exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-acquire_llmgateway_maintenance_lock backup-restore
+acquire_llm2api_maintenance_lock backup-restore
 lock_acquired=true
-remove_stale_private_directories "$target_parent" .llmgateway-restore.
+remove_stale_private_directories "$target_parent" .llm2api-restore.
 started=$(date +%s)
-snapshot_selection=$(run_restic snapshots --json --host llmgateway-production --tag llmgateway-production "$snapshot_id")
+snapshot_selection=$(run_restic snapshots --json --host llm2api-production --tag llm2api-production "$snapshot_id")
 if [[ $snapshot_selection =~ ^[[:space:]]*\[[[:space:]]*\][[:space:]]*$ ]]; then
-  echo "snapshot ID does not identify a production LLMGateway snapshot" >&2
+  echo "snapshot ID does not identify a production LLM2API snapshot" >&2
   exit 1
 fi
 unset snapshot_selection
 
-restore_stage=$(mktemp -d "$target_parent/.llmgateway-restore.XXXXXXXX")
+restore_stage=$(mktemp -d "$target_parent/.llm2api-restore.XXXXXXXX")
 chmod 0700 "$restore_stage"
 RESTIC_DATA_MOUNT_SOURCE=$restore_stage
 RESTIC_DATA_MOUNT_TARGET=/restore
@@ -106,7 +106,7 @@ if [[ -e $target ]]; then rmdir -- "$target"; fi
 [[ ! -e $target && ! -L $target ]] || { echo "restore directory appeared during recovery" >&2; exit 1; }
 mv -T -- "$restore_stage" "$target"
 restore_stage=''
-release_llmgateway_maintenance_lock
+release_llm2api_maintenance_lock
 lock_acquired=false
 trap - EXIT INT TERM
 elapsed=$(( $(date +%s) - started ))

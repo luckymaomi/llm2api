@@ -1,12 +1,12 @@
 [Unit]
-Description=Run LLMGateway encrypted offsite backup with missed-cycle margin
+Description=Run LLM2API encrypted offsite backup with missed-cycle margin
 
 [Timer]
 OnCalendar=*-*-* 00,02,04,06,08,10,12,14,16,18,20,22:00:00
 Persistent=true
 RandomizedDelaySec=10m
 AccuracySec=1m
-Unit=llmgateway-backup.service
+Unit=llm2api-backup.service
 
 [Install]
 WantedBy=timers.target

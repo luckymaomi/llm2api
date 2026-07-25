@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/canonical"
-	"github.com/luckymaomi/llmgateway/internal/protocol"
-	"github.com/luckymaomi/llmgateway/internal/requestflow"
-	responseowner "github.com/luckymaomi/llmgateway/internal/responses"
+	"github.com/luckymaomi/llm2api/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/protocol"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
+	responseowner "github.com/luckymaomi/llm2api/internal/responses"
 )
 
 type ResponseWorkerConfig struct {

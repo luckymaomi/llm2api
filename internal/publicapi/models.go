@@ -3,7 +3,7 @@ package publicapi
 import (
 	"net/http"
 
-	"github.com/luckymaomi/llmgateway/internal/httpserver"
+	"github.com/luckymaomi/llm2api/internal/httpserver"
 )
 
 func (a *API) models(w http.ResponseWriter, r *http.Request) {

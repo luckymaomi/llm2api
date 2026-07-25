@@ -1,4 +1,4 @@
-"""Explicitly reset only LLMGateway-owned local development data."""
+"""Explicitly reset only LLM2API-owned local development data."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="停止 LLMGateway 并清空全部本地开发数据")
+    parser = argparse.ArgumentParser(description="停止 LLM2API 并清空全部本地开发数据")
     parser.add_argument("--yes", action="store_true", help="跳过 RESET 输入确认，仅用于明确的自动化操作")
     args = parser.parse_args()
 
@@ -26,7 +26,7 @@ def main() -> int:
         print("未找到 Windows PowerShell。", file=sys.stderr)
         return 2
 
-    print("警告：这会先停止 LLMGateway，再永久删除本项目 PostgreSQL/Valkey 中的全部本地开发数据。")
+    print("警告：这会先停止 LLM2API，再永久删除本项目 PostgreSQL/Valkey 中的全部本地开发数据。")
     print("将丢失管理员、成员、资源池、套餐、订阅、上游 API Key、API 密钥、额度和账本。")
     print("不会删除源码、.env、Key 文件或其他 Docker 项目；完成后不会自动启动。")
     if not args.yes:

@@ -118,7 +118,6 @@ export function KeyForm({
     mutation.mutate()
   }
 
-  const gatewayBaseURL = `${window.location.origin}/v1`
   return (
     <DialogFrame
       open={open}
@@ -148,21 +147,13 @@ export function KeyForm({
               variant="secondary"
               icon={copied ? <Check size={16} /> : <Copy size={16} />}
               onClick={() =>
-                void navigator.clipboard
-                  .writeText(`OPENAI_BASE_URL=${gatewayBaseURL}\nOPENAI_API_KEY=${created.secret}`)
-                  .then(() => setCopied(true))
+                void navigator.clipboard.writeText(created.secret).then(() => setCopied(true))
               }
             >
-              {copied ? '已复制' : '复制调用配置'}
+              {copied ? '已复制' : '复制 API 密钥'}
             </Button>
           </div>
           <dl className="fact-list">
-            <div>
-              <dt>Base URL</dt>
-              <dd>
-                <code>{gatewayBaseURL}</code>
-              </dd>
-            </div>
             <div>
               <dt>名称</dt>
               <dd>{created.key.name}</dd>
@@ -172,11 +163,6 @@ export function KeyForm({
               <dd>{created.key.routes.map(routeLabel).join('、')}</dd>
             </div>
           </dl>
-          <ConnectionExamples
-            baseURL={gatewayBaseURL}
-            secret={created.secret}
-            {...(created.key.routes[0] ? { route: created.key.routes[0] } : {})}
-          />
         </div>
       ) : (
         <form id="key-form" className="form-grid" onSubmit={submit}>
@@ -278,7 +264,13 @@ export function KeyForm({
             !subscriptions.isLoading &&
             !pools.isLoading &&
             availableRoutes.length === 0 ? (
-              <p className="choice-field__empty">当前没有可用于新 API 密钥的有效路由</p>
+              <p className="choice-field__empty">
+                {session.role === 'administrator' && effectiveOwnerId !== session.userId
+                  ? '该成员还没有包含可用路由的有效订阅，请先为成员分配套餐。资源池可以同时服务多个成员。'
+                  : session.role === 'member'
+                    ? '当前没有包含可用路由的有效订阅，请联系管理员分配套餐。'
+                    : '当前没有可用的资源池路由，请先启用资源池并添加可用的上游 API Key。'}
+              </p>
             ) : null}
             {effectiveOwnerId && availableRoutes.length > 0 && routes.length === 0 ? (
               <span className="field__error">至少选择一个模型和资源池</span>
@@ -304,36 +296,4 @@ export function KeyForm({
 
 function routeLabel(route: GatewayKeyRoute): string {
   return `${route.modelName} · ${route.resourcePoolName}`
-}
-
-function ConnectionExamples({
-  baseURL,
-  secret,
-  route,
-}: {
-  baseURL: string
-  secret: string
-  route?: GatewayKeyRoute
-}) {
-  const model = route?.modelName ?? 'your-model'
-  const curl = `curl ${baseURL}/chat/completions -H "Authorization: Bearer ${secret}" -H "Content-Type: application/json" -d '{"model":"${model}","messages":[{"role":"user","content":"Hello"}]}'`
-  const python = `from openai import OpenAI\nclient = OpenAI(base_url="${baseURL}", api_key="${secret}")\nprint(client.chat.completions.create(model="${model}", messages=[{"role": "user", "content": "Hello"}]))`
-  const node = `import OpenAI from "openai"\nconst client = new OpenAI({ baseURL: "${baseURL}", apiKey: "${secret}" })\nconsole.log(await client.chat.completions.create({ model: "${model}", messages: [{ role: "user", content: "Hello" }] }))`
-  return (
-    <details className="connection-examples">
-      <summary>调用示例</summary>
-      <h4>cURL</h4>
-      <pre>
-        <code>{curl}</code>
-      </pre>
-      <h4>Python</h4>
-      <pre>
-        <code>{python}</code>
-      </pre>
-      <h4>Node.js</h4>
-      <pre>
-        <code>{node}</code>
-      </pre>
-    </details>
-  )
 }

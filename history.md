@@ -1,10 +1,10 @@
-# LLMGateway 开发历史
+# LLM2API 开发历史
 
 更新时间：2026-07-23
 
 当前代码锚点：`b859af3` 与 2026-07-23 当前工作树
 
-用途：给后续窗口理解 LLMGateway 为什么形成今天的产品边界、事实 owner、恢复规则、控制台结构和验收门槛。它不是 `spec.md`，不是 README，也不是当前任务计划；当前产品事实仍以 `spec.md` 为准，当前实现合同仍以根目录 `plan.md` 为准。
+用途：给后续窗口理解 LLM2API 为什么形成今天的产品边界、事实 owner、恢复规则、控制台结构和验收门槛。它不是 `spec.md`，不是 README，也不是当前任务计划；当前产品事实仍以 `spec.md` 为准，当前实现合同仍以根目录 `plan.md` 为准。
 
 这份历史记录做过什么、删过什么、失败在哪里、哪些机制最后进入主干。历史里出现过的页面、接口或方案不因此恢复为当前能力。
 
@@ -22,17 +22,17 @@
 - 当前仓库 `AGENTS.md`、`spec.md`、`dev.md`、README、`plan.md`
 - 当前仓库 Git 历史：2026-07-19 至 2026-07-22 的 21 个可见提交
 - Codex 全局会话目录：`C:\Users\Administrator\.codex\sessions` 与 `archived_sessions`
-- 精确按 session metadata 的 cwd 核验：67 份 LLMGateway 会话，其中 23 份 VS Code 根会话、44 份派生调查或实现会话
+- 精确按 session metadata 的 cwd 核验：67 份 LLM2API 会话，其中 23 份 VS Code 根会话、44 份派生调查或实现会话
 - `.build/test-logs/`、容量报告和有头 Chromium 验收证据
 
-会话检索说明：全文搜索曾额外命中 2026-04 和 2026-05 的其他项目会话，因为正文后来提到 LLMGateway；这些记录的 session metadata cwd 不属于本仓库，未被写入 LLMGateway 历史。当前可证明的项目演进从 2026-07-19 的 BirdAPI 初始化开始。
+会话检索说明：全文搜索曾额外命中 2026-04 和 2026-05 的其他项目会话，因为正文后来提到 LLM2API；这些记录的 session metadata cwd 不属于本仓库，未被写入 LLM2API 历史。当前可证明的项目演进从 2026-07-19 的 BirdAPI 初始化开始。
 
 ## 快速索引
 
 | 阶段 | 时间 | 主题 | 最后留下的东西 |
 | --- | --- | --- | --- |
 | 00 | 2026-07-19 17:53 | BirdAPI 初始化 | 企业网关问题域、文档和开发约束骨架 |
-| 01 | 2026-07-19 17:55 到 18:15 | 架构收束并改名 | LLMGateway 名称、`spec.md` 当前事实主干 |
+| 01 | 2026-07-19 17:55 到 18:15 | 架构收束并改名 | LLM2API 名称、`spec.md` 当前事实主干 |
 | 02 | 2026-07-19 19:45 到 20:54 | 生产纪律与单文件计划 | `dev.md`、事实 owner、生命周期审查、`plan.md` |
 | 03 | 2026-07-19 23:04 | 生产网关基础一次落地 | Go、PostgreSQL、Valkey、公共协议、Provider、调度、额度、控制 API、React 控制台 |
 | 04 | 2026-07-20 00:25 到 11:27 | 真实浏览器与恢复 | 有头 Chromium、Provider mutation、会话/邀请隔离、幂等恢复 |
@@ -74,16 +74,16 @@ HTTP 转发不是网关事实。
 身份、额度、调度、发送边界和恢复一起成立，才是可运营网关。
 ```
 
-## 阶段 01：架构文档收回事实主干，BirdAPI 改名 LLMGateway
+## 阶段 01：架构文档收回事实主干，BirdAPI 改名 LLM2API
 
 时间：2026-07-19 17:55 到 18:15
 
 关键提交：
 
 - `e7f4f79 docs: consolidate gateway architecture`
-- `39ff631 chore: rename project to LLMGateway`
+- `39ff631 chore: rename project to LLM2API`
 
-初始化后很快发现，独立的架构说明容易与产品事实重复。`docs/architecture.md` 被删除，关键边界并回 `spec.md`；随后仓库、Skill 和文档统一改名为 LLMGateway。
+初始化后很快发现，独立的架构说明容易与产品事实重复。`docs/architecture.md` 被删除，关键边界并回 `spec.md`；随后仓库、Skill 和文档统一改名为 LLM2API。
 
 这次收束确立了一个长期规则：
 
@@ -179,11 +179,11 @@ HTTP 转发不是网关事实。
 相关根会话集中在：
 
 - `继续实现并完成真实验收`
-- `完成 LLMGateway 生产级开发`
+- `完成 LLM2API 生产级开发`
 - `执行真实验收迭代闭环`
 - `继续生产级真实验收开发`
 - `继续真实浏览器闭环开发`
-- `闭合 LLMGateway 核心业务链`
+- `闭合 LLM2API 核心业务链`
 
 这批会话大多因窗口中断而没有单独 final answer，但派生会话、Git 差异和后续提交能证明实际工作。用户要求的主旅程逐渐固定为：
 
@@ -362,7 +362,7 @@ Playground 删除后留下的规则：
 
 时间：2026-07-23
 
-用户要求参考 Kitty 的 `docs/history.md`，在根目录建立 LLMGateway 自己的历史，并要求检索所有 Codex 相关聊天记录。
+用户要求参考 Kitty 的 `docs/history.md`，在根目录建立 LLM2API 自己的历史，并要求检索所有 Codex 相关聊天记录。
 
 本次实际完成的证据工作：
 
@@ -400,7 +400,7 @@ Playground 删除后留下的规则：
 
 时间：2026-07-23
 
-Sub2API 新手指引和表单调研证明了“先划分服务边界、再接上游资源、最后给成员交付密钥”的任务顺序，但它的费率余额、OAuth 账号池、客户端识别、IP 限制、预热 mock 和跨组兜底不属于 LLMGateway。最终只采用与两个业务核心同义的任务组织，没有复制 AGPL 源码或第二套计费、身份、路由和限流 owner。
+Sub2API 新手指引和表单调研证明了“先划分服务边界、再接上游资源、最后给成员交付密钥”的任务顺序，但它的费率余额、OAuth 账号池、客户端识别、IP 限制、预热 mock 和跨组兜底不属于 LLM2API。最终只采用与两个业务核心同义的任务组织，没有复制 AGPL 源码或第二套计费、身份、路由和限流 owner。
 
 原实现把资源域固化为免费与专业枚举，既无法表达团队自定义服务边界，也迫使模型、上游凭据、entitlement、配置 revision 和请求链共同依赖两个固定名称。这不是界面问题，因此直接重建纵向 owner：
 
@@ -467,7 +467,7 @@ Windows 生命周期命令也压平为唯一语义：start 只启动，stop 精�
 
 ## 当前结论
 
-LLMGateway 的演进时间不长，但路线已经经历四次重要收束：
+LLM2API 的演进时间不长，但路线已经经历四次重要收束：
 
 1. 从泛化 API 架构收束为两个业务核心。
 2. 从“大量代码和页面存在”收束为真实管理员/成员主旅程。

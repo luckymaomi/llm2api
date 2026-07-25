@@ -1,6 +1,6 @@
 package providers
 
-import "github.com/luckymaomi/llmgateway/internal/canonical"
+import "github.com/luckymaomi/llm2api/internal/canonical"
 
 func NewZhipu() Adapter {
 	return mustNewAdapter("https://open.bigmodel.cn/api/paas/v4", zhipuPolicy())

@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"unicode/utf8"
 
-	"github.com/luckymaomi/llmgateway/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
 func (a *openAIAdapter) encodeReasoning(reasoning *canonical.ReasoningConfig, request *wireChatRequest) error {

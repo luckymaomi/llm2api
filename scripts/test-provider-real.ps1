@@ -62,12 +62,12 @@ function Invoke-SDKClient {
     [Parameter(Mandatory = $true)][string] $PythonPath
   )
 
-  $env:LLMGATEWAY_SDK_BASE_URL = "$script:BaseURL/v1"
-  $env:LLMGATEWAY_SDK_API_KEY = $script:GatewayKey
-  $env:LLMGATEWAY_SDK_SUCCESS_MODEL = $SuccessModel
-  $env:LLMGATEWAY_SDK_STREAM_MODEL = $StreamModel
-  $env:LLMGATEWAY_SDK_REASONING_MODE = $ReasoningMode
-  $env:LLMGATEWAY_SDK_ERROR_MODEL = $ErrorModel
+  $env:LLM2API_SDK_BASE_URL = "$script:BaseURL/v1"
+  $env:LLM2API_SDK_API_KEY = $script:GatewayKey
+  $env:LLM2API_SDK_SUCCESS_MODEL = $SuccessModel
+  $env:LLM2API_SDK_STREAM_MODEL = $StreamModel
+  $env:LLM2API_SDK_REASONING_MODE = $ReasoningMode
+  $env:LLM2API_SDK_ERROR_MODEL = $ErrorModel
   $previousPreference = $ErrorActionPreference
   try {
     $ErrorActionPreference = "Continue"
@@ -80,10 +80,10 @@ function Invoke-SDKClient {
     }
   } finally {
     $ErrorActionPreference = $previousPreference
-    $env:LLMGATEWAY_SDK_API_KEY = $null
-    $env:LLMGATEWAY_SDK_EXPLICIT_REISSUE = $null
-    $env:LLMGATEWAY_SDK_STREAM_MODEL = $null
-    $env:LLMGATEWAY_SDK_REASONING_MODE = $null
+    $env:LLM2API_SDK_API_KEY = $null
+    $env:LLM2API_SDK_EXPLICIT_REISSUE = $null
+    $env:LLM2API_SDK_STREAM_MODEL = $null
+    $env:LLM2API_SDK_REASONING_MODE = $null
   }
   if (@($output).Count -ne 1) {
     throw "$SDK SDK acceptance failed without a valid redacted summary."
@@ -177,7 +177,7 @@ function Invoke-GatewayJSONWithExplicitReissue {
 }
 
 $root = Split-Path -Parent $PSScriptRoot
-$runID = New-LLMGatewayTestRunID -Purpose "provider"
+$runID = New-LLM2APITestRunID -Purpose "provider"
 $buildDirectory = Join-Path $root ".build\provider-real-$runID"
 $runningOnWindows = $env:OS -eq "Windows_NT"
 $binaryName = if ($runningOnWindows) { "gateway.exe" } else { "gateway" }
@@ -188,7 +188,7 @@ $stdoutPath = Join-Path $buildDirectory "gateway.stdout.log"
 $stderrPath = Join-Path $buildDirectory "gateway.stderr.log"
 $pythonEnvironment = Join-Path $buildDirectory "python"
 $pythonPath = if ($runningOnWindows) { Join-Path $pythonEnvironment "Scripts\python.exe" } else { Join-Path $pythonEnvironment "bin/python" }
-$environmentSnapshot = Save-LLMGatewayEnvironment
+$environmentSnapshot = Save-LLM2APIEnvironment
 $postgres = $null
 $valkey = $null
 $gatewayProcess = $null
@@ -198,7 +198,7 @@ $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 
 Push-Location $root
 try {
-  Clear-LLMGatewayEnvironment
+  Clear-LLM2APIEnvironment
   New-Item -ItemType Directory -Force $buildDirectory | Out-Null
   $zhipuLabelPrefix = [string]::Concat([char]0x667A, [char]0x8C31)
   $keyLines = @(Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root "key.txt") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -276,31 +276,31 @@ try {
     throw "Zhipu canary did not confirm two quota credentials and one healthy credential."
   }
 
-  $postgres = Start-LLMGatewayTestPostgres -RunID $runID -DatabaseName "llmgateway_provider" -Password "provider-postgres-fixture"
+  $postgres = Start-LLM2APITestPostgres -RunID $runID -DatabaseName "llm2api_provider" -Password "provider-postgres-fixture"
   $valkeyPassword = "provider-valkey-fixture"
-  $valkey = Start-LLMGatewayTestValkey -RunID $runID -Password $valkeyPassword
+  $valkey = Start-LLM2APITestValkey -RunID $runID -Password $valkeyPassword
   $gatewayPort = Get-AcceptanceLoopbackPort
   $script:BaseURL = "http://127.0.0.1:$gatewayPort"
 
-  $env:LLMGATEWAY_PROFILE = "test"
-  $env:LLMGATEWAY_HTTP_ADDRESS = "127.0.0.1:$gatewayPort"
-  $env:LLMGATEWAY_HTTP_IDLE_TIMEOUT = "180s"
-  $env:LLMGATEWAY_DATABASE_URL = $postgres.DatabaseURL
-  $env:LLMGATEWAY_DATABASE_MIGRATE_ON_START = "true"
-  $env:LLMGATEWAY_VALKEY_ADDRESS = $valkey.Address
-  $env:LLMGATEWAY_VALKEY_PASSWORD = $valkeyPassword
-  $env:LLMGATEWAY_VALKEY_DATABASE = "0"
-  $env:LLMGATEWAY_MASTER_KEYS = "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-  $env:LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION = "1"
-  $env:LLMGATEWAY_SESSION_PEPPER = "llmgateway-provider-session-pepper-0000"
-  $env:LLMGATEWAY_API_KEY_PEPPER = "llmgateway-provider-api-key-pepper-0000"
-  $env:LLMGATEWAY_COORDINATION_KEY_HASH_SECRET = "llmgateway-provider-coordination-pepper"
-  $env:LLMGATEWAY_COOKIE_SECURE = "false"
-  $env:LLMGATEWAY_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15,fdfe:dcba:9876::/48"
-  $env:LLMGATEWAY_PROVIDER_PROBE_TIMEOUT = "120s"
-  $env:LLMGATEWAY_REQUEST_MAX_QUEUE_WAIT = "150s"
-  $env:LLMGATEWAY_REQUEST_RETRY_MAX_ELAPSED = "120s"
-  $env:LLMGATEWAY_LOG_LEVEL = "info"
+  $env:LLM2API_PROFILE = "test"
+  $env:LLM2API_HTTP_ADDRESS = "127.0.0.1:$gatewayPort"
+  $env:LLM2API_HTTP_IDLE_TIMEOUT = "180s"
+  $env:LLM2API_DATABASE_URL = $postgres.DatabaseURL
+  $env:LLM2API_DATABASE_MIGRATE_ON_START = "true"
+  $env:LLM2API_VALKEY_ADDRESS = $valkey.Address
+  $env:LLM2API_VALKEY_PASSWORD = $valkeyPassword
+  $env:LLM2API_VALKEY_DATABASE = "0"
+  $env:LLM2API_MASTER_KEYS = "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  $env:LLM2API_ACTIVE_MASTER_KEY_VERSION = "1"
+  $env:LLM2API_SESSION_PEPPER = "llm2api-provider-session-pepper-0000"
+  $env:LLM2API_API_KEY_PEPPER = "llm2api-provider-api-key-pepper-0000"
+  $env:LLM2API_COORDINATION_KEY_HASH_SECRET = "llm2api-provider-coordination-pepper"
+  $env:LLM2API_COOKIE_SECURE = "false"
+  $env:LLM2API_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15,fdfe:dcba:9876::/48"
+  $env:LLM2API_PROVIDER_PROBE_TIMEOUT = "120s"
+  $env:LLM2API_REQUEST_MAX_QUEUE_WAIT = "150s"
+  $env:LLM2API_REQUEST_RETRY_MAX_ELAPSED = "120s"
+  $env:LLM2API_LOG_LEVEL = "info"
 
   & pnpm.cmd --dir web run build
   if ($LASTEXITCODE -ne 0) { throw "Could not build the production frontend for real Provider acceptance." }
@@ -405,7 +405,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Could not install the pinned Python SDK." }
   Push-Location (Join-Path $root "scripts\acceptance\openai-python")
   try {
-    $env:LLMGATEWAY_SDK_EXPLICIT_REISSUE = "true"
+    $env:LLM2API_SDK_EXPLICIT_REISSUE = "true"
     $pythonSummary = Invoke-SDKClient -SDK python -SuccessModel $siliconModel.public_name -StreamModel $agnesModel.public_name `
       -ReasoningMode "toggle" -ErrorModel $zhipuModel.public_name -PythonPath $pythonPath
   } finally {
@@ -497,8 +497,8 @@ try {
     throw "The remaining healthy Zhipu credential did not take over with authoritative usage."
   }
 
-  $docker = Get-LLMGatewayDockerCommand
-  $zhipuFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_provider -Atc `
+  $docker = Get-LLM2APIDockerCommand
+  $zhipuFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_provider -Atc `
     "SELECT string_agg(credential.name || ':' || credential.status::text || ':' || coalesce(credential.last_error_kind, 'ok'), ',' ORDER BY credential.name) FROM provider_credentials credential JOIN resource_pools pool ON pool.id = credential.resource_pool_id WHERE pool.provider_id = '$($zhipu.id)'"
   if ($LASTEXITCODE -ne 0 -or $zhipuFacts -ne "Zhipu quota 1:cooling:quota,Zhipu quota 3:cooling:quota,Zhipu success:active:ok") {
     throw "Real Zhipu quota exclusion and healthy credential takeover did not persist."
@@ -526,12 +526,12 @@ try {
   $zhipuSuccessKeys = $null
   try { Stop-AcceptanceProcess -Process $gatewayProcess -ExpectedBinaryPath $binaryPath } catch { $cleanupFailures.Add($_.Exception.Message) }
   if ($null -ne $valkey) {
-    try { Stop-LLMGatewayTestContainer -Container $valkey.Container -RunID $runID } catch { $cleanupFailures.Add($_.Exception.Message) }
+    try { Stop-LLM2APITestContainer -Container $valkey.Container -RunID $runID } catch { $cleanupFailures.Add($_.Exception.Message) }
   }
   if ($null -ne $postgres) {
-    try { Stop-LLMGatewayTestContainer -Container $postgres.Container -RunID $runID } catch { $cleanupFailures.Add($_.Exception.Message) }
+    try { Stop-LLM2APITestContainer -Container $postgres.Container -RunID $runID } catch { $cleanupFailures.Add($_.Exception.Message) }
   }
-  Restore-LLMGatewayEnvironment -Snapshot $environmentSnapshot
+  Restore-LLM2APIEnvironment -Snapshot $environmentSnapshot
   Pop-Location
   if ($acceptancePassed -and $cleanupFailures.Count -eq 0) {
     try { Remove-AcceptanceBuildDirectory -RepositoryRoot $root -BuildDirectory $buildDirectory -ExpectedPrefix "provider-real-" } catch { $cleanupFailures.Add($_.Exception.Message) }

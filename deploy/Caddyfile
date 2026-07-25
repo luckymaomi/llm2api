@@ -1,9 +1,9 @@
 {
 	admin off
-	email {$LLMGATEWAY_ACME_EMAIL}
+	email {$LLM2API_ACME_EMAIL}
 }
 
-{$LLMGATEWAY_SITE_ADDRESS} {
+{$LLM2API_SITE_ADDRESS} {
 	encode zstd gzip
 	@metrics path /metrics
 	respond @metrics 404

@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/luckymaomi/llmgateway/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
 var toolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)

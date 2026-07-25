@@ -187,18 +187,18 @@ func waitForRateGrant(t *testing.T, coordinator *Coordinator, limit BucketLimit,
 
 func integrationCoordinator(t *testing.T) (*Coordinator, *redis.Client, string) {
 	t.Helper()
-	address := environmentOr("LLMGATEWAY_TEST_VALKEY_ADDRESS", "127.0.0.1:16380")
-	password := environmentOr("LLMGATEWAY_TEST_VALKEY_PASSWORD", "llmgateway_dev")
-	database, err := strconv.Atoi(environmentOr("LLMGATEWAY_TEST_VALKEY_DATABASE", "0"))
+	address := environmentOr("LLM2API_TEST_VALKEY_ADDRESS", "127.0.0.1:16380")
+	password := environmentOr("LLM2API_TEST_VALKEY_PASSWORD", "llm2api_dev")
+	database, err := strconv.Atoi(environmentOr("LLM2API_TEST_VALKEY_DATABASE", "0"))
 	if err != nil {
-		t.Fatalf("invalid LLMGATEWAY_TEST_VALKEY_DATABASE: %v", err)
+		t.Fatalf("invalid LLM2API_TEST_VALKEY_DATABASE: %v", err)
 	}
 	client := redis.NewClient(&redis.Options{Addr: address, Password: password, DB: database, DialTimeout: 500 * time.Millisecond})
 	pingContext, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := client.Ping(pingContext).Err(); err != nil {
 		_ = client.Close()
-		if os.Getenv("LLMGATEWAY_TEST_VALKEY_REQUIRED") == "true" {
+		if os.Getenv("LLM2API_TEST_VALKEY_REQUIRED") == "true" {
 			t.Fatalf("Valkey integration dependency is required: %v", err)
 		}
 		t.Skipf("Valkey integration dependency is unavailable: %v", err)
@@ -207,7 +207,7 @@ func integrationCoordinator(t *testing.T) (*Coordinator, *redis.Client, string) 
 	if err != nil {
 		t.Fatalf("NewLeaseID() error = %v", err)
 	}
-	prefix := "llmgateway-it-" + id
+	prefix := "llm2api-it-" + id
 	secret := sha256.Sum256([]byte("coordination-integration:" + prefix))
 	coordinator, err := New(client, Options{Prefix: prefix, KeyHashSecret: secret[:]})
 	if err != nil {

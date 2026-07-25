@@ -98,14 +98,14 @@ function Invoke-ReleaseBuild {
 
   New-Item -ItemType Directory -Force -Path $Directory | Out-Null
   $suffix = if ($OS -eq "windows") { ".exe" } else { "" }
-  $ldflags = "-s -w -X github.com/luckymaomi/llmgateway/internal/buildinfo.version=$Version -X github.com/luckymaomi/llmgateway/internal/buildinfo.revision=$Revision -X github.com/luckymaomi/llmgateway/internal/buildinfo.builtAt=$BuiltAt"
+  $ldflags = "-s -w -X github.com/luckymaomi/llm2api/internal/buildinfo.version=$Version -X github.com/luckymaomi/llm2api/internal/buildinfo.revision=$Revision -X github.com/luckymaomi/llm2api/internal/buildinfo.builtAt=$BuiltAt"
   $env:GOOS = $OS
   $env:GOARCH = $Arch
   $env:CGO_ENABLED = "0"
   foreach ($binary in @(
-    @{ Name = "llmgateway"; Package = "./cmd/gateway"; Tags = "webembed" },
-    @{ Name = "llmgateway-dbtool"; Package = "./cmd/dbtool"; Tags = "" },
-    @{ Name = "llmgateway-healthcheck"; Package = "./cmd/healthcheck"; Tags = "" }
+    @{ Name = "llm2api"; Package = "./cmd/gateway"; Tags = "webembed" },
+    @{ Name = "llm2api-dbtool"; Package = "./cmd/dbtool"; Tags = "" },
+    @{ Name = "llm2api-healthcheck"; Package = "./cmd/healthcheck"; Tags = "" }
   )) {
     $arguments = @("build", "-buildvcs=false", "-trimpath", "-ldflags", $ldflags)
     if ($binary.Tags) { $arguments += @("-tags", $binary.Tags) }
@@ -167,11 +167,11 @@ if (-not $BuiltAt) { $BuiltAt = [DateTimeOffset]::UtcNow.ToString("yyyy-MM-dd'T'
 $BuiltAt = Get-CanonicalBuiltAt -Value $BuiltAt
 
 $expectedTag = "v$Version"
-$workflowIdentity = "https://github.com/luckymaomi/llmgateway/.github/workflows/verify.yml@refs/tags/$expectedTag"
+$workflowIdentity = "https://github.com/luckymaomi/llm2api/.github/workflows/verify.yml@refs/tags/$expectedTag"
 if ($SigningMode -eq "Keyless") {
-  $expectedWorkflowRef = "luckymaomi/llmgateway/.github/workflows/verify.yml@refs/tags/$expectedTag"
+  $expectedWorkflowRef = "luckymaomi/llm2api/.github/workflows/verify.yml@refs/tags/$expectedTag"
   if ($env:GITHUB_ACTIONS -cne "true" -or
-      $env:GITHUB_REPOSITORY -cne "luckymaomi/llmgateway" -or
+      $env:GITHUB_REPOSITORY -cne "luckymaomi/llm2api" -or
       $env:GITHUB_REF_TYPE -cne "tag" -or
       $env:GITHUB_REF_NAME -cne $expectedTag -or
       $env:GITHUB_REF -cne "refs/tags/$expectedTag" -or
@@ -189,11 +189,11 @@ if (-not $OutputDirectory.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorC
 if (Test-Path -LiteralPath $OutputDirectory) { throw "Release output already exists: $OutputDirectory" }
 
 $workDirectory = Join-Path $buildRoot "release-work-$([guid]::NewGuid().ToString('N'))"
-$docker = Get-LLMGatewayDockerCommand
+$docker = Get-LLM2APIDockerCommand
 $pnpmCommand = if ($env:OS -eq "Windows_NT") { "pnpm.cmd" } else { "pnpm" }
-$image = "llmgateway:release-$($Version.ToLowerInvariant())"
+$image = "llm2api:release-$($Version.ToLowerInvariant())"
 $imageBuilt = $false
-$containerName = "llmgateway-release-verify-$([guid]::NewGuid().ToString('N').Substring(0, 12))"
+$containerName = "llm2api-release-verify-$([guid]::NewGuid().ToString('N').Substring(0, 12))"
 $containerCreated = $false
 $goEnvironment = @{}
 foreach ($name in @("GOOS", "GOARCH", "CGO_ENABLED")) {
@@ -265,7 +265,7 @@ try {
     $first = Join-Path $workDirectory "$platformName-first"
     $second = Join-Path $workDirectory "$platformName-second"
     $suffix = if ($platform.OS -eq "windows") { ".exe" } else { "" }
-    $binaryNames = @("llmgateway$suffix", "llmgateway-dbtool$suffix", "llmgateway-healthcheck$suffix")
+    $binaryNames = @("llm2api$suffix", "llm2api-dbtool$suffix", "llm2api-healthcheck$suffix")
     Invoke-ReleaseBuild -OS $platform.OS -Arch $platform.Arch -Directory $first
     Invoke-ReleaseBuild -OS $platform.OS -Arch $platform.Arch -Directory $second
     Assert-ExpectedBinarySet -Directory $first -Names $binaryNames -Label "$platformName first build"
@@ -279,7 +279,7 @@ try {
       $binaryEvidence += [ordered]@{ name = "$platformName/$binaryName"; sha256 = $firstHash }
     }
 
-    $packageDirectory = Join-Path $workDirectory "llmgateway-$Version-$platformName"
+    $packageDirectory = Join-Path $workDirectory "llm2api-$Version-$platformName"
     New-Item -ItemType Directory -Force -Path $packageDirectory | Out-Null
     foreach ($document in $releaseDocuments) {
       Copy-Item -LiteralPath (Join-Path $root $document) -Destination $packageDirectory
@@ -305,7 +305,7 @@ try {
     }
 
     $archiveEntries = @($releaseDocuments + $deployPaths + $binaryNames | Sort-Object)
-    $archiveName = "llmgateway-$Version-$platformName.zip"
+    $archiveName = "llm2api-$Version-$platformName.zip"
     $archive = Join-Path $OutputDirectory $archiveName
     $archiveArguments = @(
       "-source", $packageDirectory,
@@ -329,7 +329,7 @@ try {
   $hostOS = if ($env:OS -eq "Windows_NT") { "windows" } else { "linux" }
   $hostSuffix = if ($hostOS -eq "windows") { ".exe" } else { "" }
   $hostBuildDirectory = Join-Path $workDirectory "$hostOS-amd64-first"
-  foreach ($binaryName in @("llmgateway", "llmgateway-dbtool", "llmgateway-healthcheck")) {
+  foreach ($binaryName in @("llm2api", "llm2api-dbtool", "llm2api-healthcheck")) {
     $binaryPath = Join-Path $hostBuildDirectory ($binaryName + $hostSuffix)
     $versionInfo = & $binaryPath --version | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0 -or
@@ -345,7 +345,7 @@ try {
   & $docker build --build-arg "RELEASE_VERSION=$Version" --build-arg "RELEASE_REVISION=$Revision" --build-arg "RELEASE_BUILT_AT=$BuiltAt" --tag $image .
   if ($LASTEXITCODE -ne 0) { throw "Could not build the release image." }
   $imageBuilt = $true
-  $imageIdentity = & $docker run --rm --entrypoint /llmgateway $image --version | ConvertFrom-Json
+  $imageIdentity = & $docker run --rm --entrypoint /llm2api $image --version | ConvertFrom-Json
   if ($LASTEXITCODE -ne 0 -or
       $imageIdentity.version -cne $Version -or
       $imageIdentity.revision -cne $Revision -or
@@ -361,7 +361,7 @@ try {
   $containerDirectory = Join-Path $workDirectory "container-binaries"
   New-Item -ItemType Directory -Force -Path $containerDirectory | Out-Null
   $linuxBuildDirectory = Join-Path $workDirectory "linux-amd64-first"
-  foreach ($binaryName in @("llmgateway", "llmgateway-dbtool", "llmgateway-healthcheck")) {
+  foreach ($binaryName in @("llm2api", "llm2api-dbtool", "llm2api-healthcheck")) {
     $containerPath = Join-Path $containerDirectory $binaryName
     & $docker cp "${containerName}:/$binaryName" $containerPath
     if ($LASTEXITCODE -ne 0) { throw "Could not extract $binaryName from the release image." }
@@ -373,7 +373,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Could not remove the binary comparison container." }
   $containerCreated = $false
 
-  $imageTarName = "llmgateway-$Version-linux-amd64.oci.tar"
+  $imageTarName = "llm2api-$Version-linux-amd64.oci.tar"
   $imageTar = Join-Path $OutputDirectory $imageTarName
   & $docker save --output $imageTar $image
   if ($LASTEXITCODE -ne 0) { throw "Could not export the release image." }
@@ -387,9 +387,9 @@ try {
   if ($LASTEXITCODE -ne 0 -or -not (@($nodeLicenseReport) -join "`n").Trim()) { throw "Could not generate the Node production license report." }
   [IO.File]::WriteAllText((Join-Path $OutputDirectory "node-licenses.json"), (@($nodeLicenseReport) -join "`n"), [Text.UTF8Encoding]::new($false))
 
-  $spdxName = "llmgateway-$Version-image.spdx.json"
-  $cycloneDXName = "llmgateway-$Version-artifacts.cdx.json"
-  $syft = Install-LLMGatewayReleaseTool -Name syft
+  $spdxName = "llm2api-$Version-image.spdx.json"
+  $cycloneDXName = "llm2api-$Version-artifacts.cdx.json"
+  $syft = Install-LLM2APIReleaseTool -Name syft
   & $syft scan $image -o "spdx-json=$(Join-Path $OutputDirectory $spdxName)"
   if ($LASTEXITCODE -ne 0) { throw "Could not generate the image SBOM." }
   & $syft scan "dir:$OutputDirectory" -o "cyclonedx-json=$(Join-Path $OutputDirectory $cycloneDXName)"
@@ -403,18 +403,18 @@ try {
   $resolvedDependencies = @()
   if ($Revision -ne "working-tree") {
     $resolvedDependencies = @([ordered]@{
-      uri = "git+https://github.com/luckymaomi/llmgateway@$Revision"
+      uri = "git+https://github.com/luckymaomi/llm2api@$Revision"
       digest = @{ gitCommit = $Revision }
     })
   }
-  $builderID = if ($SigningMode -eq "Keyless") { $workflowIdentity } else { "https://github.com/luckymaomi/llmgateway/local-release-acceptance" }
+  $builderID = if ($SigningMode -eq "Keyless") { $workflowIdentity } else { "https://github.com/luckymaomi/llm2api/local-release-acceptance" }
   $provenance = [ordered]@{
     _type = "https://in-toto.io/Statement/v1"
     subject = $provenanceSubjects
     predicateType = "https://slsa.dev/provenance/v1"
     predicate = [ordered]@{
       buildDefinition = [ordered]@{
-        buildType = "https://github.com/luckymaomi/llmgateway/release-build"
+        buildType = "https://github.com/luckymaomi/llm2api/release-build"
         externalParameters = [ordered]@{
           version = $Version
           revision = $Revision
@@ -440,7 +440,7 @@ try {
   [IO.File]::WriteAllText((Join-Path $OutputDirectory $provenanceName), ($provenance | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
 
   $manifest = [ordered]@{
-    format = "llmgateway-release-manifest"
+    format = "llm2api-release-manifest"
     version = $Version
     revision = $Revision
     builtAt = $BuiltAt
@@ -457,8 +457,8 @@ try {
   [IO.File]::WriteAllText((Join-Path $OutputDirectory $manifestName), ($manifest | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
 
   $payloadNames = @(
-    "llmgateway-$Version-windows-amd64.zip",
-    "llmgateway-$Version-linux-amd64.zip",
+    "llm2api-$Version-windows-amd64.zip",
+    "llm2api-$Version-linux-amd64.zip",
     $imageTarName,
     "go-licenses.csv",
     "node-licenses.json",
@@ -483,12 +483,12 @@ try {
   })
   [IO.File]::WriteAllLines($checksumPath, $checksumLines, [Text.UTF8Encoding]::new($false))
 
-  $cosign = Install-LLMGatewayReleaseTool -Name cosign
+  $cosign = Install-LLM2APIReleaseTool -Name cosign
   $bundlePath = Join-Path $OutputDirectory "SHA256SUMS.sigstore.json"
   if ($SigningMode -eq "Test") {
     $keyPrefix = Join-Path $workDirectory "release-test"
     $previousPassword = $env:COSIGN_PASSWORD
-    $env:COSIGN_PASSWORD = "llmgateway-release-acceptance"
+    $env:COSIGN_PASSWORD = "llm2api-release-acceptance"
     try {
       & $cosign generate-key-pair --output-key-prefix $keyPrefix
       if ($LASTEXITCODE -ne 0) { throw "Could not generate the ephemeral release acceptance key." }
@@ -519,11 +519,11 @@ try {
       [Environment]::SetEnvironmentVariable($name, $null, "Process")
     }
   }
-  if ($containerCreated -and $containerName -match '^llmgateway-release-verify-[0-9a-f]{12}$') {
+  if ($containerCreated -and $containerName -match '^llm2api-release-verify-[0-9a-f]{12}$') {
     & $docker rm --force $containerName 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0 -and $null -eq $failure) { $failure = [Exception]::new("Could not clean up the release comparison container.") }
   }
-  if ($imageBuilt -and $image -match '^llmgateway:release-[0-9a-z.-]+$') {
+  if ($imageBuilt -and $image -match '^llm2api:release-[0-9a-z.-]+$') {
     & $docker image rm $image 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0 -and $null -eq $failure) { $failure = [Exception]::new("Could not clean up the release image.") }
   }

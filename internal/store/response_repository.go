@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/luckymaomi/llmgateway/internal/responses"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/responses"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
 )
 
 type ResponseRepository struct {

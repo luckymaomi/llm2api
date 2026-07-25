@@ -1,10 +1,10 @@
 param([switch] $RemoveEventSource)
 
 $ErrorActionPreference = "Stop"
-$serviceName = "LLMGateway"
+$serviceName = "LLM2API"
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-  throw "Uninstalling the LLMGateway Windows service requires an elevated PowerShell session."
+  throw "Uninstalling the LLM2API Windows service requires an elevated PowerShell session."
 }
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($service) {
@@ -18,4 +18,4 @@ if ($service) {
 if ($RemoveEventSource -and [Diagnostics.EventLog]::SourceExists($serviceName)) {
   Remove-EventLog -Source $serviceName
 }
-Write-Host "LLMGateway Windows service removed; database, secret files, and logs were preserved."
+Write-Host "LLM2API Windows service removed; database, secret files, and logs were preserved."

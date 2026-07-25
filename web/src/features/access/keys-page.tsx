@@ -47,6 +47,7 @@ export function KeysPage() {
       {
         accessorKey: 'name',
         header: 'API 密钥',
+        meta: { align: 'center' },
         cell: ({ row }) => (
           <div>
             <strong>{row.original.name}</strong>
@@ -58,14 +59,26 @@ export function KeysPage() {
       },
       ...(session.role === 'member'
         ? []
-        : [{ accessorKey: 'ownerName', header: '所属成员' } as ColumnDef<GatewayKey, unknown>]),
+        : [
+            {
+              accessorKey: 'ownerName',
+              header: '所属成员',
+              meta: { align: 'center' },
+            } as ColumnDef<GatewayKey, unknown>,
+          ]),
       {
         id: 'routes',
         header: '模型授权',
-        cell: ({ row }) =>
-          row.original.routes
-            .map((route) => `${route.modelName} · ${route.resourcePoolName}`)
-            .join('、'),
+        meta: { align: 'center' },
+        cell: ({ row }) => (
+          <div className="route-chip-list">
+            {row.original.routes.map((route) => (
+              <code key={`${route.modelId}-${route.resourcePoolId}`}>
+                {route.modelName} · {route.resourcePoolName}
+              </code>
+            ))}
+          </div>
+        ),
       },
       {
         accessorKey: 'status',
@@ -77,11 +90,13 @@ export function KeysPage() {
         accessorKey: 'expiresAt',
         header: '到期',
         cell: ({ row }) => formatDateTime(row.original.expiresAt),
+        meta: { align: 'center' },
       },
       {
         accessorKey: 'lastUsedAt',
         header: '最近使用',
         cell: ({ row }) => formatDateTime(row.original.lastUsedAt),
+        meta: { align: 'center' },
       },
       {
         id: 'actions',

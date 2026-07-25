@@ -41,7 +41,7 @@ $evidenceDirectory = Join-Path $root ".build\acceptance-evidence"
 $reportPath = Join-Path $evidenceDirectory "supply-chain-report.json"
 $builtImage = $false
 $failure = $null
-$docker = Get-LLMGatewayDockerCommand
+$docker = Get-LLM2APIDockerCommand
 $pnpmCommand = if ($env:OS -eq "Windows_NT") { "pnpm.cmd" } else { "pnpm" }
 $report = [ordered]@{
   govulncheck = $false
@@ -237,7 +237,7 @@ try {
     $stagedSourceFileCount++
   }
   if ($stagedSourceFileCount -eq 0) { throw "The current non-ignored source tree contains no regular files." }
-  $gitleaks = Install-LLMGatewayReleaseTool -Name gitleaks
+  $gitleaks = Install-LLM2APIReleaseTool -Name gitleaks
   $acceptedHistoricalFindings = @(Invoke-GitleaksScan -Mode git -Target $root -ReportPath (Join-Path $evidenceDirectory "gitleaks-history-report.json") -FindingMessage "Gitleaks found a secret in Git history." -AllowedFindings $historicalFixtureExceptions)
   $report.gitHistorySecrets = $true
   $report.historicalFixtureFindings = $acceptedHistoricalFindings
@@ -255,13 +255,13 @@ try {
     $report.image = "skipped-by-platform"
   } else {
     if (-not $Image) {
-      $Image = "llmgateway:supply-chain-$($runID.Substring($runID.Length - 12))"
+      $Image = "llm2api:supply-chain-$($runID.Substring($runID.Length - 12))"
       & $docker build --build-arg RELEASE_VERSION=0.1.0-supply-chain --build-arg RELEASE_REVISION=working-tree --build-arg RELEASE_BUILT_AT=2026-07-22T00:00:00Z --tag $Image .
       if ($LASTEXITCODE -ne 0) { throw "Could not build the image for supply-chain scanning." }
       $builtImage = $true
     }
     $report.image = $Image
-    $trivy = Install-LLMGatewayReleaseTool -Name trivy
+    $trivy = Install-LLM2APIReleaseTool -Name trivy
     & $trivy image --quiet --exit-code 1 --severity HIGH,CRITICAL --scanners vuln,secret $Image *> $null
     if ($LASTEXITCODE -ne 0) { throw "Trivy found a high or critical image vulnerability or an embedded secret." }
     $report.imageVulnerabilities = $true
@@ -277,7 +277,7 @@ try {
 } catch {
   $failure = $_
 } finally {
-  if ($builtImage -and $Image -match '^llmgateway:supply-chain-[a-z0-9]+$') {
+  if ($builtImage -and $Image -match '^llm2api:supply-chain-[a-z0-9]+$') {
     $previousErrorPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
@@ -286,7 +286,7 @@ try {
     } finally {
       $ErrorActionPreference = $previousErrorPreference
     }
-    if ($inspectionExitCode -eq 0 -and $inspection.Count -eq 1 -and $inspection[0].Config.Labels.'org.opencontainers.image.title' -eq "LLMGateway") {
+    if ($inspectionExitCode -eq 0 -and $inspection.Count -eq 1 -and $inspection[0].Config.Labels.'org.opencontainers.image.title' -eq "LLM2API") {
       & $docker image rm $Image | Out-Null
     }
   }

@@ -32,3 +32,6 @@ ref/repos/
 # One-time project inception source
 /skill.md
 skills/
+!/.agents/skills/
+!/.agents/skills/llm2api-dev/
+!/.agents/skills/llm2api-dev/SKILL.md

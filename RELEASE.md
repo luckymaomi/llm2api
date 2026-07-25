@@ -1,4 +1,4 @@
-# LLMGateway 0.1.0 发布候选说明
+# LLM2API 0.1.0 发布候选说明
 
 `RELEASE.md` 随发布包交付，只回答“这个版本包含什么、验证到哪里、还缺什么”。产品与系统事实以 [spec.md](spec.md) 为准，开发验收边界以 [dev.md](dev.md) 为准，正式操作以 [deploy/README.md](deploy/README.md) 为准。
 

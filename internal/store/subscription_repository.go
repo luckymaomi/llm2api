@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
-	"github.com/luckymaomi/llmgateway/internal/subscription"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/subscription"
 )
 
 func (r *SubscriptionRepository) CreateSubscription(ctx context.Context, input subscription.NewSubscription, actorID uuid.UUID, mutation subscription.Mutation) (subscription.Subscription, error) {

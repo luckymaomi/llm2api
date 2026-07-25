@@ -64,5 +64,5 @@ func (g *LoginGuard) Reset(ctx context.Context, account string) error {
 
 func loginKey(kind, value string) string {
 	digest := sha256.Sum256([]byte(value))
-	return "llmgateway:login:{" + kind + "}:" + hex.EncodeToString(digest[:])
+	return "llm2api:login:{" + kind + "}:" + hex.EncodeToString(digest[:])
 }

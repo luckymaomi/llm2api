@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/luckymaomi/llmgateway/internal/siteprofile"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/siteprofile"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
 )
 
 type SiteProfileRepository struct {

@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/luckymaomi/llmgateway/internal/app"
-	"github.com/luckymaomi/llmgateway/internal/buildinfo"
-	"github.com/luckymaomi/llmgateway/internal/config"
-	"github.com/luckymaomi/llmgateway/internal/security"
+	"github.com/luckymaomi/llm2api/internal/app"
+	"github.com/luckymaomi/llm2api/internal/buildinfo"
+	"github.com/luckymaomi/llm2api/internal/config"
+	"github.com/luckymaomi/llm2api/internal/security"
 )
 
 func main() {

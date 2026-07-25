@@ -702,7 +702,7 @@ input[role='switch'] {
 
 .data-table-desktop table {
   width: 100%;
-  min-width: 820px;
+  min-width: 980px;
   border-collapse: collapse;
 }
 

@@ -53,6 +53,7 @@ export function SubscriptionsPage() {
             {
               accessorKey: 'memberName',
               header: '成员',
+              meta: { align: 'center' },
               cell: ({ row }) => (
                 <div>
                   <strong>{row.original.memberName}</strong>
@@ -65,6 +66,7 @@ export function SubscriptionsPage() {
       {
         accessorKey: 'servicePlanName',
         header: '套餐',
+        meta: { align: 'center' },
         cell: ({ row }) => (
           <div>
             <strong>{row.original.servicePlanName}</strong>
@@ -76,11 +78,13 @@ export function SubscriptionsPage() {
         accessorKey: 'startsAt',
         header: '开始',
         cell: ({ row }) => formatDateTime(row.original.startsAt),
+        meta: { align: 'center' },
       },
       {
         accessorKey: 'expiresAt',
         header: '到期',
         cell: ({ row }) => formatDateTime(row.original.expiresAt),
+        meta: { align: 'center' },
       },
       {
         accessorKey: 'status',

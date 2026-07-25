@@ -22,7 +22,7 @@ function Invoke-Step {
   }
 }
 
-$environmentSnapshot = Save-LLMGatewayEnvironment
+$environmentSnapshot = Save-LLM2APIEnvironment
 $goEnvironmentSnapshot = @{}
 foreach ($name in @("GOOS", "GOARCH", "CGO_ENABLED")) {
   $item = Get-Item "Env:$name" -ErrorAction SilentlyContinue
@@ -35,7 +35,7 @@ foreach ($name in @("GOOS", "GOARCH", "CGO_ENABLED")) {
 $verificationFailure = $null
 Push-Location (Join-Path $PSScriptRoot "..")
 try {
-  Clear-LLMGatewayEnvironment
+  Clear-LLM2APIEnvironment
   Invoke-Step "Environment" {
     if ($SkipIntegration -and $SkipBrowser) {
       & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-environment.ps1 -SkipServices -SkipDockerDaemon
@@ -96,7 +96,7 @@ try {
         $env:GOOS = $target.OS
         $env:GOARCH = $target.Arch
         $env:CGO_ENABLED = "0"
-        $output = ".\.build\llmgateway-$($target.OS)-$($target.Arch)$($target.Suffix)"
+        $output = ".\.build\llm2api-$($target.OS)-$($target.Arch)$($target.Suffix)"
         go build -tags webembed -trimpath -o $output .\cmd\gateway
         if ($LASTEXITCODE -ne 0) { throw "Go build failed for $($target.OS)/$($target.Arch) with exit code $LASTEXITCODE." }
       }
@@ -122,9 +122,9 @@ try {
     }
   }
   try {
-    Restore-LLMGatewayEnvironment -Snapshot $environmentSnapshot
+    Restore-LLM2APIEnvironment -Snapshot $environmentSnapshot
   } catch {
-    $cleanupFailures += "LLMGATEWAY environment restore: $($_.Exception.Message)"
+    $cleanupFailures += "LLM2API environment restore: $($_.Exception.Message)"
   }
   try {
     Pop-Location
@@ -142,4 +142,4 @@ try {
   }
 }
 
-Write-Host "`nLLMGateway verification passed."
+Write-Host "`nLLM2API verification passed."

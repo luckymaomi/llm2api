@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	serviceName := flag.String("name", "LLMGateway", "Windows service name")
+	serviceName := flag.String("name", "LLM2API", "Windows service name")
 	flag.Parse()
 	if err := verify(*serviceName); err != nil {
 		fmt.Fprintln(os.Stderr, err)

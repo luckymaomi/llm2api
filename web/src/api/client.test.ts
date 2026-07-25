@@ -22,7 +22,7 @@ describe('same-origin control API', () => {
     const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
     server.use(
       http.post(
-        'http://llmgateway.test/api/control/api-key-test/runs',
+        'http://llm2api.test/api/control/api-key-test/runs',
         () => new HttpResponse(body, { headers: { 'Content-Type': 'text/event-stream' } }),
       ),
     )

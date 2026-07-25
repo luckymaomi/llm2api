@@ -78,7 +78,7 @@ function createTour() {
     overlayOpacity: 0.72,
     stagePadding: 7,
     stageRadius: 7,
-    popoverClass: 'llmgateway-tour',
+    popoverClass: 'llm2api-tour',
     popoverOffset: 12,
     showProgress: false,
     disableActiveInteraction: true,

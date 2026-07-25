@@ -5,7 +5,7 @@ import { gatewayKeyTestApi, type GatewayKey } from '@/api'
 import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DialogFrame } from '@/components/ui/dialog'
-import { Field, NativeSelect, Textarea } from '@/components/ui/field'
+import { Field, Input, NativeSelect } from '@/components/ui/field'
 import { ErrorState } from '@/components/ui/state'
 import { formatNumber } from '@/lib/format'
 
@@ -86,15 +86,16 @@ export function GatewayKeyTestDialog({
             </NativeSelect>
           </Field>
           <Field label="测试消息" htmlFor="gateway-key-test-message">
-            <Textarea
+            <Input
               id="gateway-key-test-message"
-              rows={3}
               value={message}
               disabled={running}
               onChange={(event) => setMessage(event.target.value)}
             />
           </Field>
-          <span>请求会记录到这把 API 密钥所属账号的使用记录。</span>
+          <p className="field--full gateway-key-test-note">
+            请求会记录到这把 API 密钥所属账号的使用记录。
+          </p>
           {test.facts.phase !== 'idle' ? <GatewayKeyTestResult facts={test.facts} /> : null}
         </div>
       )}

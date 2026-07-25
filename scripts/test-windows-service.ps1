@@ -2,12 +2,12 @@ $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\isolated-services.ps1"
 
 $root = Split-Path -Parent $PSScriptRoot
-$runID = New-LLMGatewayTestRunID -Purpose "winservice"
+$runID = New-LLM2APITestRunID -Purpose "winservice"
 $buildDirectory = Join-Path $root ".build\$runID"
-$databaseName = "llmgateway_winservice_$($runID.Replace('-', '_'))"
+$databaseName = "llm2api_winservice_$($runID.Replace('-', '_'))"
 $databasePassword = "winservice-$runID-database-password"
 $valkeyPassword = "winservice-$runID-valkey-password"
-$environmentSnapshot = Save-LLMGatewayEnvironment
+$environmentSnapshot = Save-LLM2APIEnvironment
 $postgres = $null
 $valkey = $null
 $serviceInstalled = $false
@@ -23,11 +23,11 @@ function Write-ServiceSecret {
 Push-Location $root
 try {
   New-Item -ItemType Directory -Force -Path $buildDirectory | Out-Null
-  Clear-LLMGatewayEnvironment
-  $postgres = Start-LLMGatewayTestPostgres -RunID $runID -DatabaseName $databaseName -Password $databasePassword
-  $valkey = Start-LLMGatewayTestValkey -RunID $runID -Password $valkeyPassword
-  $gatewayPort = Get-LLMGatewayFreeLoopbackPort
-  $binaryPath = Join-Path $buildDirectory "llmgateway.exe"
+  Clear-LLM2APIEnvironment
+  $postgres = Start-LLM2APITestPostgres -RunID $runID -DatabaseName $databaseName -Password $databasePassword
+  $valkey = Start-LLM2APITestValkey -RunID $runID -Password $valkeyPassword
+  $gatewayPort = Get-LLM2APIFreeLoopbackPort
+  $binaryPath = Join-Path $buildDirectory "llm2api.exe"
   $environmentPath = Join-Path $buildDirectory "service.env"
 
   pnpm.cmd --dir web run build
@@ -43,20 +43,20 @@ try {
   $apiKeyPepperFile = Write-ServiceSecret "api-key-pepper" "winservice-api-key-pepper-$runID"
   $coordinationSecretFile = Write-ServiceSecret "coordination-secret" "winservice-coordination-secret-$runID"
   $lines = @(
-    "LLMGATEWAY_PROFILE=production",
-    "LLMGATEWAY_HTTP_ADDRESS=127.0.0.1:$gatewayPort",
-    "LLMGATEWAY_DATABASE_URL_FILE=$databaseURLFile",
-    "LLMGATEWAY_DATABASE_MIGRATE_ON_START=false",
-    "LLMGATEWAY_DATABASE_MIN_CONNECTIONS=1",
-    "LLMGATEWAY_DATABASE_MAX_CONNECTIONS=4",
-    "LLMGATEWAY_VALKEY_ADDRESS=$($valkey.Address)",
-    "LLMGATEWAY_VALKEY_PASSWORD_FILE=$valkeyPasswordFile",
-    "LLMGATEWAY_MASTER_KEYS_FILE=$masterKeysFile",
-    "LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION=1",
-    "LLMGATEWAY_SESSION_PEPPER_FILE=$sessionPepperFile",
-    "LLMGATEWAY_API_KEY_PEPPER_FILE=$apiKeyPepperFile",
-    "LLMGATEWAY_COORDINATION_KEY_HASH_SECRET_FILE=$coordinationSecretFile",
-    "LLMGATEWAY_COOKIE_SECURE=true"
+    "LLM2API_PROFILE=production",
+    "LLM2API_HTTP_ADDRESS=127.0.0.1:$gatewayPort",
+    "LLM2API_DATABASE_URL_FILE=$databaseURLFile",
+    "LLM2API_DATABASE_MIGRATE_ON_START=false",
+    "LLM2API_DATABASE_MIN_CONNECTIONS=1",
+    "LLM2API_DATABASE_MAX_CONNECTIONS=4",
+    "LLM2API_VALKEY_ADDRESS=$($valkey.Address)",
+    "LLM2API_VALKEY_PASSWORD_FILE=$valkeyPasswordFile",
+    "LLM2API_MASTER_KEYS_FILE=$masterKeysFile",
+    "LLM2API_ACTIVE_MASTER_KEY_VERSION=1",
+    "LLM2API_SESSION_PEPPER_FILE=$sessionPepperFile",
+    "LLM2API_API_KEY_PEPPER_FILE=$apiKeyPepperFile",
+    "LLM2API_COORDINATION_KEY_HASH_SECRET_FILE=$coordinationSecretFile",
+    "LLM2API_COOKIE_SECURE=true"
   )
   [IO.File]::WriteAllLines($environmentPath, $lines, [Text.UTF8Encoding]::new($false))
 
@@ -66,7 +66,7 @@ try {
   }
   go run .\cmd\dbtool -action up
   if ($LASTEXITCODE -ne 0) { throw "Windows service migration preflight failed." }
-  Clear-LLMGatewayEnvironment
+  Clear-LLM2APIEnvironment
 
   & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-service.ps1 `
     -BinaryPath $binaryPath -EnvironmentFile $environmentPath -Start `
@@ -74,26 +74,26 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Windows service installation failed." }
   $serviceInstalled = $true
 
-  $service = Get-Service -Name LLMGateway
+  $service = Get-Service -Name LLM2API
   if ($service.Status -ne [ServiceProcess.ServiceControllerStatus]::Running -or $service.StartType -ne "Automatic") {
     throw "Windows service did not enter automatic running state."
   }
-  $serviceFacts = Get-CimInstance Win32_Service -Filter "Name='LLMGateway'"
-  if ($serviceFacts.StartMode -ne "Auto" -or -not $serviceFacts.StartName.EndsWith("\LLMGateway")) {
+  $serviceFacts = Get-CimInstance Win32_Service -Filter "Name='LLM2API'"
+  if ($serviceFacts.StartMode -ne "Auto" -or -not $serviceFacts.StartName.EndsWith("\LLM2API")) {
     throw "Windows SCM account or automatic start facts are invalid."
   }
-  $event = Get-WinEvent -FilterHashtable @{ LogName = "Application"; ProviderName = "LLMGateway" } -MaxEvents 20 |
+  $event = Get-WinEvent -FilterHashtable @{ LogName = "Application"; ProviderName = "LLM2API" } -MaxEvents 20 |
     Where-Object { $_.Message -like '*gateway listening*' } | Select-Object -First 1
   if (-not $event) { throw "Gateway structured startup log did not reach Windows Event Log." }
 
-  Stop-Service -Name LLMGateway
+  Stop-Service -Name LLM2API
   $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(45))
-  Start-Service -Name LLMGateway
+  Start-Service -Name LLM2API
   $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(45))
   $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$gatewayPort/health/ready" -TimeoutSec 10
   if ([int]$response.StatusCode -ne 200) { throw "Restarted Windows service was not ready." }
 
-  & go run ./cmd/windowsservicecheck -name LLMGateway
+  & go run ./cmd/windowsservicecheck -name LLM2API
   if ($LASTEXITCODE -ne 0) { throw "Windows service restart recovery policy is invalid." }
   $evidenceDirectory = Join-Path $root ".build\acceptance-evidence"
   New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
@@ -116,18 +116,18 @@ try {
   $failure = $_
 } finally {
   $cleanupFailures = @()
-  if ($serviceInstalled -or (Get-Service -Name LLMGateway -ErrorAction SilentlyContinue)) {
+  if ($serviceInstalled -or (Get-Service -Name LLM2API -ErrorAction SilentlyContinue)) {
     try {
       & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-windows-service.ps1 -RemoveEventSource
       if ($LASTEXITCODE -ne 0) { throw "Windows service uninstall returned a failure." }
     } catch { $cleanupFailures += $_.Exception.Message }
   }
-  try { Restore-LLMGatewayEnvironment -Snapshot $environmentSnapshot } catch { $cleanupFailures += $_.Exception.Message }
+  try { Restore-LLM2APIEnvironment -Snapshot $environmentSnapshot } catch { $cleanupFailures += $_.Exception.Message }
   if ($null -ne $valkey) {
-    try { Stop-LLMGatewayTestContainer -Container $valkey.Container -RunID $runID } catch { $cleanupFailures += $_.Exception.Message }
+    try { Stop-LLM2APITestContainer -Container $valkey.Container -RunID $runID } catch { $cleanupFailures += $_.Exception.Message }
   }
   if ($null -ne $postgres) {
-    try { Stop-LLMGatewayTestContainer -Container $postgres.Container -RunID $runID } catch { $cleanupFailures += $_.Exception.Message }
+    try { Stop-LLM2APITestContainer -Container $postgres.Container -RunID $runID } catch { $cleanupFailures += $_.Exception.Message }
   }
   try {
     $resolvedBuild = [IO.Path]::GetFullPath($buildDirectory)

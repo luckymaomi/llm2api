@@ -21,13 +21,13 @@ jobs:
       postgres:
         image: postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
         env:
-          POSTGRES_DB: llmgateway
-          POSTGRES_USER: llmgateway
-          POSTGRES_PASSWORD: llmgateway_ci
+          POSTGRES_DB: llm2api
+          POSTGRES_USER: llm2api
+          POSTGRES_PASSWORD: llm2api_ci
         ports:
           - 15432:5432
         options: >-
-          --health-cmd "pg_isready -U llmgateway -d llmgateway"
+          --health-cmd "pg_isready -U llm2api -d llm2api"
           --health-interval 5s --health-timeout 3s --health-retries 20
       valkey:
         image: valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02
@@ -60,9 +60,9 @@ jobs:
       - name: Verify
         shell: bash
         env:
-          LLMGATEWAY_POSTGRES_PASSWORD: llmgateway_ci
-          LLMGATEWAY_DATABASE_URL: postgres://llmgateway:llmgateway_ci@127.0.0.1:15432/llmgateway?sslmode=disable
-          LLMGATEWAY_VALKEY_PASSWORD: ""
+          LLM2API_POSTGRES_PASSWORD: llm2api_ci
+          LLM2API_DATABASE_URL: postgres://llm2api:llm2api_ci@127.0.0.1:15432/llm2api?sslmode=disable
+          LLM2API_VALKEY_PASSWORD: ""
         run: xvfb-run --auto-servernum pwsh -NoProfile -File ./scripts/verify.ps1 -SkipBuildMatrix
       - name: Supply-chain source and dependency policy
         shell: pwsh
@@ -204,14 +204,14 @@ jobs:
           RELEASE_DIRECTORY: ${{ steps.build.outputs.directory }}
           RELEASE_VERSION: ${{ steps.build.outputs.version }}
         run: |
-          $stage = "release-artifacts/llmgateway-$env:RELEASE_VERSION"
+          $stage = "release-artifacts/llm2api-$env:RELEASE_VERSION"
           New-Item -ItemType Directory -Path $stage | Out-Null
           Copy-Item -Path (Join-Path $env:RELEASE_DIRECTORY "*") -Destination $stage
           ./scripts/verify-release.ps1 -Directory $stage -ExpectedVersion $env:RELEASE_VERSION -ExpectedRevision $env:RELEASE_REVISION -Keyless
           "directory=$stage" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: llmgateway-${{ steps.build.outputs.version }}
+          name: llm2api-${{ steps.build.outputs.version }}
           path: ${{ steps.stage.outputs.directory }}
           if-no-files-found: error
           include-hidden-files: false

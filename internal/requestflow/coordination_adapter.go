@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/admission"
-	"github.com/luckymaomi/llmgateway/internal/coordination"
+	"github.com/luckymaomi/llm2api/internal/admission"
+	"github.com/luckymaomi/llm2api/internal/coordination"
 )
 
 type Capacity struct {

@@ -40,14 +40,7 @@ export function ResourcePoolsPage() {
         accessorKey: 'name',
         header: '资源池',
         meta: { align: 'center' },
-        cell: ({ row }) => (
-          <div>
-            <strong>{row.original.name}</strong>
-            <small className="table-subline">
-              <code>{row.original.slug}</code>
-            </small>
-          </div>
-        ),
+        cell: ({ row }) => <strong>{row.original.name}</strong>,
       },
       { accessorKey: 'providerName', header: '上游平台', meta: { align: 'center' } },
       {

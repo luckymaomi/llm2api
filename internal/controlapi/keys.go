@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/identity"
 )
 
 type gatewayKeyView struct {

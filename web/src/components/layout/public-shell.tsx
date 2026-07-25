@@ -13,7 +13,7 @@ export function PublicShell() {
     <div className="public-shell">
       <header className="public-brand">
         <Network size={24} />
-        <span>{siteProfile.data?.name ?? 'LLMGateway'}</span>
+        <span>{siteProfile.data?.name ?? 'LLM2API'}</span>
       </header>
       <main className="public-main">
         <Suspense fallback={<LoadingState label="正在加载页面" />}>

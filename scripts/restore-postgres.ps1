@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string] $InputPath,
   [Parameter(Mandatory = $true)][string] $TargetDatabase,
-  [string] $Container = "llmgateway-postgres",
+  [string] $Container = "llm2api-postgres",
   [string] $DatabaseUser = "",
   [string] $ExpectedComposeProject = "",
   [switch] $ConfirmRestore,
@@ -20,16 +20,16 @@ if (-not (Test-Path -LiteralPath $resolvedInput) -or (Get-Item -LiteralPath $res
   throw "Backup archive is missing or empty: $resolvedInput"
 }
 
-$docker = Get-LLMGatewayDockerCommand
+$docker = Get-LLM2APIDockerCommand
 $labels = (& $docker inspect --format '{{json .Config.Labels}}' $Container | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0) { throw "Could not inspect PostgreSQL container $Container." }
 if ($ExpectedComposeProject -and $ExpectedComposeProject -notmatch '^[a-z0-9][a-z0-9_-]{1,62}$') {
   throw "Expected Compose project name is invalid."
 }
-$allowedProjects = if ($ExpectedComposeProject) { @($ExpectedComposeProject) } else { @('llmgateway', 'llmgateway-production') }
+$allowedProjects = if ($ExpectedComposeProject) { @($ExpectedComposeProject) } else { @('llm2api', 'llm2api-production') }
 $owned = $labels.'com.docker.compose.project' -in $allowedProjects -and $labels.'com.docker.compose.service' -eq 'postgres'
-$isolated = $AllowIsolatedTestContainer -and $labels.'llmgateway.test.owner' -eq 'llmgateway-isolated-tests'
-if (-not $owned -and -not $isolated) { throw "Refusing to restore into a PostgreSQL container not owned by LLMGateway." }
+$isolated = $AllowIsolatedTestContainer -and $labels.'llm2api.test.owner' -eq 'llm2api-isolated-tests'
+if (-not $owned -and -not $isolated) { throw "Refusing to restore into a PostgreSQL container not owned by LLM2API." }
 if (-not $DatabaseUser) {
   foreach ($entry in @(& $docker inspect --format '{{json .Config.Env}}' $Container | ConvertFrom-Json)) {
     if ([string]$entry -like 'POSTGRES_USER=*') { $DatabaseUser = ([string]$entry -split '=', 2)[1] }
@@ -41,7 +41,7 @@ $existing = & $docker exec $Container psql --username $DatabaseUser --dbname pos
 if ($LASTEXITCODE -ne 0) { throw "Could not check the restore target database." }
 if ([string]$existing -eq '1') { throw "Restore target already exists: $TargetDatabase" }
 
-$containerArchive = "/tmp/llmgateway-restore-$([guid]::NewGuid().ToString('N')).dump"
+$containerArchive = "/tmp/llm2api-restore-$([guid]::NewGuid().ToString('N')).dump"
 $created = $false
 try {
   & $docker cp $resolvedInput "$Container`:$containerArchive"

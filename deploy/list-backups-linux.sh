@@ -11,4 +11,4 @@ SCRIPT_DIRECTORY=$(cd -- "$(dirname -- "$0")" && pwd)
 source "$SCRIPT_DIRECTORY/backup-lib.sh"
 load_backup_environment "$1"
 
-run_restic snapshots --json --host llmgateway-production --tag llmgateway-production
+run_restic snapshots --json --host llm2api-production --tag llm2api-production

@@ -106,31 +106,31 @@ unset database_url database_url_lines database_userinfo database_hostport databa
 verify_backup_configuration_tree "$source_configuration"
 
 declare -A replacements=(
-  [LLMGATEWAY_POSTGRES_DB]="$target_database"
-  [LLMGATEWAY_POSTGRES_PASSWORD_FILE]="$target_configuration/secrets/postgres-password"
-  [LLMGATEWAY_DATABASE_URL_FILE]="$target_configuration/secrets/database-url"
-  [LLMGATEWAY_VALKEY_PASSWORD_FILE]="$target_configuration/secrets/valkey-password"
-  [LLMGATEWAY_VALKEY_ACL_FILE]="$target_configuration/secrets/valkey-acl"
-  [LLMGATEWAY_MASTER_KEYS_FILE]="$target_configuration/secrets/master-keys"
-  [LLMGATEWAY_SESSION_PEPPER_FILE]="$target_configuration/secrets/session-pepper"
-  [LLMGATEWAY_API_KEY_PEPPER_FILE]="$target_configuration/secrets/api-key-pepper"
-  [LLMGATEWAY_COORDINATION_KEY_HASH_SECRET_FILE]="$target_configuration/secrets/coordination-secret"
+  [LLM2API_POSTGRES_DB]="$target_database"
+  [LLM2API_POSTGRES_PASSWORD_FILE]="$target_configuration/secrets/postgres-password"
+  [LLM2API_DATABASE_URL_FILE]="$target_configuration/secrets/database-url"
+  [LLM2API_VALKEY_PASSWORD_FILE]="$target_configuration/secrets/valkey-password"
+  [LLM2API_VALKEY_ACL_FILE]="$target_configuration/secrets/valkey-acl"
+  [LLM2API_MASTER_KEYS_FILE]="$target_configuration/secrets/master-keys"
+  [LLM2API_SESSION_PEPPER_FILE]="$target_configuration/secrets/session-pepper"
+  [LLM2API_API_KEY_PEPPER_FILE]="$target_configuration/secrets/api-key-pepper"
+  [LLM2API_COORDINATION_KEY_HASH_SECRET_FILE]="$target_configuration/secrets/coordination-secret"
 )
 declare -A seen_keys=()
 
 maintenance_lock_held=false
-acquire_llmgateway_maintenance_lock configuration-restore
+acquire_llm2api_maintenance_lock configuration-restore
 maintenance_lock_held=true
-remove_stale_private_directories "$target_parent" .llmgateway-configuration. '700|750'
-staging_configuration=$(mktemp -d "$target_parent/.llmgateway-configuration.XXXXXXXX")
+remove_stale_private_directories "$target_parent" .llm2api-configuration. '700|750'
+staging_configuration=$(mktemp -d "$target_parent/.llm2api-configuration.XXXXXXXX")
 cleanup() {
   local status=$?
   trap - EXIT
-  if [[ -n ${staging_configuration:-} && $staging_configuration == "$target_parent/.llmgateway-configuration."* && -d $staging_configuration && ! -L $staging_configuration ]]; then
+  if [[ -n ${staging_configuration:-} && $staging_configuration == "$target_parent/.llm2api-configuration."* && -d $staging_configuration && ! -L $staging_configuration ]]; then
     rm -rf -- "$staging_configuration"
   fi
   if [[ $maintenance_lock_held == true ]]; then
-    release_llmgateway_maintenance_lock || status=1
+    release_llm2api_maintenance_lock || status=1
   fi
   exit "$status"
 }
@@ -147,11 +147,11 @@ while IFS= read -r line || [[ -n $line ]]; do
   fi
   [[ $line == *=* ]] || { echo "restored deployment environment contains an invalid entry" >&2; exit 1; }
   key=${line%%=*}
-  [[ $key =~ ^LLMGATEWAY_[A-Z0-9_]+$ ]] || { echo "restored deployment environment contains an invalid key" >&2; exit 1; }
+  [[ $key =~ ^LLM2API_[A-Z0-9_]+$ ]] || { echo "restored deployment environment contains an invalid key" >&2; exit 1; }
   [[ -z ${seen_keys[$key]+x} ]] || { echo "restored deployment environment contains a duplicate key" >&2; exit 1; }
   seen_keys[$key]=true
   case "$key" in
-    LLMGATEWAY_DATABASE_URL|LLMGATEWAY_VALKEY_PASSWORD|LLMGATEWAY_MASTER_KEYS|LLMGATEWAY_SESSION_PEPPER|LLMGATEWAY_API_KEY_PEPPER|LLMGATEWAY_COORDINATION_KEY_HASH_SECRET)
+    LLM2API_DATABASE_URL|LLM2API_VALKEY_PASSWORD|LLM2API_MASTER_KEYS|LLM2API_SESSION_PEPPER|LLM2API_API_KEY_PEPPER|LLM2API_COORDINATION_KEY_HASH_SECRET)
       echo "restored deployment environment contains an inline secret" >&2
       exit 1
       ;;
@@ -180,25 +180,25 @@ chmod 0640 "$staging_configuration/deployment.env"
 [[ ! -e $target_configuration && ! -L $target_configuration ]] || { echo "target configuration directory appeared during installation" >&2; exit 1; }
 verify_runtime_configuration_tree "$staging_configuration"
 (
-  unset LLMGATEWAY_POSTGRES_PASSWORD LLMGATEWAY_DATABASE_URL LLMGATEWAY_VALKEY_PASSWORD \
-    LLMGATEWAY_MASTER_KEYS LLMGATEWAY_SESSION_PEPPER LLMGATEWAY_API_KEY_PEPPER \
-    LLMGATEWAY_COORDINATION_KEY_HASH_SECRET
-  load_llmgateway_environment "$staging_configuration/deployment.env"
+  unset LLM2API_POSTGRES_PASSWORD LLM2API_DATABASE_URL LLM2API_VALKEY_PASSWORD \
+    LLM2API_MASTER_KEYS LLM2API_SESSION_PEPPER LLM2API_API_KEY_PEPPER \
+    LLM2API_COORDINATION_KEY_HASH_SECRET
+  load_llm2api_environment "$staging_configuration/deployment.env"
   require_configuration_bindings "$target_configuration"
-  export LLMGATEWAY_POSTGRES_PASSWORD_FILE="$staging_configuration/secrets/postgres-password"
-  export LLMGATEWAY_DATABASE_URL_FILE="$staging_configuration/secrets/database-url"
-  export LLMGATEWAY_VALKEY_PASSWORD_FILE="$staging_configuration/secrets/valkey-password"
-  export LLMGATEWAY_VALKEY_ACL_FILE="$staging_configuration/secrets/valkey-acl"
-  export LLMGATEWAY_MASTER_KEYS_FILE="$staging_configuration/secrets/master-keys"
-  export LLMGATEWAY_SESSION_PEPPER_FILE="$staging_configuration/secrets/session-pepper"
-  export LLMGATEWAY_API_KEY_PEPPER_FILE="$staging_configuration/secrets/api-key-pepper"
-  export LLMGATEWAY_COORDINATION_KEY_HASH_SECRET_FILE="$staging_configuration/secrets/coordination-secret"
+  export LLM2API_POSTGRES_PASSWORD_FILE="$staging_configuration/secrets/postgres-password"
+  export LLM2API_DATABASE_URL_FILE="$staging_configuration/secrets/database-url"
+  export LLM2API_VALKEY_PASSWORD_FILE="$staging_configuration/secrets/valkey-password"
+  export LLM2API_VALKEY_ACL_FILE="$staging_configuration/secrets/valkey-acl"
+  export LLM2API_MASTER_KEYS_FILE="$staging_configuration/secrets/master-keys"
+  export LLM2API_SESSION_PEPPER_FILE="$staging_configuration/secrets/session-pepper"
+  export LLM2API_API_KEY_PEPPER_FILE="$staging_configuration/secrets/api-key-pepper"
+  export LLM2API_COORDINATION_KEY_HASH_SECRET_FILE="$staging_configuration/secrets/coordination-secret"
   require_file_secrets
   require_immutable_gateway_image
 )
 mv -T -- "$staging_configuration" "$target_configuration"
 staging_configuration=
-release_llmgateway_maintenance_lock
+release_llm2api_maintenance_lock
 maintenance_lock_held=false
 trap - EXIT INT TERM
 echo "Restored configuration installed for database $target_database."

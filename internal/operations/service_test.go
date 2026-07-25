@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/identity"
 )
 
 type scopeRepository struct {

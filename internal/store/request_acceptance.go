@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
-	"github.com/luckymaomi/llmgateway/internal/usage"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/usage"
 )
 
 func (r *UsageRepository) AcceptRequest(ctx context.Context, input usage.AcceptInput) (usage.AcceptedRequest, error) {

@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
-	"github.com/luckymaomi/llmgateway/internal/usage"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/usage"
 )
 
 type UsageRepository struct {

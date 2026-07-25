@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/canonical"
-	"github.com/luckymaomi/llmgateway/internal/execution"
-	"github.com/luckymaomi/llmgateway/internal/providers"
-	"github.com/luckymaomi/llmgateway/internal/resilience"
-	"github.com/luckymaomi/llmgateway/internal/routing"
+	"github.com/luckymaomi/llm2api/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/execution"
+	"github.com/luckymaomi/llm2api/internal/providers"
+	"github.com/luckymaomi/llm2api/internal/resilience"
+	"github.com/luckymaomi/llm2api/internal/routing"
 )
 
 type Config struct {

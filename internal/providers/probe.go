@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/luckymaomi/llmgateway/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
 func (a *openAIAdapter) Probe(ctx context.Context, credential Credential) (Probe, error) {

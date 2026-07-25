@@ -3,7 +3,7 @@ package identity
 import (
 	"strings"
 
-	"github.com/luckymaomi/llmgateway/internal/security"
+	"github.com/luckymaomi/llm2api/internal/security"
 )
 
 func HashRecoveryPassword(password string) (string, error) {

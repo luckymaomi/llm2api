@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-load_llmgateway_environment() {
+load_llm2api_environment() {
   local file=$1 line key value
   local -A seen_keys=()
   [[ -f "$file" ]] || { echo "environment file does not exist: $file" >&2; return 1; }
@@ -12,20 +12,20 @@ load_llmgateway_environment() {
     [[ "$line" == *=* ]] || { echo "invalid environment entry" >&2; return 1; }
     key=${line%%=*}
     value=${line#*=}
-    [[ "$key" =~ ^LLMGATEWAY_[A-Z0-9_]+$ ]] || { echo "invalid environment key" >&2; return 1; }
+    [[ "$key" =~ ^LLM2API_[A-Z0-9_]+$ ]] || { echo "invalid environment key" >&2; return 1; }
     [[ -z ${seen_keys[$key]+x} ]] || { echo "duplicate environment key: $key" >&2; return 1; }
     seen_keys[$key]=true
     export "$key=$value"
   done < "$file"
 }
 
-acquire_llmgateway_maintenance_lock() {
-  local operation=$1 lock_file=/run/lock/llmgateway-maintenance.lock
+acquire_llm2api_maintenance_lock() {
+  local operation=$1 lock_file=/run/lock/llm2api-maintenance.lock
   local path_identity descriptor_identity
   [[ $(id -u) -eq 0 ]] || { echo "maintenance operations require root" >&2; return 1; }
   [[ $operation =~ ^[a-z][a-z0-9-]{1,31}$ ]] || { echo "maintenance operation name is invalid" >&2; return 1; }
-  [[ ${LLMGATEWAY_MAINTENANCE_LOCK_HELD:-false} != true ]] || {
-    echo "this process already holds the LLMGateway maintenance lock" >&2
+  [[ ${LLM2API_MAINTENANCE_LOCK_HELD:-false} != true ]] || {
+    echo "this process already holds the LLM2API maintenance lock" >&2
     return 1
   }
   [[ -d /run/lock && ! -L /run/lock ]] || { echo "/run/lock is unavailable or unsafe" >&2; return 1; }
@@ -39,55 +39,55 @@ acquire_llmgateway_maintenance_lock() {
     return 1
   }
 
-  exec {LLMGATEWAY_MAINTENANCE_LOCK_FD}<>"$lock_file"
+  exec {LLM2API_MAINTENANCE_LOCK_FD}<>"$lock_file"
   path_identity=$(stat -Lc '%d:%i' "$lock_file")
-  descriptor_identity=$(stat -Lc '%d:%i' "/proc/$$/fd/$LLMGATEWAY_MAINTENANCE_LOCK_FD")
+  descriptor_identity=$(stat -Lc '%d:%i' "/proc/$$/fd/$LLM2API_MAINTENANCE_LOCK_FD")
   if [[ $path_identity != "$descriptor_identity" ]]; then
-    exec {LLMGATEWAY_MAINTENANCE_LOCK_FD}>&-
+    exec {LLM2API_MAINTENANCE_LOCK_FD}>&-
     echo "maintenance lock file changed while it was opened" >&2
     return 1
   fi
-  if ! flock -n "$LLMGATEWAY_MAINTENANCE_LOCK_FD"; then
-    exec {LLMGATEWAY_MAINTENANCE_LOCK_FD}>&-
-    echo "another LLMGateway maintenance operation is running" >&2
+  if ! flock -n "$LLM2API_MAINTENANCE_LOCK_FD"; then
+    exec {LLM2API_MAINTENANCE_LOCK_FD}>&-
+    echo "another LLM2API maintenance operation is running" >&2
     return 1
   fi
-  LLMGATEWAY_MAINTENANCE_LOCK_HELD=true
-  LLMGATEWAY_MAINTENANCE_OPERATION=$operation
+  LLM2API_MAINTENANCE_LOCK_HELD=true
+  LLM2API_MAINTENANCE_OPERATION=$operation
 }
 
-release_llmgateway_maintenance_lock() {
-  [[ ${LLMGATEWAY_MAINTENANCE_LOCK_HELD:-false} == true ]] || return 0
-  [[ ${LLMGATEWAY_MAINTENANCE_LOCK_FD:-} =~ ^[0-9]+$ ]] || {
+release_llm2api_maintenance_lock() {
+  [[ ${LLM2API_MAINTENANCE_LOCK_HELD:-false} == true ]] || return 0
+  [[ ${LLM2API_MAINTENANCE_LOCK_FD:-} =~ ^[0-9]+$ ]] || {
     echo "maintenance lock descriptor is invalid" >&2
     return 1
   }
-  flock -u "$LLMGATEWAY_MAINTENANCE_LOCK_FD"
-  exec {LLMGATEWAY_MAINTENANCE_LOCK_FD}>&-
-  unset LLMGATEWAY_MAINTENANCE_LOCK_HELD LLMGATEWAY_MAINTENANCE_OPERATION
+  flock -u "$LLM2API_MAINTENANCE_LOCK_FD"
+  exec {LLM2API_MAINTENANCE_LOCK_FD}>&-
+  unset LLM2API_MAINTENANCE_LOCK_HELD LLM2API_MAINTENANCE_OPERATION
 }
 
 require_file_secrets() {
   local name path
   for name in \
-    LLMGATEWAY_POSTGRES_PASSWORD \
-    LLMGATEWAY_DATABASE_URL \
-    LLMGATEWAY_VALKEY_PASSWORD \
-    LLMGATEWAY_MASTER_KEYS \
-    LLMGATEWAY_SESSION_PEPPER \
-    LLMGATEWAY_API_KEY_PEPPER \
-    LLMGATEWAY_COORDINATION_KEY_HASH_SECRET; do
+    LLM2API_POSTGRES_PASSWORD \
+    LLM2API_DATABASE_URL \
+    LLM2API_VALKEY_PASSWORD \
+    LLM2API_MASTER_KEYS \
+    LLM2API_SESSION_PEPPER \
+    LLM2API_API_KEY_PEPPER \
+    LLM2API_COORDINATION_KEY_HASH_SECRET; do
     [[ -z ${!name+x} ]] || { echo "$name must use its _FILE input" >&2; return 1; }
   done
   for name in \
-    LLMGATEWAY_POSTGRES_PASSWORD_FILE \
-    LLMGATEWAY_DATABASE_URL_FILE \
-    LLMGATEWAY_VALKEY_PASSWORD_FILE \
-    LLMGATEWAY_VALKEY_ACL_FILE \
-    LLMGATEWAY_MASTER_KEYS_FILE \
-    LLMGATEWAY_SESSION_PEPPER_FILE \
-    LLMGATEWAY_API_KEY_PEPPER_FILE \
-    LLMGATEWAY_COORDINATION_KEY_HASH_SECRET_FILE; do
+    LLM2API_POSTGRES_PASSWORD_FILE \
+    LLM2API_DATABASE_URL_FILE \
+    LLM2API_VALKEY_PASSWORD_FILE \
+    LLM2API_VALKEY_ACL_FILE \
+    LLM2API_MASTER_KEYS_FILE \
+    LLM2API_SESSION_PEPPER_FILE \
+    LLM2API_API_KEY_PEPPER_FILE \
+    LLM2API_COORDINATION_KEY_HASH_SECRET_FILE; do
     path=${!name:-}
     [[ -f "$path" && -s "$path" ]] || { echo "$name must name a non-empty file" >&2; return 1; }
     [[ $(stat -c %s "$path") -le 65536 ]] || { echo "$name exceeds 64 KiB" >&2; return 1; }
@@ -96,7 +96,7 @@ require_file_secrets() {
 
 require_immutable_gateway_image() {
   local name
-  for name in LLMGATEWAY_GATEWAY_IMAGE LLMGATEWAY_POSTGRES_IMAGE LLMGATEWAY_VALKEY_IMAGE LLMGATEWAY_CADDY_IMAGE; do
+  for name in LLM2API_GATEWAY_IMAGE LLM2API_POSTGRES_IMAGE LLM2API_VALKEY_IMAGE LLM2API_CADDY_IMAGE; do
     [[ ${!name:-} =~ @sha256:[a-f0-9]{64}$ ]] || {
       echo "$name must be an immutable sha256 reference" >&2
       return 1
@@ -105,9 +105,9 @@ require_immutable_gateway_image() {
 }
 
 deployment_compose() {
-  local project=${LLMGATEWAY_COMPOSE_PROJECT:-llmgateway-production}
+  local project=${LLM2API_COMPOSE_PROJECT:-llm2api-production}
   [[ $project =~ ^[a-z0-9][a-z0-9_-]{1,62}$ ]] || {
-    echo "LLMGATEWAY_COMPOSE_PROJECT is invalid" >&2
+    echo "LLM2API_COMPOSE_PROJECT is invalid" >&2
     return 1
   }
   docker compose --project-name "$project" --file "$DEPLOY_DIRECTORY/compose.production.yaml" "$@"

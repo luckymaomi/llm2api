@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/luckymaomi/llmgateway/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
 type Kind string

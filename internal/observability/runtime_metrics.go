@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/execution"
-	"github.com/luckymaomi/llmgateway/internal/providers"
-	"github.com/luckymaomi/llmgateway/internal/requestflow"
+	"github.com/luckymaomi/llm2api/internal/execution"
+	"github.com/luckymaomi/llm2api/internal/providers"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -29,15 +29,15 @@ type RuntimeMetrics struct {
 
 func NewRuntimeMetrics(registry prometheus.Registerer, loggers ...*slog.Logger) *RuntimeMetrics {
 	metrics := &RuntimeMetrics{
-		admissionRequests:  prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "admission", Name: "requests_total", Help: "Local and shared admission outcomes."}, []string{"outcome"}),
-		admissionWait:      prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "llmgateway", Subsystem: "admission", Name: "wait_seconds", Help: "Time spent waiting for admission.", Buckets: []float64{0.001, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30}}, []string{"outcome"}),
-		coordinationLeases: prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "coordination", Name: "leases_total", Help: "Shared request lease acquisition outcomes."}, []string{"outcome", "resource_pool"}),
-		coordinationActive: prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: "llmgateway", Subsystem: "coordination", Name: "active_leases", Help: "Currently held shared request leases."}, []string{"resource_pool"}),
-		coordinationWait:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "llmgateway", Subsystem: "coordination", Name: "wait_seconds", Help: "Time spent acquiring shared request capacity.", Buckets: []float64{0.001, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30}}, []string{"outcome"}),
-		providerAttempts:   prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "provider", Name: "attempts_total", Help: "Terminal Provider attempt outcomes."}, []string{"provider_kind", "outcome", "error_kind"}),
-		usageOperations:    prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "usage", Name: "operations_total", Help: "Request acceptance and usage resolution outcomes."}, []string{"operation", "outcome", "resource_pool"}),
-		requestRecovery:    prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "request_recovery", Name: "results_total", Help: "Recovered stale request outcomes."}, []string{"outcome"}),
-		background:         prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "background", Name: "responses_total", Help: "Background Responses lifecycle outcomes."}, []string{"outcome"}),
+		admissionRequests:  prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llm2api", Subsystem: "admission", Name: "requests_total", Help: "Local and shared admission outcomes."}, []string{"outcome"}),
+		admissionWait:      prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "llm2api", Subsystem: "admission", Name: "wait_seconds", Help: "Time spent waiting for admission.", Buckets: []float64{0.001, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30}}, []string{"outcome"}),
+		coordinationLeases: prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llm2api", Subsystem: "coordination", Name: "leases_total", Help: "Shared request lease acquisition outcomes."}, []string{"outcome", "resource_pool"}),
+		coordinationActive: prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: "llm2api", Subsystem: "coordination", Name: "active_leases", Help: "Currently held shared request leases."}, []string{"resource_pool"}),
+		coordinationWait:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "llm2api", Subsystem: "coordination", Name: "wait_seconds", Help: "Time spent acquiring shared request capacity.", Buckets: []float64{0.001, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30}}, []string{"outcome"}),
+		providerAttempts:   prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llm2api", Subsystem: "provider", Name: "attempts_total", Help: "Terminal Provider attempt outcomes."}, []string{"provider_kind", "outcome", "error_kind"}),
+		usageOperations:    prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llm2api", Subsystem: "usage", Name: "operations_total", Help: "Request acceptance and usage resolution outcomes."}, []string{"operation", "outcome", "resource_pool"}),
+		requestRecovery:    prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llm2api", Subsystem: "request_recovery", Name: "results_total", Help: "Recovered stale request outcomes."}, []string{"outcome"}),
+		background:         prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llm2api", Subsystem: "background", Name: "responses_total", Help: "Background Responses lifecycle outcomes."}, []string{"outcome"}),
 	}
 	if len(loggers) > 0 {
 		metrics.logger = loggers[0]

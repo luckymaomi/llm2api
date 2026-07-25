@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/luckymaomi/llmgateway/internal/execution"
+	"github.com/luckymaomi/llm2api/internal/execution"
 )
 
 func (s *Service) executionContext(parent context.Context, claim execution.Claim) (context.Context, context.CancelFunc) {

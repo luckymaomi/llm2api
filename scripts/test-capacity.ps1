@@ -49,13 +49,13 @@ function Invoke-CapacityControl {
 }
 
 Push-Location (Join-Path $PSScriptRoot "..")
-$runID = New-LLMGatewayTestRunID -Purpose "capacity"
+$runID = New-LLM2APITestRunID -Purpose "capacity"
 $postgres = $null
 $valkey = $null
 $providerProcess = $null
 $recoveryProcess = $null
 $gatewayProcesses = @()
-$environmentSnapshot = Save-LLMGatewayEnvironment
+$environmentSnapshot = Save-LLM2APIEnvironment
 $testFailure = $null
 $cleanupFailures = @()
 $runningOnWindows = $env:OS -eq "Windows_NT"
@@ -74,16 +74,16 @@ $reportPath = Join-Path $buildDirectory "capacity-report.json"
 $recoveryReportPath = Join-Path $buildDirectory "recovery-report.json"
 try {
   if ($ActiveUsers -gt $Users) { throw "ActiveUsers cannot exceed Users." }
-  Clear-LLMGatewayEnvironment
+  Clear-LLM2APIEnvironment
   New-Item -ItemType Directory -Force $buildDirectory | Out-Null
-  $postgres = Start-LLMGatewayTestPostgres -RunID $runID -DatabaseName "llmgateway_capacity" -Password "capacity-postgres-fixture"
+  $postgres = Start-LLM2APITestPostgres -RunID $runID -DatabaseName "llm2api_capacity" -Password "capacity-postgres-fixture"
   $valkeyPassword = "capacity-valkey-fixture"
-  $valkey = Start-LLMGatewayTestValkey -RunID $runID -Password $valkeyPassword
-  $providerPort = Get-LLMGatewayFreeLoopbackPort
-  $providerAdminPort = Get-LLMGatewayFreeLoopbackPort
+  $valkey = Start-LLM2APITestValkey -RunID $runID -Password $valkeyPassword
+  $providerPort = Get-LLM2APIFreeLoopbackPort
+  $providerAdminPort = Get-LLM2APIFreeLoopbackPort
   $gatewayPorts = @(
-    Get-LLMGatewayFreeLoopbackPort
-    Get-LLMGatewayFreeLoopbackPort
+    Get-LLM2APIFreeLoopbackPort
+    Get-LLM2APIFreeLoopbackPort
   )
   $providerBaseURL = "https://127.0.0.1:$providerPort/v1"
   $providerAdminURL = "http://127.0.0.1:$providerAdminPort"
@@ -112,37 +112,37 @@ try {
   } while (-not $providerReady -and (Get-Date) -lt $providerDeadline)
   if (-not $providerReady) { throw "Capacity Provider fixture did not become ready." }
 
-  $apiKeyPepper = "llmgateway-capacity-api-key-pepper-000000"
-  $env:LLMGATEWAY_PROFILE = "test"
-  $env:LLMGATEWAY_DATABASE_URL = $firstDatabaseURL
-  $env:LLMGATEWAY_DATABASE_MAX_CONNECTIONS = "24"
-  $env:LLMGATEWAY_DATABASE_MIN_CONNECTIONS = "4"
-  $env:LLMGATEWAY_DATABASE_MIGRATE_ON_START = "true"
-  $env:LLMGATEWAY_VALKEY_ADDRESS = $valkey.Address
-  $env:LLMGATEWAY_VALKEY_PASSWORD = $valkeyPassword
-  $env:LLMGATEWAY_MASTER_KEYS = "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-  $env:LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION = "1"
-  $env:LLMGATEWAY_SESSION_PEPPER = "llmgateway-capacity-session-pepper-00000"
-  $env:LLMGATEWAY_API_KEY_PEPPER = $apiKeyPepper
-  $env:LLMGATEWAY_COORDINATION_KEY_HASH_SECRET = "llmgateway-capacity-coordination-hash-000"
-  $env:LLMGATEWAY_COOKIE_SECURE = "false"
-  $env:LLMGATEWAY_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
-  $env:LLMGATEWAY_REQUEST_MAX_QUEUED = "512"
-  $env:LLMGATEWAY_REQUEST_MAX_ACTIVE = "256"
-  $env:LLMGATEWAY_REQUEST_MAX_QUEUE_WAIT = "30s"
-  $env:LLMGATEWAY_REQUEST_LEASE_TTL = "10s"
-  $env:LLMGATEWAY_REQUEST_EXECUTION_HEARTBEAT_INTERVAL = "200ms"
-  $env:LLMGATEWAY_REQUEST_EXECUTION_STALE_AFTER = "2s"
-  $env:LLMGATEWAY_REQUEST_RECOVERY_INTERVAL = "200ms"
-  $env:LLMGATEWAY_RESPONSES_MAX_WORKERS = "16"
-  $env:LLMGATEWAY_HTTP_ADDRESS = "127.0.0.1:$($gatewayPorts[0])"
+  $apiKeyPepper = "llm2api-capacity-api-key-pepper-000000"
+  $env:LLM2API_PROFILE = "test"
+  $env:LLM2API_DATABASE_URL = $firstDatabaseURL
+  $env:LLM2API_DATABASE_MAX_CONNECTIONS = "24"
+  $env:LLM2API_DATABASE_MIN_CONNECTIONS = "4"
+  $env:LLM2API_DATABASE_MIGRATE_ON_START = "true"
+  $env:LLM2API_VALKEY_ADDRESS = $valkey.Address
+  $env:LLM2API_VALKEY_PASSWORD = $valkeyPassword
+  $env:LLM2API_MASTER_KEYS = "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  $env:LLM2API_ACTIVE_MASTER_KEY_VERSION = "1"
+  $env:LLM2API_SESSION_PEPPER = "llm2api-capacity-session-pepper-00000"
+  $env:LLM2API_API_KEY_PEPPER = $apiKeyPepper
+  $env:LLM2API_COORDINATION_KEY_HASH_SECRET = "llm2api-capacity-coordination-hash-000"
+  $env:LLM2API_COOKIE_SECURE = "false"
+  $env:LLM2API_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
+  $env:LLM2API_REQUEST_MAX_QUEUED = "512"
+  $env:LLM2API_REQUEST_MAX_ACTIVE = "256"
+  $env:LLM2API_REQUEST_MAX_QUEUE_WAIT = "30s"
+  $env:LLM2API_REQUEST_LEASE_TTL = "10s"
+  $env:LLM2API_REQUEST_EXECUTION_HEARTBEAT_INTERVAL = "200ms"
+  $env:LLM2API_REQUEST_EXECUTION_STALE_AFTER = "2s"
+  $env:LLM2API_REQUEST_RECOVERY_INTERVAL = "200ms"
+  $env:LLM2API_RESPONSES_MAX_WORKERS = "16"
+  $env:LLM2API_HTTP_ADDRESS = "127.0.0.1:$($gatewayPorts[0])"
   $firstGateway = Start-CapacityProcess -FilePath $gatewayPath -Arguments @() `
     -Stdout (Join-Path $buildDirectory "gateway-first.stdout.log") -Stderr (Join-Path $buildDirectory "gateway-first.stderr.log")
   $gatewayProcesses += $firstGateway
   Wait-CapacityGateway -Process $firstGateway -BaseURL $gatewayURLs[0]
 
-  $docker = Get-LLMGatewayDockerCommand
-  & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_capacity -c `
+  $docker = Get-LLM2APIDockerCommand
+  & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_capacity -c `
     "UPDATE providers SET base_url = '$providerBaseURL' WHERE catalog_id = 'siliconflow'; UPDATE models SET upstream_name = 'fixture-chat' WHERE provider_id = (SELECT id FROM providers WHERE catalog_id = 'siliconflow');" | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Could not redirect the capacity Provider catalog to the fixture." }
 
@@ -178,9 +178,9 @@ try {
     }
   if ($plan.data.current_version.version -ne 1) { throw "Capacity plan version was not published." }
 
-  $env:LLMGATEWAY_DATABASE_MIGRATE_ON_START = "false"
-  $env:LLMGATEWAY_DATABASE_URL = $secondDatabaseURL
-  $env:LLMGATEWAY_HTTP_ADDRESS = "127.0.0.1:$($gatewayPorts[1])"
+  $env:LLM2API_DATABASE_MIGRATE_ON_START = "false"
+  $env:LLM2API_DATABASE_URL = $secondDatabaseURL
+  $env:LLM2API_HTTP_ADDRESS = "127.0.0.1:$($gatewayPorts[1])"
   $secondGateway = Start-CapacityProcess -FilePath $gatewayPath -Arguments @() `
     -Stdout (Join-Path $buildDirectory "gateway-second.stdout.log") -Stderr (Join-Path $buildDirectory "gateway-second.stderr.log")
   $gatewayProcesses += $secondGateway
@@ -235,7 +235,7 @@ try {
 
   $databaseDeadline = (Get-Date).AddSeconds(10)
   do {
-    $recoveryFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_capacity -Atc `
+    $recoveryFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_capacity -Atc `
       "SELECT count(*) FROM requests r WHERE r.idempotency_key LIKE 'recovery-first-%' AND r.status = 'uncertain'"
     if ($LASTEXITCODE -ne 0) { throw "Could not inspect crash recovery facts." }
     if ([int]$recoveryFacts -lt 128) { Start-Sleep -Milliseconds 100 }
@@ -259,9 +259,9 @@ try {
       try { Stop-Process -Id $process.Id -Force -ErrorAction Stop; $process.WaitForExit() } catch { $cleanupFailures += "Process cleanup: $($_.Exception.Message)" }
     }
   }
-  if ($null -ne $valkey) { try { Stop-LLMGatewayTestContainer -Container $valkey.Container -RunID $runID } catch { $cleanupFailures += "Valkey cleanup: $($_.Exception.Message)" } }
-  if ($null -ne $postgres) { try { Stop-LLMGatewayTestContainer -Container $postgres.Container -RunID $runID } catch { $cleanupFailures += "PostgreSQL cleanup: $($_.Exception.Message)" } }
-  Restore-LLMGatewayEnvironment -Snapshot $environmentSnapshot
+  if ($null -ne $valkey) { try { Stop-LLM2APITestContainer -Container $valkey.Container -RunID $runID } catch { $cleanupFailures += "Valkey cleanup: $($_.Exception.Message)" } }
+  if ($null -ne $postgres) { try { Stop-LLM2APITestContainer -Container $postgres.Container -RunID $runID } catch { $cleanupFailures += "PostgreSQL cleanup: $($_.Exception.Message)" } }
+  Restore-LLM2APIEnvironment -Snapshot $environmentSnapshot
   Pop-Location
 }
 if ($null -ne $testFailure) { throw $testFailure }

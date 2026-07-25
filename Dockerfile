@@ -19,24 +19,24 @@ ARG TARGETARCH
 ARG RELEASE_VERSION=development
 ARG RELEASE_REVISION=unknown
 ARG RELEASE_BUILT_AT=unknown
-RUN BUILD_LDFLAGS="-s -w -X github.com/luckymaomi/llmgateway/internal/buildinfo.version=${RELEASE_VERSION} -X github.com/luckymaomi/llmgateway/internal/buildinfo.revision=${RELEASE_REVISION} -X github.com/luckymaomi/llmgateway/internal/buildinfo.builtAt=${RELEASE_BUILT_AT}" && \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -tags webembed -trimpath -ldflags="$BUILD_LDFLAGS" -o /out/llmgateway ./cmd/gateway && \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="$BUILD_LDFLAGS" -o /out/llmgateway-dbtool ./cmd/dbtool && \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="$BUILD_LDFLAGS" -o /out/llmgateway-healthcheck ./cmd/healthcheck
+RUN BUILD_LDFLAGS="-s -w -X github.com/luckymaomi/llm2api/internal/buildinfo.version=${RELEASE_VERSION} -X github.com/luckymaomi/llm2api/internal/buildinfo.revision=${RELEASE_REVISION} -X github.com/luckymaomi/llm2api/internal/buildinfo.builtAt=${RELEASE_BUILT_AT}" && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -tags webembed -trimpath -ldflags="$BUILD_LDFLAGS" -o /out/llm2api ./cmd/gateway && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="$BUILD_LDFLAGS" -o /out/llm2api-dbtool ./cmd/dbtool && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="$BUILD_LDFLAGS" -o /out/llm2api-healthcheck ./cmd/healthcheck
 
 FROM scratch
 ARG RELEASE_VERSION=development
 ARG RELEASE_REVISION=unknown
-LABEL org.opencontainers.image.title="LLMGateway" \
+LABEL org.opencontainers.image.title="LLM2API" \
       org.opencontainers.image.version=$RELEASE_VERSION \
       org.opencontainers.image.revision=$RELEASE_REVISION \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.source="https://github.com/luckymaomi/llmgateway"
+      org.opencontainers.image.source="https://github.com/luckymaomi/llm2api"
 COPY --from=go-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=go-build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=go-build /out/llmgateway /llmgateway
-COPY --from=go-build /out/llmgateway-dbtool /llmgateway-dbtool
-COPY --from=go-build /out/llmgateway-healthcheck /llmgateway-healthcheck
+COPY --from=go-build /out/llm2api /llm2api
+COPY --from=go-build /out/llm2api-dbtool /llm2api-dbtool
+COPY --from=go-build /out/llm2api-healthcheck /llm2api-healthcheck
 USER 65532:65532
 EXPOSE 8080
-ENTRYPOINT ["/llmgateway"]
+ENTRYPOINT ["/llm2api"]

@@ -6,7 +6,7 @@ import { defineConfig } from 'vite'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 const apiProxyTarget = requiredLoopbackURL('VITE_API_PROXY_TARGET')
-const outputDirectory = requiredBuildDirectory('LLMGATEWAY_REAL_WEB_DIST')
+const outputDirectory = requiredBuildDirectory('LLM2API_REAL_WEB_DIST')
 const proxy = {
   '/api': apiProxyTarget,
   '/v1': apiProxyTarget,

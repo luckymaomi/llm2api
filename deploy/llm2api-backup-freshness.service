@@ -1,0 +1,22 @@
+[Unit]
+Description=Check the LLM2API backup recovery point age
+RequiresMountsFor=/opt/llm2api /etc/llm2api-backup /var/lib/llm2api-backup
+
+[Service]
+Type=oneshot
+ExecStart=/opt/llm2api/backup-bundle-launcher-linux.sh check-freshness /etc/llm2api-backup/backup.env
+User=root
+Group=root
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/etc/llm2api /etc/llm2api-backup /opt/llm2api /var/lib/llm2api-backup
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native

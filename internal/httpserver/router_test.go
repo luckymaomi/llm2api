@@ -2,14 +2,16 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
-	"github.com/luckymaomi/llmgateway/internal/config"
+	"github.com/luckymaomi/llm2api/internal/config"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -63,5 +65,43 @@ func TestRequestIDRejectsUnsafeInput(t *testing.T) {
 
 	if response.Header().Get("X-Request-ID") == "unsafe\nvalue" {
 		t.Fatal("unsafe request ID was reflected")
+	}
+}
+
+func TestDocumentationEndpointsExposeStableMachineReadableEntryPoints(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.Config{HTTP: config.HTTP{MaxBodyBytes: 1024}}
+	router := NewRouter(cfg, logger, readinessStub{}, prometheus.NewRegistry(), nil, nil)
+
+	request := httptest.NewRequest(http.MethodGet, "https://gateway.example/llms.txt", nil)
+	request.Header.Set("X-Forwarded-Proto", "https")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("llms.txt returned %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("llms.txt content type = %q", got)
+	}
+	if body := response.Body.String(); !strings.Contains(body, "https://gateway.example/v1/models") {
+		t.Fatalf("llms.txt did not contain the public models endpoint: %s", body)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "https://gateway.example/openapi.json", nil)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("openapi.json returned %d", response.Code)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+		t.Fatalf("openapi.json is invalid JSON: %v", err)
+	}
+	if document["openapi"] != "3.1.0" {
+		t.Fatalf("openapi version = %v", document["openapi"])
+	}
+	paths, ok := document["paths"].(map[string]any)
+	if !ok || paths["/models"] == nil || paths["/chat/completions"] == nil || paths["/responses"] == nil {
+		t.Fatalf("openapi paths are incomplete: %v", document["paths"])
 	}
 }

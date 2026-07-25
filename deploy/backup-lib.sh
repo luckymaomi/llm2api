@@ -5,7 +5,7 @@ BACKUP_DEPLOY_DIRECTORY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 source "$BACKUP_DEPLOY_DIRECTORY/lib.sh"
 
-declare -ar LLMGATEWAY_BACKUP_CONFIGURATION_FILES=(
+declare -ar LLM2API_BACKUP_CONFIGURATION_FILES=(
   deployment.env
   secrets/postgres-password
   secrets/database-url
@@ -164,21 +164,21 @@ require_repository_policy() {
         port=${BASH_REMATCH[1]}
         (( 10#$port >= 1 && 10#$port <= 65535 )) || { backup_error "production S3 repository port is invalid"; return 1; }
       fi
-      [[ -n ${LLMGATEWAY_RESTIC_AWS_CREDENTIALS_FILE:-} ]] || {
+      [[ -n ${LLM2API_RESTIC_AWS_CREDENTIALS_FILE:-} ]] || {
         backup_error "production S3 backups require an AWS credentials file"
         return 1
       }
       ;;
     acceptance)
       [[ $repository == local:/repository ]] || { backup_error "acceptance backups require repository local:/repository"; return 1; }
-      [[ ${LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY+x} == x && -n ${LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY:-} ]] || {
+      [[ ${LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY+x} == x && -n ${LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY:-} ]] || {
         backup_error "acceptance backups require an explicit local repository directory"
         return 1
       }
-      require_backup_directory "local Restic repository directory" "$LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY" || return 1
+      require_backup_directory "local Restic repository directory" "$LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY" || return 1
       ;;
     *)
-      backup_error "LLMGATEWAY_BACKUP_MODE must be production or acceptance"
+      backup_error "LLM2API_BACKUP_MODE must be production or acceptance"
       return 1
       ;;
   esac
@@ -262,21 +262,21 @@ require_configuration_bindings() {
       return 1
     }
   done <<'EOF'
-LLMGATEWAY_POSTGRES_PASSWORD_FILE:secrets/postgres-password
-LLMGATEWAY_DATABASE_URL_FILE:secrets/database-url
-LLMGATEWAY_VALKEY_PASSWORD_FILE:secrets/valkey-password
-LLMGATEWAY_VALKEY_ACL_FILE:secrets/valkey-acl
-LLMGATEWAY_MASTER_KEYS_FILE:secrets/master-keys
-LLMGATEWAY_SESSION_PEPPER_FILE:secrets/session-pepper
-LLMGATEWAY_API_KEY_PEPPER_FILE:secrets/api-key-pepper
-LLMGATEWAY_COORDINATION_KEY_HASH_SECRET_FILE:secrets/coordination-secret
+LLM2API_POSTGRES_PASSWORD_FILE:secrets/postgres-password
+LLM2API_DATABASE_URL_FILE:secrets/database-url
+LLM2API_VALKEY_PASSWORD_FILE:secrets/valkey-password
+LLM2API_VALKEY_ACL_FILE:secrets/valkey-acl
+LLM2API_MASTER_KEYS_FILE:secrets/master-keys
+LLM2API_SESSION_PEPPER_FILE:secrets/session-pepper
+LLM2API_API_KEY_PEPPER_FILE:secrets/api-key-pepper
+LLM2API_COORDINATION_KEY_HASH_SECRET_FILE:secrets/coordination-secret
 EOF
 }
 
 write_configuration_checksum() {
   local root=$1 output=$2 relative
   : > "$output"
-  for relative in "${LLMGATEWAY_BACKUP_CONFIGURATION_FILES[@]}"; do
+  for relative in "${LLM2API_BACKUP_CONFIGURATION_FILES[@]}"; do
     (cd "$root" && sha256sum -- "$relative") >> "$output"
   done
 }
@@ -284,7 +284,7 @@ write_configuration_checksum() {
 verify_configuration_checksum() {
   local root=$1 checksum=$2 relative expected actual
   expected=''
-  for relative in "${LLMGATEWAY_BACKUP_CONFIGURATION_FILES[@]}"; do
+  for relative in "${LLM2API_BACKUP_CONFIGURATION_FILES[@]}"; do
     actual=$(cd "$root" && sha256sum -- "$relative" | awk '{print $1}')
     expected+="$actual  $relative"$'\n'
   done
@@ -341,7 +341,7 @@ verify_backup_payload() {
   postgres_digest=$actual_digest
   mapfile -t manifest_lines < "$payload/backup-manifest"
   [[ ${#manifest_lines[@]} -eq 7 ]] || { backup_error "backup manifest must contain exactly seven entries"; return 1; }
-  [[ ${manifest_lines[0]} == format=llmgateway-backup ]] || { backup_error "backup manifest format is invalid"; return 1; }
+  [[ ${manifest_lines[0]} == format=llm2api-backup ]] || { backup_error "backup manifest format is invalid"; return 1; }
   [[ ${manifest_lines[1]} =~ ^recovery_point_utc=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$ ]] || { backup_error "backup recovery point is invalid"; return 1; }
   recovery_point=${BASH_REMATCH[1]}
   recovery_point_parse=${recovery_point%Z}
@@ -353,9 +353,9 @@ verify_backup_payload() {
   gateway_image=${BASH_REMATCH[1]}
   [[ $gateway_image =~ @sha256:[a-f0-9]{64}$ ]] || { backup_error "backup gateway image is not immutable"; return 1; }
   configured_gateway_image=$(
-    unset LLMGATEWAY_GATEWAY_IMAGE
-    load_llmgateway_environment "$payload/configuration/deployment.env"
-    printf '%s' "${LLMGATEWAY_GATEWAY_IMAGE:-}"
+    unset LLM2API_GATEWAY_IMAGE
+    load_llm2api_environment "$payload/configuration/deployment.env"
+    printf '%s' "${LLM2API_GATEWAY_IMAGE:-}"
   ) || return 1
   [[ $gateway_image == "$configured_gateway_image" ]] || { backup_error "backup gateway image does not match deployment.env"; return 1; }
   gateway_digest=${gateway_image##*@}
@@ -370,50 +370,50 @@ load_backup_environment() {
   local -a control_files=()
   [[ $EUID -eq 0 ]] || { backup_error "backup operations require UID 0"; return 1; }
   require_backup_control_file "backup environment" "$file" || return 1
-  unset LLMGATEWAY_BACKUP_MODE LLMGATEWAY_RESTIC_IMAGE LLMGATEWAY_RESTIC_REPOSITORY_FILE \
-    LLMGATEWAY_RESTIC_PASSWORD_FILE LLMGATEWAY_RESTIC_AWS_CREDENTIALS_FILE \
-    LLMGATEWAY_RESTIC_AWS_CONFIG_FILE LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY \
-    LLMGATEWAY_DEPLOYMENT_ENVIRONMENT_FILE LLMGATEWAY_CONFIGURATION_DIRECTORY \
-    LLMGATEWAY_BACKUP_STAGING_ROOT LLMGATEWAY_BACKUP_LAST_SUCCESS_MARKER_FILE \
-    LLMGATEWAY_RESTIC_CHECK_SUBSET
-  load_llmgateway_environment "$file"
-  : "${LLMGATEWAY_BACKUP_MODE:?set LLMGATEWAY_BACKUP_MODE}"
-  : "${LLMGATEWAY_RESTIC_IMAGE:?set the immutable Restic image}"
-  : "${LLMGATEWAY_RESTIC_REPOSITORY_FILE:?set the Restic repository file}"
-  : "${LLMGATEWAY_RESTIC_PASSWORD_FILE:?set the Restic password file}"
-  : "${LLMGATEWAY_DEPLOYMENT_ENVIRONMENT_FILE:?set the deployment environment file}"
-  : "${LLMGATEWAY_CONFIGURATION_DIRECTORY:?set the configuration directory}"
-  : "${LLMGATEWAY_BACKUP_STAGING_ROOT:?set the backup staging root}"
-  : "${LLMGATEWAY_BACKUP_LAST_SUCCESS_MARKER_FILE:?set the backup success marker}"
-  [[ $LLMGATEWAY_RESTIC_IMAGE =~ @sha256:[a-f0-9]{64}$ ]] || { backup_error "Restic image must be immutable"; return 1; }
-  : "${LLMGATEWAY_RESTIC_CHECK_SUBSET:=5%}"
-  [[ $LLMGATEWAY_RESTIC_CHECK_SUBSET =~ ^(100|[1-9][0-9]?)%$ ]] || {
+  unset LLM2API_BACKUP_MODE LLM2API_RESTIC_IMAGE LLM2API_RESTIC_REPOSITORY_FILE \
+    LLM2API_RESTIC_PASSWORD_FILE LLM2API_RESTIC_AWS_CREDENTIALS_FILE \
+    LLM2API_RESTIC_AWS_CONFIG_FILE LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY \
+    LLM2API_DEPLOYMENT_ENVIRONMENT_FILE LLM2API_CONFIGURATION_DIRECTORY \
+    LLM2API_BACKUP_STAGING_ROOT LLM2API_BACKUP_LAST_SUCCESS_MARKER_FILE \
+    LLM2API_RESTIC_CHECK_SUBSET
+  load_llm2api_environment "$file"
+  : "${LLM2API_BACKUP_MODE:?set LLM2API_BACKUP_MODE}"
+  : "${LLM2API_RESTIC_IMAGE:?set the immutable Restic image}"
+  : "${LLM2API_RESTIC_REPOSITORY_FILE:?set the Restic repository file}"
+  : "${LLM2API_RESTIC_PASSWORD_FILE:?set the Restic password file}"
+  : "${LLM2API_DEPLOYMENT_ENVIRONMENT_FILE:?set the deployment environment file}"
+  : "${LLM2API_CONFIGURATION_DIRECTORY:?set the configuration directory}"
+  : "${LLM2API_BACKUP_STAGING_ROOT:?set the backup staging root}"
+  : "${LLM2API_BACKUP_LAST_SUCCESS_MARKER_FILE:?set the backup success marker}"
+  [[ $LLM2API_RESTIC_IMAGE =~ @sha256:[a-f0-9]{64}$ ]] || { backup_error "Restic image must be immutable"; return 1; }
+  : "${LLM2API_RESTIC_CHECK_SUBSET:=5%}"
+  [[ $LLM2API_RESTIC_CHECK_SUBSET =~ ^(100|[1-9][0-9]?)%$ ]] || {
     backup_error "Restic check subset must be between 1% and 100%"
     return 1
   }
-  export LLMGATEWAY_RESTIC_CHECK_SUBSET
-  configuration_directory=$(configured_path "configuration directory" "$LLMGATEWAY_CONFIGURATION_DIRECTORY") || return 1
-  staging_root=$(configured_path "backup staging root" "$LLMGATEWAY_BACKUP_STAGING_ROOT") || return 1
-  marker_file=$(configured_path "backup success marker" "$LLMGATEWAY_BACKUP_LAST_SUCCESS_MARKER_FILE") || return 1
-  deployment_file=$(configured_path "deployment environment file" "$LLMGATEWAY_DEPLOYMENT_ENVIRONMENT_FILE") || return 1
+  export LLM2API_RESTIC_CHECK_SUBSET
+  configuration_directory=$(configured_path "configuration directory" "$LLM2API_CONFIGURATION_DIRECTORY") || return 1
+  staging_root=$(configured_path "backup staging root" "$LLM2API_BACKUP_STAGING_ROOT") || return 1
+  marker_file=$(configured_path "backup success marker" "$LLM2API_BACKUP_LAST_SUCCESS_MARKER_FILE") || return 1
+  deployment_file=$(configured_path "deployment environment file" "$LLM2API_DEPLOYMENT_ENVIRONMENT_FILE") || return 1
   [[ $deployment_file == "$configuration_directory/deployment.env" ]] || { backup_error "deployment environment must be configuration/deployment.env"; return 1; }
   require_backup_directory "backup staging root" "$staging_root" || return 1
   [[ $marker_file == "$staging_root/last-success" ]] || { backup_error "backup success marker must be staging-root/last-success"; return 1; }
   if [[ -e $marker_file || -L $marker_file ]]; then
     require_backup_control_file "backup success marker" "$marker_file" || return 1
   fi
-  LLMGATEWAY_CONFIGURATION_DIRECTORY=$configuration_directory
-  LLMGATEWAY_BACKUP_STAGING_ROOT=$staging_root
-  LLMGATEWAY_BACKUP_LAST_SUCCESS_MARKER_FILE=$marker_file
-  LLMGATEWAY_DEPLOYMENT_ENVIRONMENT_FILE=$deployment_file
-  export LLMGATEWAY_CONFIGURATION_DIRECTORY LLMGATEWAY_BACKUP_STAGING_ROOT \
-    LLMGATEWAY_BACKUP_LAST_SUCCESS_MARKER_FILE LLMGATEWAY_DEPLOYMENT_ENVIRONMENT_FILE
-  require_backup_control_file "Restic repository file" "$LLMGATEWAY_RESTIC_REPOSITORY_FILE" || return 1
-  require_backup_control_file "Restic password file" "$LLMGATEWAY_RESTIC_PASSWORD_FILE" || return 1
-  LLMGATEWAY_RESTIC_REPOSITORY_FILE=$(realpath "$LLMGATEWAY_RESTIC_REPOSITORY_FILE")
-  LLMGATEWAY_RESTIC_PASSWORD_FILE=$(realpath "$LLMGATEWAY_RESTIC_PASSWORD_FILE")
-  control_files=("$file" "$LLMGATEWAY_RESTIC_REPOSITORY_FILE" "$LLMGATEWAY_RESTIC_PASSWORD_FILE")
-  for variable in LLMGATEWAY_RESTIC_AWS_CREDENTIALS_FILE LLMGATEWAY_RESTIC_AWS_CONFIG_FILE; do
+  LLM2API_CONFIGURATION_DIRECTORY=$configuration_directory
+  LLM2API_BACKUP_STAGING_ROOT=$staging_root
+  LLM2API_BACKUP_LAST_SUCCESS_MARKER_FILE=$marker_file
+  LLM2API_DEPLOYMENT_ENVIRONMENT_FILE=$deployment_file
+  export LLM2API_CONFIGURATION_DIRECTORY LLM2API_BACKUP_STAGING_ROOT \
+    LLM2API_BACKUP_LAST_SUCCESS_MARKER_FILE LLM2API_DEPLOYMENT_ENVIRONMENT_FILE
+  require_backup_control_file "Restic repository file" "$LLM2API_RESTIC_REPOSITORY_FILE" || return 1
+  require_backup_control_file "Restic password file" "$LLM2API_RESTIC_PASSWORD_FILE" || return 1
+  LLM2API_RESTIC_REPOSITORY_FILE=$(realpath "$LLM2API_RESTIC_REPOSITORY_FILE")
+  LLM2API_RESTIC_PASSWORD_FILE=$(realpath "$LLM2API_RESTIC_PASSWORD_FILE")
+  control_files=("$file" "$LLM2API_RESTIC_REPOSITORY_FILE" "$LLM2API_RESTIC_PASSWORD_FILE")
+  for variable in LLM2API_RESTIC_AWS_CREDENTIALS_FILE LLM2API_RESTIC_AWS_CONFIG_FILE; do
     if [[ ${!variable+x} == x ]]; then
       [[ -n ${!variable} ]] || { backup_error "$variable cannot be empty"; return 1; }
       require_backup_control_file "$variable" "${!variable}" || return 1
@@ -425,35 +425,35 @@ load_backup_environment() {
   for path in "${control_files[@]}"; do
     if paths_overlap "$path" "$configuration_directory"; then backup_error "backup control file overlaps configuration directory"; return 1; fi
     if paths_overlap "$path" "$staging_root"; then backup_error "backup control file overlaps staging root"; return 1; fi
-    if [[ ${LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY+x} == x && -n ${LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY:-} ]]; then
-      if paths_overlap "$path" "$(realpath "$LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY")"; then backup_error "backup control file overlaps local repository"; return 1; fi
+    if [[ ${LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY+x} == x && -n ${LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY:-} ]]; then
+      if paths_overlap "$path" "$(realpath "$LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY")"; then backup_error "backup control file overlaps local repository"; return 1; fi
     fi
   done
   if paths_overlap "$configuration_directory" "$staging_root"; then backup_error "configuration and staging paths overlap"; return 1; fi
-  repository_spec=$(read_repository_specification "$LLMGATEWAY_RESTIC_REPOSITORY_FILE") || return 1
-  require_repository_policy "$LLMGATEWAY_BACKUP_MODE" "$repository_spec" || return 1
-  if [[ $LLMGATEWAY_BACKUP_MODE == production && ${LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY+x} == x ]]; then
+  repository_spec=$(read_repository_specification "$LLM2API_RESTIC_REPOSITORY_FILE") || return 1
+  require_repository_policy "$LLM2API_BACKUP_MODE" "$repository_spec" || return 1
+  if [[ $LLM2API_BACKUP_MODE == production && ${LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY+x} == x ]]; then
     backup_error "production backups must not set a local repository directory"
     return 1
   fi
-  if [[ $LLMGATEWAY_BACKUP_MODE == acceptance ]]; then
-    if paths_overlap "$configuration_directory" "$(realpath "$LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY")"; then backup_error "configuration and local repository paths overlap"; return 1; fi
-    if paths_overlap "$staging_root" "$(realpath "$LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY")"; then backup_error "staging and local repository paths overlap"; return 1; fi
+  if [[ $LLM2API_BACKUP_MODE == acceptance ]]; then
+    if paths_overlap "$configuration_directory" "$(realpath "$LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY")"; then backup_error "configuration and local repository paths overlap"; return 1; fi
+    if paths_overlap "$staging_root" "$(realpath "$LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY")"; then backup_error "staging and local repository paths overlap"; return 1; fi
   fi
 }
 
 check_backup_freshness() {
-  local marker=${LLMGATEWAY_BACKUP_LAST_SUCCESS_MARKER_FILE:?} recovery_point recovery_epoch now_epoch age_seconds
+  local marker=${LLM2API_BACKUP_LAST_SUCCESS_MARKER_FILE:?} recovery_point recovery_epoch now_epoch age_seconds
   local -a marker_lines
   if [[ ! -e $marker ]]; then
     echo "backup success marker is absent; a first successful backup is required" >&2
     return 1
   fi
   mapfile -t marker_lines < "$marker"
-  if [[ ${#marker_lines[@]} -ne 3 || ${marker_lines[0]} != format=llmgateway-backup-success ||
+  if [[ ${#marker_lines[@]} -ne 3 || ${marker_lines[0]} != format=llm2api-backup-success ||
         ! ${marker_lines[1]} =~ ^recovery_point_utc=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ||
         ! ${marker_lines[2]} =~ ^completed_at_utc=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$ ]]; then
-    logger --priority daemon.alert --tag llmgateway-backup "LLMGateway backup success marker is invalid" 2>/dev/null || true
+    logger --priority daemon.alert --tag llm2api-backup "LLM2API backup success marker is invalid" 2>/dev/null || true
     echo "backup success marker is invalid" >&2
     return 1
   fi
@@ -462,11 +462,11 @@ check_backup_freshness() {
   now_epoch=$(date -u +%s)
   age_seconds=$(( now_epoch - recovery_epoch ))
   if (( recovery_epoch == 0 || age_seconds < 0 || age_seconds > 21600 )); then
-    logger --priority daemon.alert --tag llmgateway-backup "LLMGateway backup freshness exceeded the six-hour objective" 2>/dev/null || true
+    logger --priority daemon.alert --tag llm2api-backup "LLM2API backup freshness exceeded the six-hour objective" 2>/dev/null || true
     echo "backup freshness exceeded the six-hour objective" >&2
     return 1
   fi
-  printf 'LLMGateway backup recovery point age: %ss\n' "$age_seconds"
+  printf 'LLM2API backup recovery point age: %ss\n' "$age_seconds"
 }
 
 require_restic_run_owner() {
@@ -477,14 +477,14 @@ require_restic_run_owner() {
 }
 
 cleanup_restic_execution() {
-  local run_owner=$1 runtime_root=/run/llmgateway-restic run_directory container_ids remaining_ids container_id
+  local run_owner=$1 runtime_root=/run/llm2api-restic run_directory container_ids remaining_ids container_id
   local mount_point unexpected_runtime_entry
   require_restic_run_owner "$run_owner" || return 1
   run_directory=$runtime_root/$run_owner
 
   if ! container_ids=$(timeout --signal=TERM --kill-after=5s 20s docker ps --all --quiet --no-trunc \
-      --filter 'label=com.llmgateway.restic.owner' \
-      --filter "label=com.llmgateway.restic.owner=$run_owner"); then
+      --filter 'label=com.llm2api.restic.owner' \
+      --filter "label=com.llm2api.restic.owner=$run_owner"); then
     backup_error "could not enumerate owned Restic containers"
     return 1
   fi
@@ -494,8 +494,8 @@ cleanup_restic_execution() {
     timeout --signal=TERM --kill-after=5s 20s docker rm --force "$container_id" >/dev/null 2>&1 || true
   done <<< "$container_ids"
   if ! remaining_ids=$(timeout --signal=TERM --kill-after=5s 20s docker ps --all --quiet --no-trunc \
-      --filter 'label=com.llmgateway.restic.owner' \
-      --filter "label=com.llmgateway.restic.owner=$run_owner"); then
+      --filter 'label=com.llm2api.restic.owner' \
+      --filter "label=com.llm2api.restic.owner=$run_owner"); then
     backup_error "could not verify owned Restic container cleanup"
     return 1
   fi
@@ -534,11 +534,11 @@ cleanup_restic_execution() {
 }
 
 run_restic() {
-  local run_owner=${LLMGATEWAY_RESTIC_RUN_OWNER:-} runtime_root=/run/llmgateway-restic random_run_id
+  local run_owner=${LLM2API_RESTIC_RUN_OWNER:-} runtime_root=/run/llm2api-restic random_run_id
   local run_directory container_id_file container_name
   local mounts=(
-    --mount "type=bind,source=$LLMGATEWAY_RESTIC_REPOSITORY_FILE,target=/run/secrets/restic-repository,readonly"
-    --mount "type=bind,source=$LLMGATEWAY_RESTIC_PASSWORD_FILE,target=/run/secrets/restic-password,readonly"
+    --mount "type=bind,source=$LLM2API_RESTIC_REPOSITORY_FILE,target=/run/secrets/restic-repository,readonly"
+    --mount "type=bind,source=$LLM2API_RESTIC_PASSWORD_FILE,target=/run/secrets/restic-password,readonly"
   )
   local environment=() capabilities=(--cap-drop ALL)
   if [[ -z $run_owner ]]; then
@@ -552,15 +552,15 @@ run_restic() {
     backup_error "RESTIC_ALLOW_CHOWN must be empty or true"
     return 1
   fi
-  if [[ $LLMGATEWAY_BACKUP_MODE == acceptance ]]; then
-    mounts+=(--mount "type=bind,source=$LLMGATEWAY_RESTIC_LOCAL_REPOSITORY_DIRECTORY,target=/repository")
+  if [[ $LLM2API_BACKUP_MODE == acceptance ]]; then
+    mounts+=(--mount "type=bind,source=$LLM2API_RESTIC_LOCAL_REPOSITORY_DIRECTORY,target=/repository")
   fi
-  if [[ -n ${LLMGATEWAY_RESTIC_AWS_CREDENTIALS_FILE:-} ]]; then
-    mounts+=(--mount "type=bind,source=$LLMGATEWAY_RESTIC_AWS_CREDENTIALS_FILE,target=/run/secrets/aws-credentials,readonly")
+  if [[ -n ${LLM2API_RESTIC_AWS_CREDENTIALS_FILE:-} ]]; then
+    mounts+=(--mount "type=bind,source=$LLM2API_RESTIC_AWS_CREDENTIALS_FILE,target=/run/secrets/aws-credentials,readonly")
     environment+=(--env AWS_SHARED_CREDENTIALS_FILE=/run/secrets/aws-credentials)
   fi
-  if [[ -n ${LLMGATEWAY_RESTIC_AWS_CONFIG_FILE:-} ]]; then
-    mounts+=(--mount "type=bind,source=$LLMGATEWAY_RESTIC_AWS_CONFIG_FILE,target=/run/secrets/aws-config,readonly")
+  if [[ -n ${LLM2API_RESTIC_AWS_CONFIG_FILE:-} ]]; then
+    mounts+=(--mount "type=bind,source=$LLM2API_RESTIC_AWS_CONFIG_FILE,target=/run/secrets/aws-config,readonly")
     environment+=(--env AWS_CONFIG_FILE=/run/secrets/aws-config)
   fi
   if [[ -n ${RESTIC_DATA_MOUNT_SOURCE:-} ]]; then
@@ -576,7 +576,7 @@ run_restic() {
   run_directory=$runtime_root/$run_owner
   install -d -o 0 -g 0 -m 0700 "$run_directory"
   container_id_file=$run_directory/container-id
-  container_name=llmgateway-restic-$run_owner
+  container_name=llm2api-restic-$run_owner
   (
     cleanup_restic_subprocess() {
       local status=$?
@@ -589,10 +589,10 @@ run_restic() {
     trap 'exit 143' TERM
     umask 0077
     docker run --rm --read-only --name "$container_name" --cidfile "$container_id_file" \
-      --label "com.llmgateway.restic.owner=$run_owner" \
+      --label "com.llm2api.restic.owner=$run_owner" \
       "${capabilities[@]}" --security-opt no-new-privileges \
       --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
-      "${mounts[@]}" "${environment[@]}" "$LLMGATEWAY_RESTIC_IMAGE" \
+      "${mounts[@]}" "${environment[@]}" "$LLM2API_RESTIC_IMAGE" \
       --no-cache --repository-file /run/secrets/restic-repository --password-file /run/secrets/restic-password "$@"
   )
 }

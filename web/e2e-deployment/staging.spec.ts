@@ -11,7 +11,7 @@ test('preserves administrator and member boundaries through the production TLS t
   browser,
   page,
 }) => {
-  const mode = process.env.LLMGATEWAY_DEPLOYMENT_MODE
+  const mode = process.env.LLM2API_DEPLOYMENT_MODE
   if (mode === 'restored') {
     await verifyRestoredIdentities(page)
     return

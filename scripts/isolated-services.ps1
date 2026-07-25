@@ -2,9 +2,9 @@ $ErrorActionPreference = "Stop"
 
 . "$PSScriptRoot\docker.ps1"
 
-$script:LLMGatewayTestOwner = "llmgateway-isolated-tests"
+$script:LLM2APITestOwner = "llm2api-isolated-tests"
 
-function Invoke-LLMGatewayNativeProbe {
+function Invoke-LLM2APINativeProbe {
   param([Parameter(Mandatory = $true)][scriptblock] $Action)
 
   $previousPreference = $ErrorActionPreference
@@ -18,7 +18,7 @@ function Invoke-LLMGatewayNativeProbe {
   return [pscustomobject]@{ ExitCode = $exitCode; Output = @($output) }
 }
 
-function New-LLMGatewayTestRunID {
+function New-LLM2APITestRunID {
   param([Parameter(Mandatory = $true)][string] $Purpose)
 
   if ($Purpose -notmatch '^[a-z][a-z0-9-]{0,19}$') {
@@ -28,7 +28,7 @@ function New-LLMGatewayTestRunID {
   return "$Purpose-$PID-$suffix".ToLowerInvariant()
 }
 
-function Get-LLMGatewayFreeLoopbackPort {
+function Get-LLM2APIFreeLoopbackPort {
   $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
   try {
     $listener.Start()
@@ -38,13 +38,13 @@ function Get-LLMGatewayFreeLoopbackPort {
   }
 }
 
-function Get-LLMGatewayPublishedPort {
+function Get-LLM2APIPublishedPort {
   param(
     [Parameter(Mandatory = $true)][string] $Container,
     [Parameter(Mandatory = $true)][string] $Target
   )
 
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   $binding = & $docker port $Container $Target
   if ($LASTEXITCODE -ne 0) {
     throw "Could not read the published port for isolated container $Container."
@@ -56,24 +56,24 @@ function Get-LLMGatewayPublishedPort {
   return [int] $match.Groups[1].Value
 }
 
-function Wait-LLMGatewayPostgresReady {
+function Wait-LLM2APIPostgresReady {
   param(
     [Parameter(Mandatory = $true)][string] $Container,
     [Parameter(Mandatory = $true)][string] $DatabaseName,
     [Parameter(Mandatory = $true)][string] $Password
   )
 
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   $deadline = (Get-Date).AddSeconds(60)
   do {
-    $probe = Invoke-LLMGatewayNativeProbe {
+    $probe = Invoke-LLM2APINativeProbe {
       & $docker exec --env "PGPASSWORD=$Password" $Container `
-        psql -h 127.0.0.1 -U llmgateway -d $DatabaseName -Atc "SELECT 1"
+        psql -h 127.0.0.1 -U llm2api -d $DatabaseName -Atc "SELECT 1"
     }
     if ($probe.ExitCode -eq 0 -and $probe.Output.Count -eq 1 -and $probe.Output[0] -eq "1") {
       return
     }
-    $state = Invoke-LLMGatewayNativeProbe { & $docker inspect --format '{{.State.Running}}' $Container }
+    $state = Invoke-LLM2APINativeProbe { & $docker inspect --format '{{.State.Running}}' $Container }
     if ($state.ExitCode -ne 0 -or $state.Output.Count -ne 1 -or $state.Output[0] -ne "true") {
       throw "The isolated PostgreSQL container stopped before readiness."
     }
@@ -82,20 +82,20 @@ function Wait-LLMGatewayPostgresReady {
   throw "Timed out waiting for isolated PostgreSQL."
 }
 
-function Wait-LLMGatewayValkeyReady {
+function Wait-LLM2APIValkeyReady {
   param(
     [Parameter(Mandatory = $true)][string] $Container,
     [Parameter(Mandatory = $true)][string] $Password
   )
 
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   $deadline = (Get-Date).AddSeconds(60)
   do {
-    $probe = Invoke-LLMGatewayNativeProbe { & $docker exec $Container valkey-cli --no-auth-warning -a $Password ping }
+    $probe = Invoke-LLM2APINativeProbe { & $docker exec $Container valkey-cli --no-auth-warning -a $Password ping }
     if ($probe.ExitCode -eq 0 -and $probe.Output.Count -eq 1 -and $probe.Output[0] -eq "PONG") {
       return
     }
-    $state = Invoke-LLMGatewayNativeProbe { & $docker inspect --format '{{.State.Running}}' $Container }
+    $state = Invoke-LLM2APINativeProbe { & $docker inspect --format '{{.State.Running}}' $Container }
     if ($state.ExitCode -ne 0 -or $state.Output.Count -ne 1 -or $state.Output[0] -ne "true") {
       throw "The isolated Valkey container stopped before readiness."
     }
@@ -104,21 +104,21 @@ function Wait-LLMGatewayValkeyReady {
   throw "Timed out waiting for isolated Valkey."
 }
 
-function Start-LLMGatewayTestPostgres {
+function Start-LLM2APITestPostgres {
   param(
     [Parameter(Mandatory = $true)][string] $RunID,
     [Parameter(Mandatory = $true)][string] $DatabaseName,
     [Parameter(Mandatory = $true)][string] $Password
   )
 
-  $docker = Get-LLMGatewayDockerCommand
-  $containerName = "llmgateway-test-postgres-$RunID"
+  $docker = Get-LLM2APIDockerCommand
+  $containerName = "llm2api-test-postgres-$RunID"
   $containerOutput = & $docker run --detach --rm --name $containerName `
-    --label "llmgateway.test.owner=$script:LLMGatewayTestOwner" `
-    --label "llmgateway.test.run=$RunID" `
+    --label "llm2api.test.owner=$script:LLM2APITestOwner" `
+    --label "llm2api.test.run=$RunID" `
     --publish "127.0.0.1::5432" `
     --env "POSTGRES_DB=$DatabaseName" `
-    --env "POSTGRES_USER=llmgateway" `
+    --env "POSTGRES_USER=llm2api" `
     --env "POSTGRES_PASSWORD=$Password" `
     postgres:18.4-alpine
   $containerExitCode = $LASTEXITCODE
@@ -129,16 +129,16 @@ function Start-LLMGatewayTestPostgres {
   }
 
   try {
-    Wait-LLMGatewayPostgresReady -Container $container -DatabaseName $DatabaseName -Password $Password
-    $port = Get-LLMGatewayPublishedPort -Container $container -Target "5432/tcp"
+    Wait-LLM2APIPostgresReady -Container $container -DatabaseName $DatabaseName -Password $Password
+    $port = Get-LLM2APIPublishedPort -Container $container -Target "5432/tcp"
     return [pscustomobject]@{
       Container   = $container
-      DatabaseURL = "postgres://llmgateway:$Password@127.0.0.1:$port/$DatabaseName`?sslmode=disable"
+      DatabaseURL = "postgres://llm2api:$Password@127.0.0.1:$port/$DatabaseName`?sslmode=disable"
     }
   } catch {
     $startFailure = $_
     try {
-      Stop-LLMGatewayTestContainer -Container $container -RunID $RunID
+      Stop-LLM2APITestContainer -Container $container -RunID $RunID
     } catch {
       throw "PostgreSQL startup failed: $($startFailure.Exception.Message) Cleanup also failed: $($_.Exception.Message)"
     }
@@ -146,17 +146,17 @@ function Start-LLMGatewayTestPostgres {
   }
 }
 
-function Start-LLMGatewayTestValkey {
+function Start-LLM2APITestValkey {
   param(
     [Parameter(Mandatory = $true)][string] $RunID,
     [Parameter(Mandatory = $true)][string] $Password
   )
 
-  $docker = Get-LLMGatewayDockerCommand
-  $containerName = "llmgateway-test-valkey-$RunID"
+  $docker = Get-LLM2APIDockerCommand
+  $containerName = "llm2api-test-valkey-$RunID"
   $containerOutput = & $docker run --detach --rm --name $containerName `
-    --label "llmgateway.test.owner=$script:LLMGatewayTestOwner" `
-    --label "llmgateway.test.run=$RunID" `
+    --label "llm2api.test.owner=$script:LLM2APITestOwner" `
+    --label "llm2api.test.run=$RunID" `
     --publish "127.0.0.1::6379" `
     valkey/valkey:9.1.0-alpine `
     valkey-server --appendonly no --requirepass $Password
@@ -168,8 +168,8 @@ function Start-LLMGatewayTestValkey {
   }
 
   try {
-    Wait-LLMGatewayValkeyReady -Container $container -Password $Password
-    $port = Get-LLMGatewayPublishedPort -Container $container -Target "6379/tcp"
+    Wait-LLM2APIValkeyReady -Container $container -Password $Password
+    $port = Get-LLM2APIPublishedPort -Container $container -Target "6379/tcp"
     return [pscustomobject]@{
       Container = $container
       Address   = "127.0.0.1:$port"
@@ -177,7 +177,7 @@ function Start-LLMGatewayTestValkey {
   } catch {
     $startFailure = $_
     try {
-      Stop-LLMGatewayTestContainer -Container $container -RunID $RunID
+      Stop-LLM2APITestContainer -Container $container -RunID $RunID
     } catch {
       throw "Valkey startup failed: $($startFailure.Exception.Message) Cleanup also failed: $($_.Exception.Message)"
     }
@@ -185,7 +185,7 @@ function Start-LLMGatewayTestValkey {
   }
 }
 
-function Stop-LLMGatewayTestContainer {
+function Stop-LLM2APITestContainer {
   param(
     [string] $Container,
     [Parameter(Mandatory = $true)][string] $RunID
@@ -200,10 +200,10 @@ function Stop-LLMGatewayTestContainer {
   if ($Container -notmatch '^[a-f0-9]{12,64}$') {
     throw "Refusing to inspect an invalid isolated container ID."
   }
-  $docker = Get-LLMGatewayDockerCommand
-  $inspectionProbe = Invoke-LLMGatewayNativeProbe { & $docker inspect $Container }
+  $docker = Get-LLM2APIDockerCommand
+  $inspectionProbe = Invoke-LLM2APINativeProbe { & $docker inspect $Container }
   if ($inspectionProbe.ExitCode -ne 0) {
-    $existenceProbe = Invoke-LLMGatewayNativeProbe { & $docker ps --all --quiet --no-trunc --filter "id=$Container" }
+    $existenceProbe = Invoke-LLM2APINativeProbe { & $docker ps --all --quiet --no-trunc --filter "id=$Container" }
     if ($existenceProbe.ExitCode -ne 0) {
       throw "Could not determine whether isolated container $Container still exists."
     }
@@ -216,11 +216,11 @@ function Stop-LLMGatewayTestContainer {
   if ($inspection.Count -ne 1) {
     throw "Docker returned an invalid inspection result for isolated container $Container."
   }
-  $actualOwner = $inspection[0].Config.Labels.'llmgateway.test.owner'
-  $actualRunID = $inspection[0].Config.Labels.'llmgateway.test.run'
+  $actualOwner = $inspection[0].Config.Labels.'llm2api.test.owner'
+  $actualRunID = $inspection[0].Config.Labels.'llm2api.test.run'
   $actualName = [string] $inspection[0].Name
-  $expectedNames = @("/llmgateway-test-postgres-$RunID", "/llmgateway-test-valkey-$RunID")
-  if ($actualOwner -ne $script:LLMGatewayTestOwner -or $actualRunID -ne $RunID -or $actualName -notin $expectedNames) {
+  $expectedNames = @("/llm2api-test-postgres-$RunID", "/llm2api-test-valkey-$RunID")
+  if ($actualOwner -ne $script:LLM2APITestOwner -or $actualRunID -ne $RunID -or $actualName -notin $expectedNames) {
     throw "Refusing to remove container $Container because its isolated-test ownership does not match."
   }
   & $docker rm --force $Container *> $null
@@ -229,24 +229,24 @@ function Stop-LLMGatewayTestContainer {
   }
 }
 
-function Save-LLMGatewayEnvironment {
+function Save-LLM2APIEnvironment {
   $snapshot = @{}
-  foreach ($item in Get-ChildItem Env: | Where-Object { $_.Name -like "LLMGATEWAY_*" }) {
+  foreach ($item in Get-ChildItem Env: | Where-Object { $_.Name -like "LLM2API_*" }) {
     $snapshot[$item.Name] = $item.Value
   }
   return $snapshot
 }
 
-function Clear-LLMGatewayEnvironment {
-  foreach ($item in @(Get-ChildItem Env: | Where-Object { $_.Name -like "LLMGATEWAY_*" })) {
+function Clear-LLM2APIEnvironment {
+  foreach ($item in @(Get-ChildItem Env: | Where-Object { $_.Name -like "LLM2API_*" })) {
     [Environment]::SetEnvironmentVariable($item.Name, $null, "Process")
   }
 }
 
-function Restore-LLMGatewayEnvironment {
+function Restore-LLM2APIEnvironment {
   param([Parameter(Mandatory = $true)][hashtable] $Snapshot)
 
-  Clear-LLMGatewayEnvironment
+  Clear-LLM2APIEnvironment
   foreach ($name in $Snapshot.Keys) {
     [Environment]::SetEnvironmentVariable($name, $Snapshot[$name], "Process")
   }

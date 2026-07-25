@@ -9,9 +9,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/internal/providers"
-	"github.com/luckymaomi/llmgateway/internal/security"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/providers"
+	"github.com/luckymaomi/llm2api/internal/security"
 )
 
 const credentialProbePersistenceTimeout = 3 * time.Second

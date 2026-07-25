@@ -136,7 +136,7 @@ func writeEntry(archive *zip.Writer, sourceDirectory, entry string, modifiedAt t
 }
 
 func releaseMode(entry string) fs.FileMode {
-	if strings.HasSuffix(entry, ".sh") || !strings.Contains(entry, "/") && strings.HasPrefix(entry, "llmgateway") {
+	if strings.HasSuffix(entry, ".sh") || !strings.Contains(entry, "/") && strings.HasPrefix(entry, "llm2api") {
 		return 0o755
 	}
 	return 0o644

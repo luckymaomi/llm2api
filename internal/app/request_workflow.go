@@ -7,17 +7,17 @@ import (
 	"os"
 	"time"
 
-	"github.com/luckymaomi/llmgateway/internal/admission"
-	"github.com/luckymaomi/llmgateway/internal/config"
-	"github.com/luckymaomi/llmgateway/internal/coordination"
-	"github.com/luckymaomi/llmgateway/internal/observability"
-	"github.com/luckymaomi/llmgateway/internal/registry"
-	"github.com/luckymaomi/llmgateway/internal/requestflow"
-	"github.com/luckymaomi/llmgateway/internal/resilience"
-	"github.com/luckymaomi/llmgateway/internal/routing"
-	"github.com/luckymaomi/llmgateway/internal/security"
-	"github.com/luckymaomi/llmgateway/internal/store"
-	"github.com/luckymaomi/llmgateway/internal/usage"
+	"github.com/luckymaomi/llm2api/internal/admission"
+	"github.com/luckymaomi/llm2api/internal/config"
+	"github.com/luckymaomi/llm2api/internal/coordination"
+	"github.com/luckymaomi/llm2api/internal/observability"
+	"github.com/luckymaomi/llm2api/internal/registry"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
+	"github.com/luckymaomi/llm2api/internal/resilience"
+	"github.com/luckymaomi/llm2api/internal/routing"
+	"github.com/luckymaomi/llm2api/internal/security"
+	"github.com/luckymaomi/llm2api/internal/store"
+	"github.com/luckymaomi/llm2api/internal/usage"
 )
 
 type systemClock struct{}
@@ -35,13 +35,13 @@ func newRequestWorkflow(cfg config.Config, connections *store.Connections, regis
 		return nil, fmt.Errorf("load provider CA bundle: %w", err)
 	}
 	coordinator, err := coordination.New(connections.Valkey, coordination.Options{
-		Prefix: "llmgateway", KeyHashSecret: cfg.Security.CoordinationKeyHash,
+		Prefix: "llm2api", KeyHashSecret: cfg.Security.CoordinationKeyHash,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize request coordinator: %w", err)
 	}
 	admissionCoordinator, err := coordination.New(connections.Valkey, coordination.Options{
-		Prefix: "llmgateway-admission", KeyHashSecret: cfg.Security.CoordinationKeyHash,
+		Prefix: "llm2api-admission", KeyHashSecret: cfg.Security.CoordinationKeyHash,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize admission coordinator: %w", err)

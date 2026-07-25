@@ -15,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
 )
 
 type IdentityRepository struct {

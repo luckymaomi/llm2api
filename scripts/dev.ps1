@@ -12,7 +12,7 @@ $ErrorActionPreference = "Stop"
 
 . "$PSScriptRoot\docker.ps1"
 
-function Assert-LLMGatewayLoopbackPortAvailable {
+function Assert-LLM2APILoopbackPortAvailable {
   param(
     [Parameter(Mandatory = $true)][int] $Port,
     [Parameter(Mandatory = $true)][string] $Label
@@ -22,32 +22,32 @@ function Assert-LLMGatewayLoopbackPortAvailable {
   try {
     $listener.Start()
   } catch {
-    throw "$Label port 127.0.0.1:$Port is unavailable. Run python .\stop_dev.py to stop an old LLMGateway run. If the port belongs to another program, pass a different port to start_dev.py."
+    throw "$Label port 127.0.0.1:$Port is unavailable. Run python .\stop_dev.py to stop an old LLM2API run. If the port belongs to another program, pass a different port to start_dev.py."
   } finally {
     $listener.Stop()
   }
 }
 
-function Assert-LLMGatewayComposeContainerOwnership {
+function Assert-LLM2APIComposeContainerOwnership {
   param(
     [Parameter(Mandatory = $true)][string] $Container,
     [Parameter(Mandatory = $true)][string] $Service
   )
 
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   $encoded = & $docker inspect --format '{{json .Config.Labels}}' $Container
   if ($LASTEXITCODE -ne 0 -or -not $encoded) {
     throw "Could not inspect the ownership of $Container."
   }
   $labels = ConvertFrom-Json -InputObject ($encoded -join "")
-  if ($labels.'com.docker.compose.project' -ne "llmgateway" -or
+  if ($labels.'com.docker.compose.project' -ne "llm2api" -or
       $labels.'com.docker.compose.service' -ne $Service) {
-    throw "Refusing to use $Container because it is not owned by the LLMGateway Compose project."
+    throw "Refusing to use $Container because it is not owned by the LLM2API Compose project."
   }
 }
 
-function Get-LLMGatewayComposeConfiguration {
-  $docker = Get-LLMGatewayDockerCommand
+function Get-LLM2APIComposeConfiguration {
+  $docker = Get-LLM2APIDockerCommand
   $encoded = & $docker compose config --format json
   if ($LASTEXITCODE -ne 0 -or -not $encoded) {
     throw "Could not resolve the Docker Compose configuration."
@@ -55,7 +55,7 @@ function Get-LLMGatewayComposeConfiguration {
   return ConvertFrom-Json -InputObject ($encoded -join "")
 }
 
-function Assert-LLMGatewayComposeLoopbackBinding {
+function Assert-LLM2APIComposeLoopbackBinding {
   param(
     [Parameter(Mandatory = $true)] $Configuration,
     [Parameter(Mandatory = $true)][string] $Service,
@@ -74,13 +74,13 @@ function Assert-LLMGatewayComposeLoopbackBinding {
   }
 }
 
-function Get-LLMGatewayLoopbackContainerEndpoint {
+function Get-LLM2APILoopbackContainerEndpoint {
   param(
     [Parameter(Mandatory = $true)][string] $Container,
     [Parameter(Mandatory = $true)][string] $Target
   )
 
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   $bindings = @(& $docker port $Container $Target)
   if ($LASTEXITCODE -ne 0 -or $bindings.Count -ne 1) {
     throw "Expected one published loopback endpoint for $Container $Target."
@@ -92,10 +92,10 @@ function Get-LLMGatewayLoopbackContainerEndpoint {
   return "127.0.0.1:$($match.Groups[1].Value)"
 }
 
-function Get-LLMGatewayContainerEnvironment {
+function Get-LLM2APIContainerEnvironment {
   param([Parameter(Mandatory = $true)][string] $Container)
 
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   $encoded = & $docker inspect --format '{{json .Config.Env}}' $Container
   if ($LASTEXITCODE -ne 0 -or -not $encoded) {
     throw "Could not inspect the runtime configuration of $Container."
@@ -110,7 +110,7 @@ function Get-LLMGatewayContainerEnvironment {
   return $values
 }
 
-function Get-LLMGatewayRequiredEnvironmentValue {
+function Get-LLM2APIRequiredEnvironmentValue {
   param(
     [Parameter(Mandatory = $true)][hashtable] $Values,
     [Parameter(Mandatory = $true)][string] $Name,
@@ -123,34 +123,34 @@ function Get-LLMGatewayRequiredEnvironmentValue {
   return [string] $Values[$Name]
 }
 
-function Save-LLMGatewayProcessEnvironment {
+function Save-LLM2APIProcessEnvironment {
   $snapshot = @{}
   foreach ($item in Get-ChildItem Env: | Where-Object {
-      $_.Name -like "LLMGATEWAY_*" -or $_.Name -like "VITE_*"
+      $_.Name -like "LLM2API_*" -or $_.Name -like "VITE_*"
     }) {
     $snapshot[$item.Name] = $item.Value
   }
   return $snapshot
 }
 
-function Clear-LLMGatewayProcessEnvironment {
+function Clear-LLM2APIProcessEnvironment {
   foreach ($item in @(Get-ChildItem Env: | Where-Object {
-        $_.Name -like "LLMGATEWAY_*" -or $_.Name -like "VITE_*"
+        $_.Name -like "LLM2API_*" -or $_.Name -like "VITE_*"
       })) {
     [Environment]::SetEnvironmentVariable($item.Name, $null, "Process")
   }
 }
 
-function Restore-LLMGatewayProcessEnvironment {
+function Restore-LLM2APIProcessEnvironment {
   param([Parameter(Mandatory = $true)][hashtable] $Snapshot)
 
-  Clear-LLMGatewayProcessEnvironment
+  Clear-LLM2APIProcessEnvironment
   foreach ($name in $Snapshot.Keys) {
     [Environment]::SetEnvironmentVariable($name, $Snapshot[$name], "Process")
   }
 }
 
-function Save-LLMGatewayNamedEnvironment {
+function Save-LLM2APINamedEnvironment {
   param([Parameter(Mandatory = $true)][string[]] $Names)
 
   $environment = [Environment]::GetEnvironmentVariables("Process")
@@ -164,7 +164,7 @@ function Save-LLMGatewayNamedEnvironment {
   return $snapshot
 }
 
-function Restore-LLMGatewayNamedEnvironment {
+function Restore-LLM2APINamedEnvironment {
   param([Parameter(Mandatory = $true)][hashtable] $Snapshot)
 
   foreach ($name in $Snapshot.Keys) {
@@ -177,7 +177,7 @@ function Restore-LLMGatewayNamedEnvironment {
   }
 }
 
-function Wait-LLMGatewayHTTPReady {
+function Wait-LLM2APIHTTPReady {
   param(
     [Parameter(Mandatory = $true)][string] $URL,
     [Parameter(Mandatory = $true)][System.Diagnostics.Process] $Process,
@@ -204,7 +204,7 @@ function Wait-LLMGatewayHTTPReady {
   throw "Timed out waiting for $Label at $URL."
 }
 
-function Stop-LLMGatewayOwnedProcess {
+function Stop-LLM2APIOwnedProcess {
   param(
     [System.Diagnostics.Process] $Process,
     [Parameter(Mandatory = $true)][string] $Label
@@ -227,7 +227,7 @@ function Stop-LLMGatewayOwnedProcess {
   }
 }
 
-function Remove-LLMGatewayOwnedRunDirectory {
+function Remove-LLM2APIOwnedRunDirectory {
   param(
     [string] $RunDirectory,
     [Parameter(Mandatory = $true)][string] $BuildRoot
@@ -263,8 +263,8 @@ $runDirectory = $null
 Push-Location $root
 try {
   if (-not $InfrastructureOnly) {
-    Assert-LLMGatewayLoopbackPortAvailable -Port $GatewayPort -Label "Gateway"
-    Assert-LLMGatewayLoopbackPortAvailable -Port $WebPort -Label "Web"
+    Assert-LLM2APILoopbackPortAvailable -Port $GatewayPort -Label "Gateway"
+    Assert-LLM2APILoopbackPortAvailable -Port $WebPort -Label "Web"
 
     $goCommand = Get-Command go -CommandType Application -ErrorAction SilentlyContinue
     if (-not $goCommand) {
@@ -299,35 +299,35 @@ try {
   }
 
   Write-Host "Validating Docker Compose configuration..."
-  $composeConfiguration = Get-LLMGatewayComposeConfiguration
-  Assert-LLMGatewayComposeLoopbackBinding `
+  $composeConfiguration = Get-LLM2APIComposeConfiguration
+  Assert-LLM2APIComposeLoopbackBinding `
     -Configuration $composeConfiguration -Service "postgres" -Target 5432
-  Assert-LLMGatewayComposeLoopbackBinding `
+  Assert-LLM2APIComposeLoopbackBinding `
     -Configuration $composeConfiguration -Service "valkey" -Target 6379
 
-  Write-Host "Starting LLMGateway-owned PostgreSQL and Valkey..."
-  Invoke-LLMGatewayDocker compose up --detach
-  Wait-LLMGatewayContainerHealthy -Container "llmgateway-postgres"
-  Wait-LLMGatewayContainerHealthy -Container "llmgateway-valkey"
-  Assert-LLMGatewayComposeContainerOwnership -Container "llmgateway-postgres" -Service "postgres"
-  Assert-LLMGatewayComposeContainerOwnership -Container "llmgateway-valkey" -Service "valkey"
-  Test-LLMGatewayPostgres
-  Test-LLMGatewayValkey
+  Write-Host "Starting LLM2API-owned PostgreSQL and Valkey..."
+  Invoke-LLM2APIDocker compose up --detach
+  Wait-LLM2APIContainerHealthy -Container "llm2api-postgres"
+  Wait-LLM2APIContainerHealthy -Container "llm2api-valkey"
+  Assert-LLM2APIComposeContainerOwnership -Container "llm2api-postgres" -Service "postgres"
+  Assert-LLM2APIComposeContainerOwnership -Container "llm2api-valkey" -Service "valkey"
+  Test-LLM2APIPostgres
+  Test-LLM2APIValkey
 
-  $postgresAddress = Get-LLMGatewayLoopbackContainerEndpoint `
-    -Container "llmgateway-postgres" -Target "5432/tcp"
-  $valkeyAddress = Get-LLMGatewayLoopbackContainerEndpoint `
-    -Container "llmgateway-valkey" -Target "6379/tcp"
-  $postgresEnvironment = Get-LLMGatewayContainerEnvironment -Container "llmgateway-postgres"
-  $valkeyEnvironment = Get-LLMGatewayContainerEnvironment -Container "llmgateway-valkey"
-  $postgresDatabase = Get-LLMGatewayRequiredEnvironmentValue `
-    -Values $postgresEnvironment -Name "POSTGRES_DB" -Container "llmgateway-postgres"
-  $postgresUser = Get-LLMGatewayRequiredEnvironmentValue `
-    -Values $postgresEnvironment -Name "POSTGRES_USER" -Container "llmgateway-postgres"
-  $postgresPassword = Get-LLMGatewayRequiredEnvironmentValue `
-    -Values $postgresEnvironment -Name "POSTGRES_PASSWORD" -Container "llmgateway-postgres"
-  $valkeyPassword = Get-LLMGatewayRequiredEnvironmentValue `
-    -Values $valkeyEnvironment -Name "VALKEY_PASSWORD" -Container "llmgateway-valkey"
+  $postgresAddress = Get-LLM2APILoopbackContainerEndpoint `
+    -Container "llm2api-postgres" -Target "5432/tcp"
+  $valkeyAddress = Get-LLM2APILoopbackContainerEndpoint `
+    -Container "llm2api-valkey" -Target "6379/tcp"
+  $postgresEnvironment = Get-LLM2APIContainerEnvironment -Container "llm2api-postgres"
+  $valkeyEnvironment = Get-LLM2APIContainerEnvironment -Container "llm2api-valkey"
+  $postgresDatabase = Get-LLM2APIRequiredEnvironmentValue `
+    -Values $postgresEnvironment -Name "POSTGRES_DB" -Container "llm2api-postgres"
+  $postgresUser = Get-LLM2APIRequiredEnvironmentValue `
+    -Values $postgresEnvironment -Name "POSTGRES_USER" -Container "llm2api-postgres"
+  $postgresPassword = Get-LLM2APIRequiredEnvironmentValue `
+    -Values $postgresEnvironment -Name "POSTGRES_PASSWORD" -Container "llm2api-postgres"
+  $valkeyPassword = Get-LLM2APIRequiredEnvironmentValue `
+    -Values $valkeyEnvironment -Name "VALKEY_PASSWORD" -Container "llm2api-valkey"
 
   Write-Host "Development infrastructure is ready."
   Write-Host "PostgreSQL: $postgresAddress (persistent Compose volume)"
@@ -344,7 +344,7 @@ try {
   $gatewayBinary = Join-Path $runDirectory "gateway.exe"
 
   Write-Host "Building the real Go gateway..."
-  $goEnvironmentSnapshot = Save-LLMGatewayNamedEnvironment -Names @("GOOS", "GOARCH")
+  $goEnvironmentSnapshot = Save-LLM2APINamedEnvironment -Names @("GOOS", "GOARCH")
   try {
     $env:GOOS = $goHostOS
     $env:GOARCH = $goHostArch
@@ -353,38 +353,38 @@ try {
       throw "Gateway build failed."
     }
   } finally {
-    Restore-LLMGatewayNamedEnvironment -Snapshot $goEnvironmentSnapshot
+    Restore-LLM2APINamedEnvironment -Snapshot $goEnvironmentSnapshot
   }
 
   $databaseURL = "postgres://$([uri]::EscapeDataString($postgresUser)):$([uri]::EscapeDataString($postgresPassword))@$postgresAddress/$([uri]::EscapeDataString($postgresDatabase))?sslmode=disable"
-  $environmentSnapshot = Save-LLMGatewayProcessEnvironment
+  $environmentSnapshot = Save-LLM2APIProcessEnvironment
   try {
-    Clear-LLMGatewayProcessEnvironment
-    $env:LLMGATEWAY_PROFILE = "development"
-    $env:LLMGATEWAY_HTTP_ADDRESS = "127.0.0.1:$GatewayPort"
-    $env:LLMGATEWAY_DATABASE_URL = $databaseURL
-    $env:LLMGATEWAY_DATABASE_MIGRATE_ON_START = "true"
-    $env:LLMGATEWAY_VALKEY_ADDRESS = $valkeyAddress
-    $env:LLMGATEWAY_VALKEY_PASSWORD = $valkeyPassword
-    $env:LLMGATEWAY_VALKEY_DATABASE = "0"
-    $env:LLMGATEWAY_COOKIE_SECURE = "false"
+    Clear-LLM2APIProcessEnvironment
+    $env:LLM2API_PROFILE = "development"
+    $env:LLM2API_HTTP_ADDRESS = "127.0.0.1:$GatewayPort"
+    $env:LLM2API_DATABASE_URL = $databaseURL
+    $env:LLM2API_DATABASE_MIGRATE_ON_START = "true"
+    $env:LLM2API_VALKEY_ADDRESS = $valkeyAddress
+    $env:LLM2API_VALKEY_PASSWORD = $valkeyPassword
+    $env:LLM2API_VALKEY_DATABASE = "0"
+    $env:LLM2API_COOKIE_SECURE = "false"
     # Meta/Clash Fake-IP DNS is dual-stack on Windows. These are local proxy
     # ranges, not Provider or user IP allowlists; public upstream IPs remain
     # free to change and are re-resolved for every outbound request.
-    $env:LLMGATEWAY_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15,fdfe:dcba:9876::/64"
+    $env:LLM2API_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15,fdfe:dcba:9876::/64"
     $gatewayProcess = Start-Process -FilePath $gatewayBinary -WorkingDirectory $root `
       -NoNewWindow -PassThru
   } finally {
-    Restore-LLMGatewayProcessEnvironment -Snapshot $environmentSnapshot
+    Restore-LLM2APIProcessEnvironment -Snapshot $environmentSnapshot
   }
 
   $gatewayURL = "http://127.0.0.1:$GatewayPort"
-  Wait-LLMGatewayHTTPReady -URL "$gatewayURL/health/ready" -Process $gatewayProcess `
+  Wait-LLM2APIHTTPReady -URL "$gatewayURL/health/ready" -Process $gatewayProcess `
     -Label "gateway"
 
-  $environmentSnapshot = Save-LLMGatewayProcessEnvironment
+  $environmentSnapshot = Save-LLM2APIProcessEnvironment
   try {
-    Clear-LLMGatewayProcessEnvironment
+    Clear-LLM2APIProcessEnvironment
     $env:VITE_API_PROXY_TARGET = $gatewayURL
     $webArguments = @(
       "`"$viteEntry`"",
@@ -395,14 +395,14 @@ try {
     $webProcess = Start-Process -FilePath $nodeCommand.Source -ArgumentList $webArguments `
       -WorkingDirectory (Join-Path $root "web") -NoNewWindow -PassThru
   } finally {
-    Restore-LLMGatewayProcessEnvironment -Snapshot $environmentSnapshot
+    Restore-LLM2APIProcessEnvironment -Snapshot $environmentSnapshot
   }
 
   $webURL = "http://127.0.0.1:$WebPort"
-  Wait-LLMGatewayHTTPReady -URL $webURL -Process $webProcess -Label "Web development server"
+  Wait-LLM2APIHTTPReady -URL $webURL -Process $webProcess -Label "Web development server"
 
   Write-Host ""
-  Write-Host "LLMGateway is ready."
+  Write-Host "LLM2API is ready."
   Write-Host "Web UI:     $webURL"
   Write-Host "Gateway:    $gatewayURL"
   Write-Host "Readiness:  $gatewayURL/health/ready"
@@ -423,17 +423,17 @@ try {
 } finally {
   $cleanupFailures = [System.Collections.Generic.List[string]]::new()
   try {
-    Stop-LLMGatewayOwnedProcess -Process $webProcess -Label "Web development server"
+    Stop-LLM2APIOwnedProcess -Process $webProcess -Label "Web development server"
   } catch {
     $cleanupFailures.Add("Web cleanup failed: $($_.Exception.Message)")
   }
   try {
-    Stop-LLMGatewayOwnedProcess -Process $gatewayProcess -Label "gateway"
+    Stop-LLM2APIOwnedProcess -Process $gatewayProcess -Label "gateway"
   } catch {
     $cleanupFailures.Add("Gateway cleanup failed: $($_.Exception.Message)")
   }
   try {
-    Remove-LLMGatewayOwnedRunDirectory -RunDirectory $runDirectory -BuildRoot $buildRoot
+    Remove-LLM2APIOwnedRunDirectory -RunDirectory $runDirectory -BuildRoot $buildRoot
   } catch {
     $cleanupFailures.Add("Build cleanup failed: $($_.Exception.Message)")
   }

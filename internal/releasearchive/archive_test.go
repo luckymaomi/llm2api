@@ -15,8 +15,8 @@ func TestWriteCreatesCanonicalDeterministicArchive(t *testing.T) {
 	root := t.TempDir()
 	writeArchiveFixture(t, root, "README.md", "release\n")
 	writeArchiveFixture(t, root, "deploy/install-linux.sh", "#!/usr/bin/env bash\n")
-	writeArchiveFixture(t, root, "llmgateway", "binary")
-	entries := []string{"llmgateway", "README.md", "deploy/install-linux.sh"}
+	writeArchiveFixture(t, root, "llm2api", "binary")
+	entries := []string{"llm2api", "README.md", "deploy/install-linux.sh"}
 	modifiedAt := time.Date(2026, time.July, 22, 12, 34, 56, 0, time.UTC)
 
 	firstPath := filepath.Join(t.TempDir(), "first.zip")
@@ -43,7 +43,7 @@ func TestWriteCreatesCanonicalDeterministicArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reader.Close()
-	wantNames := []string{"README.md", "deploy/install-linux.sh", "llmgateway"}
+	wantNames := []string{"README.md", "deploy/install-linux.sh", "llm2api"}
 	wantModes := []os.FileMode{0o644, 0o755, 0o755}
 	if len(reader.File) != len(wantNames) {
 		t.Fatalf("archive contains %d entries, want %d", len(reader.File), len(wantNames))

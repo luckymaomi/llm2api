@@ -19,7 +19,7 @@ function Assert-HTTPFailureStatus {
   throw $FailureMessage
 }
 
-function Wait-LLMGatewayReady {
+function Wait-LLM2APIReady {
   param(
     [Parameter(Mandatory = $true)][System.Diagnostics.Process] $Process,
     [Parameter(Mandatory = $true)][string] $BaseURL
@@ -45,7 +45,7 @@ function Set-ProviderFixtureCatalog {
     [Parameter(Mandatory = $true)][string] $ProviderBaseURL
   )
 
-  & $Docker exec $Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_core -c `
+  & $Docker exec $Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_core -c `
     "UPDATE providers SET base_url = '$ProviderBaseURL' WHERE catalog_id = 'siliconflow'; UPDATE models SET upstream_name = 'fixture-chat' WHERE provider_id = (SELECT id FROM providers WHERE catalog_id = 'siliconflow');" | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Could not redirect the code-owned Provider catalog to the fixture." }
 }
@@ -66,12 +66,12 @@ function ConvertTo-UTF8Hex {
 }
 
 Push-Location (Join-Path $PSScriptRoot "..")
-$runID = New-LLMGatewayTestRunID -Purpose "core"
+$runID = New-LLM2APITestRunID -Purpose "core"
 $postgres = $null
 $valkey = $null
 $gatewayProcess = $null
 $providerProcess = $null
-$environmentSnapshot = Save-LLMGatewayEnvironment
+$environmentSnapshot = Save-LLM2APIEnvironment
 $testFailure = $null
 $runningOnWindows = $env:OS -eq "Windows_NT"
 $binaryName = if ($runningOnWindows) { "gateway.exe" } else { "gateway" }
@@ -86,45 +86,45 @@ $providerStderrPath = Join-Path $buildDirectory "provider.stderr.log"
 $providerCertificatePath = Join-Path $buildDirectory "provider-ca.pem"
 
 try {
-  Clear-LLMGatewayEnvironment
+  Clear-LLM2APIEnvironment
   New-Item -ItemType Directory -Force $buildDirectory | Out-Null
-  $postgres = Start-LLMGatewayTestPostgres -RunID $runID -DatabaseName "llmgateway_core" -Password "core-postgres-fixture"
-  $docker = Get-LLMGatewayDockerCommand
+  $postgres = Start-LLM2APITestPostgres -RunID $runID -DatabaseName "llm2api_core" -Password "core-postgres-fixture"
+  $docker = Get-LLM2APIDockerCommand
 
   $valkeyPassword = "core-valkey-fixture"
-  $valkey = Start-LLMGatewayTestValkey -RunID $runID -Password $valkeyPassword
-  $gatewayPort = Get-LLMGatewayFreeLoopbackPort
-  $providerPort = Get-LLMGatewayFreeLoopbackPort
-  $providerAdminPort = Get-LLMGatewayFreeLoopbackPort
+  $valkey = Start-LLM2APITestValkey -RunID $runID -Password $valkeyPassword
+  $gatewayPort = Get-LLM2APIFreeLoopbackPort
+  $providerPort = Get-LLM2APIFreeLoopbackPort
+  $providerAdminPort = Get-LLM2APIFreeLoopbackPort
   $baseURL = "http://127.0.0.1:$gatewayPort"
   $providerBaseURL = "https://127.0.0.1:$providerPort/v1"
   $providerAdminURL = "http://127.0.0.1:$providerAdminPort"
 
-  $env:LLMGATEWAY_PROFILE = "test"
-  $env:LLMGATEWAY_HTTP_ADDRESS = "127.0.0.1:$gatewayPort"
-  $env:LLMGATEWAY_DATABASE_URL = $postgres.DatabaseURL
-  $env:LLMGATEWAY_DATABASE_MIGRATE_ON_START = "true"
-  $env:LLMGATEWAY_VALKEY_ADDRESS = $valkey.Address
-  $env:LLMGATEWAY_VALKEY_PASSWORD = $valkeyPassword
-  $env:LLMGATEWAY_VALKEY_DATABASE = "0"
-  $env:LLMGATEWAY_MASTER_KEYS = "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-  $env:LLMGATEWAY_ACTIVE_MASTER_KEY_VERSION = "1"
-  $env:LLMGATEWAY_SESSION_PEPPER = "llmgateway-core-session-pepper-00000"
-  $env:LLMGATEWAY_API_KEY_PEPPER = "llmgateway-core-api-key-pepper-00000"
-  $env:LLMGATEWAY_COOKIE_SECURE = "false"
-  $env:LLMGATEWAY_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15"
-  $env:LLMGATEWAY_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
-  $env:LLMGATEWAY_REQUEST_MAX_ACTIVE = "2"
-  $env:LLMGATEWAY_REQUEST_MAX_QUEUE_WAIT = "5s"
-  $env:LLMGATEWAY_REQUEST_LEASE_TTL = "3s"
-  $env:LLMGATEWAY_REQUEST_EXECUTION_HEARTBEAT_INTERVAL = "100ms"
-  $env:LLMGATEWAY_REQUEST_EXECUTION_STALE_AFTER = "1s"
-  $env:LLMGATEWAY_REQUEST_RECOVERY_INTERVAL = "200ms"
-  $env:LLMGATEWAY_CONTROL_TEST_DATABASE_URL = $postgres.DatabaseURL
-  $env:LLMGATEWAY_TEST_VALKEY_ADDRESS = $valkey.Address
-  $env:LLMGATEWAY_TEST_VALKEY_PASSWORD = $valkeyPassword
-  $env:LLMGATEWAY_TEST_VALKEY_DATABASE = "1"
-  $env:LLMGATEWAY_TEST_VALKEY_REQUIRED = "true"
+  $env:LLM2API_PROFILE = "test"
+  $env:LLM2API_HTTP_ADDRESS = "127.0.0.1:$gatewayPort"
+  $env:LLM2API_DATABASE_URL = $postgres.DatabaseURL
+  $env:LLM2API_DATABASE_MIGRATE_ON_START = "true"
+  $env:LLM2API_VALKEY_ADDRESS = $valkey.Address
+  $env:LLM2API_VALKEY_PASSWORD = $valkeyPassword
+  $env:LLM2API_VALKEY_DATABASE = "0"
+  $env:LLM2API_MASTER_KEYS = "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  $env:LLM2API_ACTIVE_MASTER_KEY_VERSION = "1"
+  $env:LLM2API_SESSION_PEPPER = "llm2api-core-session-pepper-00000"
+  $env:LLM2API_API_KEY_PEPPER = "llm2api-core-api-key-pepper-00000"
+  $env:LLM2API_COOKIE_SECURE = "false"
+  $env:LLM2API_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15"
+  $env:LLM2API_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
+  $env:LLM2API_REQUEST_MAX_ACTIVE = "2"
+  $env:LLM2API_REQUEST_MAX_QUEUE_WAIT = "5s"
+  $env:LLM2API_REQUEST_LEASE_TTL = "3s"
+  $env:LLM2API_REQUEST_EXECUTION_HEARTBEAT_INTERVAL = "100ms"
+  $env:LLM2API_REQUEST_EXECUTION_STALE_AFTER = "1s"
+  $env:LLM2API_REQUEST_RECOVERY_INTERVAL = "200ms"
+  $env:LLM2API_CONTROL_TEST_DATABASE_URL = $postgres.DatabaseURL
+  $env:LLM2API_TEST_VALKEY_ADDRESS = $valkey.Address
+  $env:LLM2API_TEST_VALKEY_PASSWORD = $valkeyPassword
+  $env:LLM2API_TEST_VALKEY_DATABASE = "1"
+  $env:LLM2API_TEST_VALKEY_REQUIRED = "true"
 
   & go test ./internal/store -run '^Test(CredentialRecoveryPermitIsSharedAndFencedAcrossRepositories|GatewayKeyDeletion)' -count=1
   if ($LASTEXITCODE -ne 0) { throw "Shared credential health or API key deletion integration test failed." }
@@ -170,7 +170,7 @@ try {
   }
   if ($runningOnWindows) { $gatewayStartArguments.WindowStyle = "Hidden" }
   $gatewayProcess = Start-Process @gatewayStartArguments
-  Wait-LLMGatewayReady -Process $gatewayProcess -BaseURL $baseURL
+  Wait-LLM2APIReady -Process $gatewayProcess -BaseURL $baseURL
   Set-ProviderFixtureCatalog -Docker $docker -Container $postgres.Container -ProviderBaseURL $providerBaseURL
 
   $adminSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
@@ -215,7 +215,7 @@ try {
   $pool = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/resource-pools" -WebSession $adminSession `
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json; charset=utf-8" -Body $naturalPoolBody
   if ($pool.data.status -ne "active") { throw "Resource pool creation did not become live." }
-  $storedPoolNameHex = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_core -Atc `
+  $storedPoolNameHex = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_core -Atc `
     "SELECT encode(convert_to(name, 'UTF8'), 'hex') FROM resource_pools WHERE id = '$($pool.data.id)'"
   if ($LASTEXITCODE -ne 0 -or $storedPoolNameHex -ne (ConvertTo-UTF8Hex -Value $naturalPoolName)) {
     throw "Resource pool creation did not preserve its natural-language name."
@@ -242,7 +242,7 @@ try {
   $plan = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/plans" -WebSession $adminSession `
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json; charset=utf-8" -Body $naturalPlanBody
   if ($plan.data.current_version.version -ne 1 -or $plan.data.current_version.routes.Count -ne 1) { throw "Plan publication did not create one immutable routed version." }
-  $storedPlanNameHex = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_core -Atc `
+  $storedPlanNameHex = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_core -Atc `
     "SELECT encode(convert_to(name, 'UTF8'), 'hex') FROM service_plans WHERE id = '$($plan.data.id)'"
   if ($LASTEXITCODE -ne 0 -or $storedPlanNameHex -ne (ConvertTo-UTF8Hex -Value $naturalPlanName)) {
     throw "Plan publication did not preserve its natural-language name."
@@ -302,7 +302,7 @@ try {
   Stop-Process -Id $gatewayProcess.Id -Force
   $null = $gatewayProcess.WaitForExit(5000)
   $gatewayProcess = Start-Process @gatewayStartArguments
-  Wait-LLMGatewayReady -Process $gatewayProcess -BaseURL $baseURL
+  Wait-LLM2APIReady -Process $gatewayProcess -BaseURL $baseURL
   Set-ProviderFixtureCatalog -Docker $docker -Container $postgres.Container -ProviderBaseURL $providerBaseURL
   $restartChat = Invoke-RestMethod -Method Post -Uri "$baseURL/v1/chat/completions" `
     -Headers @{ Authorization = "Bearer $gatewayKeySecret"; "Idempotency-Key" = [guid]::NewGuid().ToString() } `
@@ -323,12 +323,12 @@ try {
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
     -Body (@{ status = "active"; expectedUpdatedAt = $disabledCredential.data.updated_at } | ConvertTo-Json)
 
-  $requestFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_core -Atc `
+  $requestFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_core -Atc `
     "SELECT request.status || '|' || request.input_tokens || '|' || request.output_tokens || '|' || (SELECT count(*) FROM request_attempts attempt WHERE attempt.request_id = request.id AND attempt.status = 'completed') FROM requests request WHERE request.gateway_key_id = '$($createdKey.data.key.id)' AND request.idempotency_key = '$requestIdempotencyKey'"
   if ($LASTEXITCODE -ne 0 -or $requestFacts -ne "completed|4|2|1") {
     throw "Request usage and upstream attempt facts did not complete exactly once: $requestFacts"
   }
-  $secretFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_core -Atc `
+  $secretFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_core -Atc `
     "SELECT (SELECT count(*) FROM credential_mutations WHERE result::text LIKE '%$credentialSecret%') || '|' || (SELECT count(*) FROM audit_events WHERE detail::text LIKE '%$credentialSecret%') || '|' || (SELECT count(*) FROM gateway_key_mutations WHERE result ? 'secret')"
   if ($LASTEXITCODE -ne 0 -or $secretFacts -ne "0|0|0") { throw "A one-time secret crossed a mutation or audit boundary: $secretFacts" }
 
@@ -346,7 +346,7 @@ try {
   $gatewayKeySecret = $null
   Invoke-RestMethod -Method Delete -Uri "$baseURL/api/control/session" -WebSession $memberSession -Headers @{ "X-CSRF-Token" = $memberCSRF } | Out-Null
   Invoke-RestMethod -Method Delete -Uri "$baseURL/api/control/session" -WebSession $adminSession -Headers @{ "X-CSRF-Token" = $adminCSRF } | Out-Null
-  $activeSessionCount = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_core -Atc `
+  $activeSessionCount = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_core -Atc `
     "SELECT count(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > now()"
   if ($LASTEXITCODE -ne 0 -or $activeSessionCount -ne "0") { throw "A core acceptance session remained active after logout." }
 } catch {
@@ -371,12 +371,12 @@ try {
       $cleanupFailures += "$($item.Name) cleanup: $($_.Exception.Message)"
     }
   }
-  try { Restore-LLMGatewayEnvironment -Snapshot $environmentSnapshot } catch { $cleanupFailures += "environment restore: $($_.Exception.Message)" }
+  try { Restore-LLM2APIEnvironment -Snapshot $environmentSnapshot } catch { $cleanupFailures += "environment restore: $($_.Exception.Message)" }
   if ($null -ne $valkey) {
-    try { Stop-LLMGatewayTestContainer -Container $valkey.Container -RunID $runID } catch { $cleanupFailures += "Valkey cleanup: $($_.Exception.Message)" }
+    try { Stop-LLM2APITestContainer -Container $valkey.Container -RunID $runID } catch { $cleanupFailures += "Valkey cleanup: $($_.Exception.Message)" }
   }
   if ($null -ne $postgres) {
-    try { Stop-LLMGatewayTestContainer -Container $postgres.Container -RunID $runID } catch { $cleanupFailures += "PostgreSQL cleanup: $($_.Exception.Message)" }
+    try { Stop-LLM2APITestContainer -Container $postgres.Container -RunID $runID } catch { $cleanupFailures += "PostgreSQL cleanup: $($_.Exception.Message)" }
   }
   try { Pop-Location } catch { $cleanupFailures += "location restore: $($_.Exception.Message)" }
   if ($null -ne $testFailure) {

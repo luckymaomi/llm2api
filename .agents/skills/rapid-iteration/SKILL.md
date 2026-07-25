@@ -1,6 +1,6 @@
 ---
 name: rapid-iteration
-description: LLMGateway 的快速迭代开发循环。正式实现、修复、重构、协议或数据变更、Provider 接入、管理端开发、测试和生产级验收时首先使用；要求先研究参考项目的机制、许可证和踩坑，再核验本仓库事实与 owner，从真实失败出发实现，并以有头 Chromium 的真实管理员和用户路径持续验收、修复和复测。
+description: LLM2API 的快速迭代开发循环。正式实现、修复、重构、协议或数据变更、Provider 接入、管理端开发、测试和生产级验收时首先使用；要求先研究参考项目的机制、许可证和踩坑，再核验本仓库事实与 owner，从真实失败出发实现，并以有头 Chromium 的真实管理员和用户路径持续验收、修复和复测。
 ---
 
 # 快速迭代开发循环
@@ -12,7 +12,7 @@ description: LLMGateway 的快速迭代开发循环。正式实现、修复、�
 ## 加载顺序
 
 1. 完整读取根目录 `AGENTS.md`、`spec.md`、`dev.md`、`README.md` 和存在时的 `plan.md`。
-2. 本 Skill 必须先于 `.agents/skills/llmgateway-dev/SKILL.md` 加载。
+2. 本 Skill 必须先于 `.agents/skills/llm2api-dev/SKILL.md` 加载。
 3. 中大型、跨模块、边界调整或生产级验收任务继续加载 `.agents/skills/plan/SKILL.md`，并实时维护根目录 `plan.md`。
 
 ## 强制循环
@@ -22,15 +22,15 @@ description: LLMGateway 的快速迭代开发循环。正式实现、修复、�
 - 公共协议、Provider 模型、能力、错误和额度先核验官方文档与真实隔离 wire；参考仓库不能替代权威合同。
 - 在 `ref/repos` 中选择与当前切片直接相关的项目，优先研究 New API、Sub2API、LiteLLM、Portkey Gateway 和 Uni API。
 - 记录仓库版本、许可证、具体文件和实际机制，追踪管理写入、数据面读取、失败恢复、并发边界与用户交互，不凭 README 或界面文案推断。
-- 明确哪些机制适合 LLMGateway、哪些坑必须拒绝。AGPL/LGPL 或归属不清的源码只研究，不复制到主干。
+- 明确哪些机制适合 LLM2API、哪些坑必须拒绝。AGPL/LGPL 或归属不清的源码只研究，不复制到主干。
 - 不读取参考仓库的 `.env`、凭据、日志、请求正文或个人数据。
 - 当证据已能解释当前 owner、失败与恢复机制，并确认至少一个可采用机制和一个必须拒绝的坑时停止扩散研究；只有新失败无法解释时再回看。
 
-### 2. 再看 LLMGateway
+### 2. 再看 LLM2API
 
 - 沿客户端、公共协议、API 密钥、活动成员、活动订阅、套餐版本、admission、模型/资源池、路由与上游 API Key、Provider、响应、usage、日志与审计追踪完整请求链。
 - 管理面继续追踪编辑、校验、事务提交、实时生效、停用/退役和数据面读取；套餐发布追踪不可变版本与既有订阅引用。
-- 列出当前事实 owner、输入、直接消费者、持久状态、展示出口、错误与恢复边界、测试和事实文档；对比参考机制时服从 LLMGateway 的唯一 owner。
+- 列出当前事实 owner、输入、直接消费者、持久状态、展示出口、错误与恢复边界、测试和事实文档；对比参考机制时服从 LLM2API 的唯一 owner。
 - 派生查询可以组合多个 owner 的权威输入，但不得持久化、展示或重算第二套源事实；组合策略本身必须有单一 owner。
 
 ### 3. 从真实失败开始

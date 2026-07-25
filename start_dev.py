@@ -1,4 +1,4 @@
-"""Beginner-friendly Windows entry point for the LLMGateway development stack."""
+"""Beginner-friendly Windows entry point for the LLM2API development stack."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def port(value: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="检查环境并启动 LLMGateway 管理网页")
+    parser = argparse.ArgumentParser(description="检查环境并启动 LLM2API 管理网页")
     parser.add_argument("--check", action="store_true", help="只检查环境，不启动服务")
     parser.add_argument("--no-browser", action="store_true", help="启动后不自动打开浏览器")
     parser.add_argument("--gateway-port", type=port, default=8080, help="Gateway 端口，默认 8080")
@@ -52,7 +52,7 @@ def main() -> int:
         print("这个友好入口目前只支持 Windows。正式 Linux 部署请查看 deploy/README.md。", file=sys.stderr)
         return 2
 
-    print("LLMGateway 环境检查")
+    print("LLM2API 环境检查")
     print("需要：Git、Docker Desktop、Go 1.26.5+、Node.js 22.12+、pnpm 10.33.0。")
     print("正常启动会保留已有成员、资源池、套餐、订阅、Key 和账本，不会调用真实 Provider。\n")
     try:

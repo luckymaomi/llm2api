@@ -10,7 +10,7 @@ beforeAll(() => {
   globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
     const request =
       typeof input === 'string' && input.startsWith('/')
-        ? new URL(input, 'http://llmgateway.test')
+        ? new URL(input, 'http://llm2api.test')
         : input
     return interceptedFetch(request, init)
   }

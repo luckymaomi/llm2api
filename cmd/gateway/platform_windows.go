@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 )
 
-const windowsServiceName = "LLMGateway"
+const windowsServiceName = "LLM2API"
 
 func runPlatform(run gatewayRunner) error {
 	isService, err := svc.IsWindowsService()

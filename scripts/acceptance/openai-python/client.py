@@ -17,7 +17,7 @@ def required_environment(name: str) -> str:
 def record(name, action, expected_error=False):
     started = time.monotonic()
     result = {"name": name, "succeeded": False}
-    explicit_reissue = os.environ.get("LLMGATEWAY_SDK_EXPLICIT_REISSUE", "").lower() == "true"
+    explicit_reissue = os.environ.get("LLM2API_SDK_EXPLICIT_REISSUE", "").lower() == "true"
     for attempt in range(1, 5):
         try:
             action()
@@ -72,12 +72,12 @@ def gateway_retry_delay(error: APIStatusError, code: str):
             return None
 
 
-base_url = required_environment("LLMGATEWAY_SDK_BASE_URL").rstrip("/") + "/"
-api_key = required_environment("LLMGATEWAY_SDK_API_KEY")
-success_model = required_environment("LLMGATEWAY_SDK_SUCCESS_MODEL")
-stream_model = required_environment("LLMGATEWAY_SDK_STREAM_MODEL")
-reasoning_mode = required_environment("LLMGATEWAY_SDK_REASONING_MODE")
-error_model = required_environment("LLMGATEWAY_SDK_ERROR_MODEL")
+base_url = required_environment("LLM2API_SDK_BASE_URL").rstrip("/") + "/"
+api_key = required_environment("LLM2API_SDK_API_KEY")
+success_model = required_environment("LLM2API_SDK_SUCCESS_MODEL")
+stream_model = required_environment("LLM2API_SDK_STREAM_MODEL")
+reasoning_mode = required_environment("LLM2API_SDK_REASONING_MODE")
+error_model = required_environment("LLM2API_SDK_ERROR_MODEL")
 client = OpenAI(base_url=base_url, api_key=api_key, max_retries=0, timeout=150.0)
 
 
@@ -195,5 +195,5 @@ summary = {
     "scenarios": scenarios,
 }
 print(json.dumps(summary, separators=(",", ":"), ensure_ascii=True))
-os.environ.pop("LLMGATEWAY_SDK_API_KEY", None)
+os.environ.pop("LLM2API_SDK_API_KEY", None)
 raise SystemExit(0 if summary["succeeded"] else 1)

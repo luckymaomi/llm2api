@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/operations"
-	db "github.com/luckymaomi/llmgateway/internal/store/db"
+	"github.com/luckymaomi/llm2api/internal/operations"
+	db "github.com/luckymaomi/llm2api/internal/store/db"
 )
 
 type OperationsRepository struct {
@@ -29,7 +29,7 @@ func (r *OperationsRepository) AdministratorResources(ctx context.Context, obser
 		SuccessfulCredentialProbeCount: row.SuccessfulCredentialProbeCount,
 		ActiveMemberCount:              row.ActiveMemberCount, ActiveGatewayKeyCount: row.ActiveGatewayKeyCount,
 		ActiveServicePlanCount: row.ActiveServicePlanCount, ActiveSubscriptionCount: row.ActiveSubscriptionCount,
-		HasActiveUpstream: row.HasActiveUpstream,
+		HasActiveUpstream:   row.HasActiveUpstream,
 		HasCompletedRequest: row.HasCompletedRequest,
 	}, nil
 }

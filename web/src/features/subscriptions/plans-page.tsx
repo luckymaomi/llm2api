@@ -38,29 +38,32 @@ export function PlansPage() {
       {
         accessorKey: 'name',
         header: '套餐',
-        cell: ({ row }) => (
-          <div>
-            <strong>{row.original.name}</strong>
-            <small className="table-subline">
-              <code>{row.original.slug}</code>
-            </small>
-          </div>
-        ),
+        meta: { align: 'center' },
+        cell: ({ row }) => <strong>{row.original.name}</strong>,
       },
       {
         id: 'version',
         header: '版本',
         cell: ({ row }) =>
           row.original.currentVersion ? `v${row.original.currentVersion.version}` : '—',
-        meta: { align: 'right' },
+        meta: { align: 'center' },
       },
       {
         id: 'routes',
         header: '模型',
+        meta: { align: 'center' },
         cell: ({ row }) =>
-          row.original.currentVersion?.routes.map((route) => route.modelName).join('、') ?? '—',
+          row.original.currentVersion?.routes.length ? (
+            <div className="route-chip-list">
+              {row.original.currentVersion.routes.map((route) => (
+                <code key={`${route.modelId}-${route.resourcePoolId}`}>{route.modelName}</code>
+              ))}
+            </div>
+          ) : (
+            '—'
+          ),
       },
-      { accessorKey: 'activeSubscriptionCount', header: '活动订阅', meta: { align: 'right' } },
+      { accessorKey: 'activeSubscriptionCount', header: '活动订阅', meta: { align: 'center' } },
       {
         accessorKey: 'status',
         header: '状态',

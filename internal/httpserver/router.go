@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/luckymaomi/llmgateway/internal/config"
+	"github.com/luckymaomi/llm2api/internal/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -39,6 +39,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, readiness Readiness, regi
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 	router.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	documentationRoutes(router)
 	if controlAPI != nil {
 		router.Mount("/api", controlAPI)
 	}

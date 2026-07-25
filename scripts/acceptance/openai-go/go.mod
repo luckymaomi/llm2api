@@ -1,4 +1,4 @@
-module github.com/luckymaomi/llmgateway/acceptance/openai-go
+module github.com/luckymaomi/llm2api/acceptance/openai-go
 
 go 1.26.0
 

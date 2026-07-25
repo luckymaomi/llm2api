@@ -8,13 +8,13 @@ $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\docker.ps1"
 . "$PSScriptRoot\dev-processes.ps1"
 
-function Get-LLMGatewayDockerLabels {
+function Get-LLM2APIDockerLabels {
   param(
     [Parameter(Mandatory = $true)][ValidateSet("container", "volume")][string] $ResourceType,
     [Parameter(Mandatory = $true)][string] $Name
   )
 
-  $docker = Get-LLMGatewayDockerCommand
+  $docker = Get-LLM2APIDockerCommand
   if ($ResourceType -eq "container") {
     $names = @(& $docker container ls --all --format '{{.Names}}')
   } else {
@@ -41,45 +41,45 @@ function Get-LLMGatewayDockerLabels {
   return $labels
 }
 
-function Assert-LLMGatewayOwnedContainerIfPresent {
+function Assert-LLM2APIOwnedContainerIfPresent {
   param(
     [Parameter(Mandatory = $true)][string] $Name,
     [Parameter(Mandatory = $true)][string] $Service
   )
 
-  $labels = Get-LLMGatewayDockerLabels -ResourceType container -Name $Name
+  $labels = Get-LLM2APIDockerLabels -ResourceType container -Name $Name
   if ($null -eq $labels) {
     return
   }
-  if ($labels.'com.docker.compose.project' -ne "llmgateway" -or
+  if ($labels.'com.docker.compose.project' -ne "llm2api" -or
       $labels.'com.docker.compose.service' -ne $Service) {
-    throw "Refusing to reset $Name because it is not owned by the expected LLMGateway Compose service."
+    throw "Refusing to reset $Name because it is not owned by the expected LLM2API Compose service."
   }
 }
 
-function Assert-LLMGatewayOwnedVolumeIfPresent {
+function Assert-LLM2APIOwnedVolumeIfPresent {
   param(
     [Parameter(Mandatory = $true)][string] $Name,
     [Parameter(Mandatory = $true)][string] $LogicalName
   )
 
-  $labels = Get-LLMGatewayDockerLabels -ResourceType volume -Name $Name
+  $labels = Get-LLM2APIDockerLabels -ResourceType volume -Name $Name
   if ($null -eq $labels) {
     return
   }
-  if ($labels.'com.docker.compose.project' -ne "llmgateway" -or
+  if ($labels.'com.docker.compose.project' -ne "llm2api" -or
       $labels.'com.docker.compose.volume' -ne $LogicalName) {
-    throw "Refusing to reset $Name because it is not owned by the expected LLMGateway Compose volume."
+    throw "Refusing to reset $Name because it is not owned by the expected LLM2API Compose volume."
   }
 }
 
-function Assert-LLMGatewayResourceAbsent {
+function Assert-LLM2APIResourceAbsent {
   param(
     [Parameter(Mandatory = $true)][ValidateSet("container", "volume")][string] $ResourceType,
     [Parameter(Mandatory = $true)][string] $Name
   )
 
-  if ($null -ne (Get-LLMGatewayDockerLabels -ResourceType $ResourceType -Name $Name)) {
+  if ($null -ne (Get-LLM2APIDockerLabels -ResourceType $ResourceType -Name $Name)) {
     throw "Reset did not remove the expected ${ResourceType}: $Name"
   }
 }
@@ -89,24 +89,24 @@ if (-not $ConfirmDataLoss) {
 }
 
 $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-Stop-LLMGatewayDevelopmentProcesses -Root $root
+Stop-LLM2APIDevelopmentProcesses -Root $root
 
-Assert-LLMGatewayOwnedContainerIfPresent -Name "llmgateway-postgres" -Service "postgres"
-Assert-LLMGatewayOwnedContainerIfPresent -Name "llmgateway-valkey" -Service "valkey"
-Assert-LLMGatewayOwnedVolumeIfPresent -Name "llmgateway_postgres" -LogicalName "llmgateway_postgres"
-Assert-LLMGatewayOwnedVolumeIfPresent -Name "llmgateway_valkey" -LogicalName "llmgateway_valkey"
+Assert-LLM2APIOwnedContainerIfPresent -Name "llm2api-postgres" -Service "postgres"
+Assert-LLM2APIOwnedContainerIfPresent -Name "llm2api-valkey" -Service "valkey"
+Assert-LLM2APIOwnedVolumeIfPresent -Name "llm2api_postgres" -LogicalName "llm2api_postgres"
+Assert-LLM2APIOwnedVolumeIfPresent -Name "llm2api_valkey" -LogicalName "llm2api_valkey"
 
 Push-Location $root
 try {
-  Write-Host "Removing LLMGateway development containers and named data volumes..."
-  Invoke-LLMGatewayDocker compose down --volumes
+  Write-Host "Removing LLM2API development containers and named data volumes..."
+  Invoke-LLM2APIDocker compose down --volumes
 } finally {
   Pop-Location
 }
 
-Assert-LLMGatewayResourceAbsent -ResourceType container -Name "llmgateway-postgres"
-Assert-LLMGatewayResourceAbsent -ResourceType container -Name "llmgateway-valkey"
-Assert-LLMGatewayResourceAbsent -ResourceType volume -Name "llmgateway_postgres"
-Assert-LLMGatewayResourceAbsent -ResourceType volume -Name "llmgateway_valkey"
+Assert-LLM2APIResourceAbsent -ResourceType container -Name "llm2api-postgres"
+Assert-LLM2APIResourceAbsent -ResourceType container -Name "llm2api-valkey"
+Assert-LLM2APIResourceAbsent -ResourceType volume -Name "llm2api_postgres"
+Assert-LLM2APIResourceAbsent -ResourceType volume -Name "llm2api_valkey"
 
-Write-Host "LLMGateway local PostgreSQL and Valkey data were reset. Source files and other Docker projects were not changed."
+Write-Host "LLM2API local PostgreSQL and Valkey data were reset. Source files and other Docker projects were not changed."

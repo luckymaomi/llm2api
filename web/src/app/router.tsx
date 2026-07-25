@@ -39,6 +39,7 @@ const SubscriptionsPage = lazyRouteComponent(
 )
 const UsersPage = lazyRouteComponent(() => import('@/features/access/users-page'), 'UsersPage')
 const KeysPage = lazyRouteComponent(() => import('@/features/access/keys-page'), 'KeysPage')
+const APIDocsPage = lazyRouteComponent(() => import('@/features/docs/api-docs-page'), 'APIDocsPage')
 const UsagePage = lazyRouteComponent(() => import('@/features/usage/usage-page'), 'UsagePage')
 const SettingsPage = lazyRouteComponent(
   () => import('@/features/settings/settings-page'),
@@ -192,6 +193,7 @@ const subscriptionsRoute = createRoute({
 })
 const usersRoute = protectedRoute('/members', 'members:write', UsersPage, true, ['administrator'])
 const keysRoute = protectedRoute('/api-keys', 'keys:write', KeysPage, true)
+const apiDocsRoute = protectedRoute('/api-docs', 'keys:write', APIDocsPage)
 const usageRoute = createRoute({
   getParentRoute: () => authenticatedLayout,
   path: '/api-logs',
@@ -258,6 +260,7 @@ const routeTree = rootRoute.addChildren([
     subscriptionsRoute,
     usersRoute,
     keysRoute,
+    apiDocsRoute,
     usageRoute,
     settingsRoute,
     overviewRoute,

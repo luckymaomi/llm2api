@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const gatewayURL = requiredURL('LLMGATEWAY_REAL_GATEWAY_URL')
+const gatewayURL = requiredURL('LLM2API_REAL_GATEWAY_URL')
 
 export default defineConfig({
   testDir: './e2e-real',

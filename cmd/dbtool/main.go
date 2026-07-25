@@ -11,12 +11,12 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/luckymaomi/llmgateway/internal/buildinfo"
-	"github.com/luckymaomi/llmgateway/internal/config"
-	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/internal/security"
-	"github.com/luckymaomi/llmgateway/internal/store"
-	"github.com/luckymaomi/llmgateway/migrations"
+	"github.com/luckymaomi/llm2api/internal/buildinfo"
+	"github.com/luckymaomi/llm2api/internal/config"
+	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/security"
+	"github.com/luckymaomi/llm2api/internal/store"
+	"github.com/luckymaomi/llm2api/migrations"
 )
 
 func main() {

@@ -38,12 +38,12 @@ func (failure *validationFailure) Error() string { return failure.code }
 func invalid(code string) error { return &validationFailure{code: code} }
 
 func main() {
-	baseURL := requiredEnvironment("LLMGATEWAY_SDK_BASE_URL")
-	apiKey := requiredEnvironment("LLMGATEWAY_SDK_API_KEY")
-	successModel := requiredEnvironment("LLMGATEWAY_SDK_SUCCESS_MODEL")
-	streamModel := requiredEnvironment("LLMGATEWAY_SDK_STREAM_MODEL")
-	errorModel := requiredEnvironment("LLMGATEWAY_SDK_ERROR_MODEL")
-	defer os.Unsetenv("LLMGATEWAY_SDK_API_KEY")
+	baseURL := requiredEnvironment("LLM2API_SDK_BASE_URL")
+	apiKey := requiredEnvironment("LLM2API_SDK_API_KEY")
+	successModel := requiredEnvironment("LLM2API_SDK_SUCCESS_MODEL")
+	streamModel := requiredEnvironment("LLM2API_SDK_STREAM_MODEL")
+	errorModel := requiredEnvironment("LLM2API_SDK_ERROR_MODEL")
+	defer os.Unsetenv("LLM2API_SDK_API_KEY")
 
 	client := openai.NewClient(
 		option.WithBaseURL(strings.TrimRight(baseURL, "/")+"/"),

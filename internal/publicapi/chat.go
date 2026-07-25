@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/luckymaomi/llmgateway/internal/canonical"
-	"github.com/luckymaomi/llmgateway/internal/httpserver"
-	"github.com/luckymaomi/llmgateway/internal/protocol"
-	"github.com/luckymaomi/llmgateway/internal/requestflow"
+	"github.com/luckymaomi/llm2api/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/httpserver"
+	"github.com/luckymaomi/llm2api/internal/protocol"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
 )
 
 const maxPublicRequestBytes = 4 << 20

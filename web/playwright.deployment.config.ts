@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const baseURL = requiredHTTPSURL('LLMGATEWAY_DEPLOYMENT_URL')
+const baseURL = requiredHTTPSURL('LLM2API_DEPLOYMENT_URL')
 
 export default defineConfig({
   testDir: './e2e-deployment',

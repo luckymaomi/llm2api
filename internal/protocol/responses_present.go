@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/luckymaomi/llmgateway/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
 func PresentResponse(response canonical.ChatResponse, request ResponsesRequest) map[string]any {

@@ -3,7 +3,7 @@ package requestflow
 import (
 	"encoding/json"
 
-	"github.com/luckymaomi/llmgateway/internal/canonical"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
 func EstimateTokens(request canonical.ChatRequest) int64 {
