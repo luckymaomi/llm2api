@@ -22,16 +22,13 @@ type databaseSummary struct {
 	Users               int64            `json:"users"`
 	Requests            int64            `json:"requests"`
 	RequestStatuses     map[string]int64 `json:"requestStatuses"`
-	ReservationStates   map[string]int64 `json:"reservationStates"`
 	NonTerminalRequests int64            `json:"nonTerminalRequests"`
-	ReservedHolds       int64            `json:"reservedHolds"`
 }
 
 type faultDatabaseFact struct {
-	Found       bool   `json:"found"`
-	Request     string `json:"request,omitempty"`
-	Reservation string `json:"reservation,omitempty"`
-	Attempts    int64  `json:"attempts"`
+	Found    bool   `json:"found"`
+	Request  string `json:"request,omitempty"`
+	Attempts int64  `json:"attempts"`
 }
 
 func provisionUsers(ctx context.Context, pool *pgxpool.Pool, pepper []byte, modelID, planVersionID uuid.UUID, count int, runID string) ([]virtualUser, error) {
@@ -57,19 +54,17 @@ VALUES ($1, $2, $3, 'capacity-fixture-cannot-login', 'member', 'active')`, userI
 VALUES ($1, $2, 'Capacity acceptance', $3, $4)`, keyID, userID, secret[:13], digest[:]); err != nil {
 			return nil, fmt.Errorf("insert capacity key %d: %w", index, err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO gateway_key_models (gateway_key_id, model_id) VALUES ($1, $2)`, keyID, modelID); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO gateway_key_models (gateway_key_id, model_id, resource_pool_id)
+SELECT $1, $2, route.resource_pool_id
+FROM service_plan_version_routes route
+WHERE route.service_plan_version_id = $3 AND route.model_id = $2`, keyID, modelID, planVersionID); err != nil {
 			return nil, fmt.Errorf("bind capacity key %d: %w", index, err)
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO subscriptions
-(id, user_id, service_plan_version_id, status, granted_tokens, starts_at, expires_at, assigned_by)
-SELECT $1, $2, version.id, 'active', 100000000, $4, $5, version.created_by
+(id, user_id, service_plan_version_id, status, starts_at, expires_at, assigned_by)
+SELECT $1, $2, version.id, 'active', $4, $5, version.created_by
 FROM service_plan_versions version WHERE version.id = $3`, subscriptionID, userID, planVersionID, time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(24*time.Hour)); err != nil {
 			return nil, fmt.Errorf("insert capacity subscription %d: %w", index, err)
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO ledger_events
-(user_id, subscription_id, kind, token_delta, usage_source, source_event_id, note)
-VALUES ($1, $2, 'grant', 100000000, 'unknown', $3, 'isolated capacity acceptance')`, userID, subscriptionID, uuid.New()); err != nil {
-			return nil, fmt.Errorf("grant capacity subscription %d: %w", index, err)
 		}
 		users = append(users, virtualUser{ID: userID, KeyID: keyID, Secret: secret})
 	}
@@ -81,7 +76,7 @@ VALUES ($1, $2, 'grant', 100000000, 'unknown', $3, 'isolated capacity acceptance
 
 func summarizeDatabase(ctx context.Context, pool *pgxpool.Pool, runID string) (databaseSummary, error) {
 	pattern := "capacity-" + runID + "-%"
-	summary := databaseSummary{RequestStatuses: map[string]int64{}, ReservationStates: map[string]int64{}}
+	summary := databaseSummary{RequestStatuses: map[string]int64{}}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE email LIKE $1`, pattern).Scan(&summary.Users); err != nil {
 		return summary, err
 	}
@@ -105,32 +100,16 @@ FROM requests r JOIN users u ON u.id = r.user_id WHERE u.email LIKE $1 GROUP BY 
 		return summary, err
 	}
 	rows.Close()
-	rows, err = pool.Query(ctx, `SELECT lr.state::text, count(*)
-FROM ledger_reservations lr JOIN requests r ON r.id = lr.request_id JOIN users u ON u.id = r.user_id
-WHERE u.email LIKE $1 GROUP BY lr.state`, pattern)
-	if err != nil {
-		return summary, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var state string
-		var count int64
-		if err := rows.Scan(&state, &count); err != nil {
-			return summary, err
-		}
-		summary.ReservationStates[state] = count
-	}
 	summary.NonTerminalRequests = summary.RequestStatuses["queued"] + summary.RequestStatuses["dispatching"] + summary.RequestStatuses["streaming"]
-	summary.ReservedHolds = summary.ReservationStates["reserved"]
-	return summary, rows.Err()
+	return summary, nil
 }
 
 func readFaultDatabaseFact(ctx context.Context, pool *pgxpool.Pool, idempotencyKey string) (faultDatabaseFact, error) {
 	var fact faultDatabaseFact
-	err := pool.QueryRow(ctx, `SELECT r.status::text, lr.state::text,
+	err := pool.QueryRow(ctx, `SELECT r.status::text,
   (SELECT count(*) FROM request_attempts attempt WHERE attempt.request_id = r.id)
-FROM requests r JOIN ledger_reservations lr ON lr.request_id = r.id
-WHERE r.idempotency_key = $1`, idempotencyKey).Scan(&fact.Request, &fact.Reservation, &fact.Attempts)
+FROM requests r
+WHERE r.idempotency_key = $1`, idempotencyKey).Scan(&fact.Request, &fact.Attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fact, nil
 	}

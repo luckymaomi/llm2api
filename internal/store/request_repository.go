@@ -76,12 +76,20 @@ func (r *RequestRepository) ListResourcePoolCandidates(ctx context.Context, reso
 	candidates := make([]requestflow.Candidate, 0, len(rows))
 	for _, row := range rows {
 		candidates = append(candidates, requestflow.Candidate{
-			ID: row.ID, Priority: row.Priority, Weight: row.Weight, RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit,
+			ID: row.ID, RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit,
 			ConcurrencyLimit:    row.ConcurrencyLimit,
-			ConsecutiveFailures: row.ConsecutiveFailures, LastSuccessAt: timePointer(row.LastSuccessAt), CooldownUntil: timePointer(row.CooldownUntil),
+			ConsecutiveFailures: row.ConsecutiveFailures, LastSuccessAt: timePointer(row.LastSuccessAt), CooldownUntil: timePointer(row.CooldownUntil), HealthGeneration: row.HealthGeneration,
 		})
 	}
 	return candidates, nil
+}
+
+func (r *RequestRepository) AcquireCredentialHealthPermit(ctx context.Context, credentialID uuid.UUID) (int64, error) {
+	generation, err := r.queries.AcquireCredentialHealthPermit(ctx, credentialID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, requestflow.ErrNoEligibleUpstream
+	}
+	return generation, err
 }
 
 func (r *RequestRepository) ClaimExecution(ctx context.Context, requestID, executionID uuid.UUID) (execution.Claim, error) {
@@ -167,27 +175,27 @@ func (r *RequestRepository) RecoverStaleExecutions(ctx context.Context, staleBef
 	})
 }
 
-func (r *RequestRepository) ListRecoverableSettlements(ctx context.Context, staleBefore time.Time, batchSize int32) ([]requestflow.RecoverableSettlement, error) {
+func (r *RequestRepository) ListRecoverableCompletions(ctx context.Context, staleBefore time.Time, batchSize int32) ([]requestflow.RecoverableCompletion, error) {
 	if staleBefore.IsZero() || batchSize < 1 || batchSize > 1000 {
-		return nil, fmt.Errorf("invalid recoverable settlement input")
+		return nil, fmt.Errorf("invalid recoverable completion input")
 	}
-	rows, err := r.queries.ListRecoverableRequestSettlements(ctx, db.ListRecoverableRequestSettlementsParams{
+	rows, err := r.queries.ListRecoverableRequestCompletions(ctx, db.ListRecoverableRequestCompletionsParams{
 		StaleBefore: optionalTimestamp(&staleBefore), BatchSize: batchSize,
 	})
 	if err != nil {
 		return nil, err
 	}
-	settlements := make([]requestflow.RecoverableSettlement, 0, len(rows))
+	completions := make([]requestflow.RecoverableCompletion, 0, len(rows))
 	for _, row := range rows {
 		if row.ExecutionID == nil || row.InputTokens == nil || row.OutputTokens == nil || row.ExecutionGeneration < 1 {
-			return nil, fmt.Errorf("recoverable settlement for request %s is incomplete", row.RequestID)
+			return nil, fmt.Errorf("recoverable completion for request %s is incomplete", row.RequestID)
 		}
-		settlements = append(settlements, requestflow.RecoverableSettlement{
+		completions = append(completions, requestflow.RecoverableCompletion{
 			Claim: execution.Claim{RequestID: row.RequestID, ExecutionID: *row.ExecutionID, Generation: row.ExecutionGeneration},
 			Usage: requestflow.Usage{InputTokens: *row.InputTokens, OutputTokens: *row.OutputTokens, Source: canonical.UsageSource(row.UsageSource)},
 		})
 	}
-	return settlements, nil
+	return completions, nil
 }
 
 func (r *RequestRepository) ListStaleQueuedRequests(ctx context.Context, staleBefore time.Time, batchSize int32) ([]uuid.UUID, error) {
@@ -250,15 +258,19 @@ func recordCredentialObservation(ctx context.Context, queries *db.Queries, crede
 	switch observation.Kind {
 	case requestflow.CredentialSucceeded:
 		return queries.RecordCredentialRuntimeSuccess(ctx, db.RecordCredentialRuntimeSuccessParams{
-			ObservedAt: optionalTimestamp(&observation.ObservedAt), ID: credentialID,
+			ObservedAt: optionalTimestamp(&observation.ObservedAt), ID: credentialID, HealthGeneration: observation.HealthGeneration,
 		})
 	case requestflow.CredentialFailed:
 		if observation.ErrorKind == "" {
 			return fmt.Errorf("credential failure requires an error kind")
 		}
 		errorKind := observation.ErrorKind
+		healthStatus := db.CredentialHealthStatusRepairRequired
+		if observation.CooldownUntil != nil {
+			healthStatus = db.CredentialHealthStatusCooling
+		}
 		return queries.RecordCredentialRuntimeFailure(ctx, db.RecordCredentialRuntimeFailureParams{
-			CooldownUntil: optionalTimestamp(observation.CooldownUntil), ErrorKind: &errorKind, ID: credentialID,
+			CooldownUntil: optionalTimestamp(observation.CooldownUntil), ErrorKind: &errorKind, ID: credentialID, HealthGeneration: observation.HealthGeneration, HealthStatus: healthStatus,
 		})
 	default:
 		return fmt.Errorf("invalid credential observation kind %q", observation.Kind)

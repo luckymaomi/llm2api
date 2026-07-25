@@ -109,24 +109,24 @@ func waitForFaultDatabaseFact(ctx context.Context, pool *pgxpool.Pool, idempoten
 
 func validateFaults(faults []faultReport) []string {
 	expected := map[string]struct {
-		status, attempts           int64
-		code, request, reservation string
-		providerRequests           int64
-		retry, found               bool
+		status, attempts int64
+		code, request    string
+		providerRequests int64
+		retry, found     bool
 	}{
 		"context_rejected_before_send":    {status: 400, code: "context_length_exceeded", providerRequests: 0},
-		"client_cancel_after_first_event": {status: 200, attempts: 1, request: "uncertain", reservation: "reserved", providerRequests: 1, found: true},
-		"rate_limit_bounded_switch":       {status: 200, attempts: 2, request: "completed", reservation: "settled", providerRequests: 2, found: true},
-		"generic_503_uncertain":           {status: 409, attempts: 1, code: "upstream_outcome_uncertain", request: "uncertain", reservation: "reserved", providerRequests: 1, retry: true, found: true},
-		"malformed_stream_after_commit":   {status: 200, attempts: 1, request: "uncertain", reservation: "reserved", providerRequests: 1, found: true},
-		"transport_disconnect_uncertain":  {status: 409, attempts: 1, code: "upstream_outcome_uncertain", request: "uncertain", reservation: "reserved", providerRequests: 1, retry: true, found: true},
+		"client_cancel_after_first_event": {status: 200, attempts: 1, request: "uncertain", providerRequests: 1, found: true},
+		"rate_limit_bounded_switch":       {status: 200, attempts: 2, request: "completed", providerRequests: 2, found: true},
+		"generic_503_uncertain":           {status: 409, attempts: 1, code: "upstream_outcome_uncertain", request: "uncertain", providerRequests: 1, retry: true, found: true},
+		"malformed_stream_after_commit":   {status: 200, attempts: 1, request: "uncertain", providerRequests: 1, found: true},
+		"transport_disconnect_uncertain":  {status: 409, attempts: 1, code: "upstream_outcome_uncertain", request: "uncertain", providerRequests: 1, retry: true, found: true},
 	}
 	var failures []string
 	for _, fault := range faults {
 		want, exists := expected[fault.Name]
 		if !exists || int64(fault.Status) != want.status || fault.ErrorCode != want.code || fault.RetryAfter != want.retry ||
 			fault.ProviderRequests != want.providerRequests || fault.Database.Found != want.found || fault.Database.Attempts != want.attempts ||
-			fault.Database.Request != want.request || fault.Database.Reservation != want.reservation {
+			fault.Database.Request != want.request {
 			failures = append(failures, fault.Name+": fault contract drifted")
 		}
 		if fault.Name == "rate_limit_bounded_switch" && (!fault.Completed || fault.ClientFailure != "") {

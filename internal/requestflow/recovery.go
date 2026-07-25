@@ -16,18 +16,18 @@ func (s *Service) RecoverOnce(ctx context.Context, staleBefore time.Time, batchS
 	var result RecoveryResult
 	var recoveryErrors []error
 
-	settlements, err := s.repository.ListRecoverableSettlements(ctx, staleBefore, batchSize)
+	completions, err := s.repository.ListRecoverableCompletions(ctx, staleBefore, batchSize)
 	if err != nil {
-		return result, fmt.Errorf("list recoverable settlements: %w", err)
+		return result, fmt.Errorf("list recoverable completions: %w", err)
 	}
-	for _, settlement := range settlements {
-		if err := s.accounting.Settle(ctx, settlement.Claim, settlement.Usage); err != nil {
+	for _, completion := range completions {
+		if err := s.accounting.Complete(ctx, completion.Claim, completion.Usage); err != nil {
 			if !errors.Is(err, execution.ErrFenced) {
-				recoveryErrors = append(recoveryErrors, fmt.Errorf("settle request %s: %w", settlement.Claim.RequestID, err))
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("complete request %s: %w", completion.Claim.RequestID, err))
 			}
 			continue
 		}
-		result.Settled++
+		result.Completed++
 	}
 
 	queuedRequests, err := s.repository.ListStaleQueuedRequests(ctx, staleBefore, batchSize)
@@ -35,13 +35,13 @@ func (s *Service) RecoverOnce(ctx context.Context, staleBefore time.Time, batchS
 		return result, errors.Join(append(recoveryErrors, fmt.Errorf("list stale queued requests: %w", err))...)
 	}
 	for _, requestID := range queuedRequests {
-		if err := s.accounting.ReleaseAccepted(ctx, requestID, "execution_abandoned", "request was accepted but no execution claimed it"); err != nil {
+		if err := s.accounting.FailAccepted(ctx, requestID, "execution_abandoned", "request was accepted but no execution claimed it"); err != nil {
 			if !errors.Is(err, execution.ErrFenced) {
-				recoveryErrors = append(recoveryErrors, fmt.Errorf("release queued request %s: %w", requestID, err))
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("fail queued request %s: %w", requestID, err))
 			}
 			continue
 		}
-		result.Released++
+		result.FailedAccepted++
 	}
 
 	result.Uncertain, err = s.repository.RecoverStaleExecutions(ctx, staleBefore, batchSize)

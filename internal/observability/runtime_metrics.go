@@ -22,7 +22,7 @@ type RuntimeMetrics struct {
 	coordinationActive *prometheus.GaugeVec
 	coordinationWait   *prometheus.HistogramVec
 	providerAttempts   *prometheus.CounterVec
-	quotaOperations    *prometheus.CounterVec
+	usageOperations    *prometheus.CounterVec
 	requestRecovery    *prometheus.CounterVec
 	background         *prometheus.CounterVec
 }
@@ -35,14 +35,14 @@ func NewRuntimeMetrics(registry prometheus.Registerer, loggers ...*slog.Logger) 
 		coordinationActive: prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: "llmgateway", Subsystem: "coordination", Name: "active_leases", Help: "Currently held shared request leases."}, []string{"resource_pool"}),
 		coordinationWait:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "llmgateway", Subsystem: "coordination", Name: "wait_seconds", Help: "Time spent acquiring shared request capacity.", Buckets: []float64{0.001, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30}}, []string{"outcome"}),
 		providerAttempts:   prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "provider", Name: "attempts_total", Help: "Terminal Provider attempt outcomes."}, []string{"provider_kind", "outcome", "error_kind"}),
-		quotaOperations:    prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "quota", Name: "operations_total", Help: "Quota reservation and settlement operation outcomes."}, []string{"operation", "outcome", "resource_pool"}),
+		usageOperations:    prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "usage", Name: "operations_total", Help: "Request acceptance and usage resolution outcomes."}, []string{"operation", "outcome", "resource_pool"}),
 		requestRecovery:    prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "request_recovery", Name: "results_total", Help: "Recovered stale request outcomes."}, []string{"outcome"}),
 		background:         prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "llmgateway", Subsystem: "background", Name: "responses_total", Help: "Background Responses lifecycle outcomes."}, []string{"outcome"}),
 	}
 	if len(loggers) > 0 {
 		metrics.logger = loggers[0]
 	}
-	registry.MustRegister(metrics.admissionRequests, metrics.admissionWait, metrics.coordinationLeases, metrics.coordinationActive, metrics.coordinationWait, metrics.providerAttempts, metrics.quotaOperations, metrics.requestRecovery, metrics.background)
+	registry.MustRegister(metrics.admissionRequests, metrics.admissionWait, metrics.coordinationLeases, metrics.coordinationActive, metrics.coordinationWait, metrics.providerAttempts, metrics.usageOperations, metrics.requestRecovery, metrics.background)
 	metrics.initialize()
 	return metrics
 }
@@ -64,11 +64,11 @@ func (m *RuntimeMetrics) initialize() {
 	for _, kind := range []providers.Kind{providers.KindAgnes, providers.KindGemini, providers.KindOpenAICompatible, providers.KindZhipu} {
 		m.providerAttempts.WithLabelValues(string(kind), "succeeded", "none")
 	}
-	for _, operation := range []string{"reserve", "settle", "release", "release_accepted", "compensate"} {
-		m.quotaOperations.WithLabelValues(operation, "succeeded", "unknown")
-		m.quotaOperations.WithLabelValues(operation, "failed", "unknown")
+	for _, operation := range []string{"accept", "complete", "fail", "fail_accepted", "fail_with_usage"} {
+		m.usageOperations.WithLabelValues(operation, "succeeded", "unknown")
+		m.usageOperations.WithLabelValues(operation, "failed", "unknown")
 	}
-	for _, outcome := range []string{"settled", "released", "uncertain", "failed"} {
+	for _, outcome := range []string{"completed", "failed_accepted", "uncertain", "failed"} {
 		m.requestRecovery.WithLabelValues(outcome)
 	}
 	for _, outcome := range []string{"queued", "claimed", "completed", "failed", "canceled", "uncertain", "recovered_completed", "recovered_failed", "recovered_canceled", "recovered_uncertain"} {
@@ -91,7 +91,7 @@ func (m *RuntimeMetrics) BackgroundResponse(outcome string) {
 }
 
 func (m *RuntimeMetrics) RequestRecovery(result requestflow.RecoveryResult) {
-	for outcome, count := range map[string]int64{"settled": result.Settled, "released": result.Released, "uncertain": result.Uncertain} {
+	for outcome, count := range map[string]int64{"completed": result.Completed, "failed_accepted": result.FailedAccepted, "uncertain": result.Uncertain} {
 		if count > 0 {
 			m.requestRecovery.WithLabelValues(outcome).Add(float64(count))
 			if outcome == "uncertain" {
@@ -213,31 +213,31 @@ func (a observedAccounting) AcceptRequest(ctx context.Context, command requestfl
 	if result.ResourcePoolID != uuid.Nil {
 		pool = result.ResourcePoolID.String()
 	}
-	a.record("reserve", pool, err)
+	a.record("accept", pool, err)
 	return result, err
 }
 
-func (a observedAccounting) Settle(ctx context.Context, claim execution.Claim, usage requestflow.Usage) error {
-	err := a.next.Settle(ctx, claim, usage)
-	a.record("settle", "unknown", err)
+func (a observedAccounting) Complete(ctx context.Context, claim execution.Claim, usage requestflow.Usage) error {
+	err := a.next.Complete(ctx, claim, usage)
+	a.record("complete", "unknown", err)
 	return err
 }
 
-func (a observedAccounting) Release(ctx context.Context, claim execution.Claim, kind, detail string) error {
-	err := a.next.Release(ctx, claim, kind, detail)
-	a.record("release", "unknown", err)
+func (a observedAccounting) Fail(ctx context.Context, claim execution.Claim, kind, detail string) error {
+	err := a.next.Fail(ctx, claim, kind, detail)
+	a.record("fail", "unknown", err)
 	return err
 }
 
-func (a observedAccounting) ReleaseAccepted(ctx context.Context, requestID uuid.UUID, kind, detail string) error {
-	err := a.next.ReleaseAccepted(ctx, requestID, kind, detail)
-	a.record("release_accepted", "unknown", err)
+func (a observedAccounting) FailAccepted(ctx context.Context, requestID uuid.UUID, kind, detail string) error {
+	err := a.next.FailAccepted(ctx, requestID, kind, detail)
+	a.record("fail_accepted", "unknown", err)
 	return err
 }
 
-func (a observedAccounting) Compensate(ctx context.Context, claim execution.Claim, usage requestflow.Usage, reason string) error {
-	err := a.next.Compensate(ctx, claim, usage, reason)
-	a.record("compensate", "unknown", err)
+func (a observedAccounting) FailWithUsage(ctx context.Context, claim execution.Claim, usage requestflow.Usage, reason string) error {
+	err := a.next.FailWithUsage(ctx, claim, usage, reason)
+	a.record("fail_with_usage", "unknown", err)
 	return err
 }
 
@@ -246,8 +246,8 @@ func (a observedAccounting) record(operation, pool string, err error) {
 	if err != nil {
 		outcome = "failed"
 	}
-	a.metrics.quotaOperations.WithLabelValues(operation, outcome, pool).Inc()
+	a.metrics.usageOperations.WithLabelValues(operation, outcome, pool).Inc()
 	if err != nil {
-		a.metrics.log("quota.operation_failed", "operation", operation, "resource_pool", pool)
+		a.metrics.log("usage.operation_failed", "operation", operation, "resource_pool", pool)
 	}
 }

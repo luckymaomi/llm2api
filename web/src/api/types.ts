@@ -77,7 +77,6 @@ export interface AdministratorOverview extends OverviewBase {
     activeServicePlanCount: number
     activeSubscriptionCount: number
     hasActiveUpstream: boolean
-    hasModelPrice: boolean
     hasCompletedRequest: boolean
   }
 }
@@ -87,7 +86,6 @@ export interface MemberOverview extends OverviewBase {
   access: {
     activeApiKeyCount: number
     activeSubscriptionCount: number
-    remainingTokens: number
     nearestSubscriptionExpiry?: string
   }
 }
@@ -191,17 +189,14 @@ export interface ResourcePool {
 export interface ResourcePoolInput {
   providerId: string
   name: string
-  modelIds: string[]
 }
 
 export interface CredentialModelBinding {
   modelId: string
   modelName: string
-  priority: number
-  weight: number
 }
 
-export type CredentialStatus = 'active' | 'cooling' | 'disabled' | 'retired'
+export type CredentialStatus = 'active' | 'disabled' | 'retired'
 
 export interface Credential {
   id: string
@@ -239,7 +234,6 @@ export interface Credential {
 export interface CredentialUpdateInput {
   name: string
   secret: string
-  modelBindings: Array<Omit<CredentialModelBinding, 'modelName'>>
   rpmLimit?: number
   tpmLimit?: number
   concurrencyLimit?: number
@@ -249,10 +243,18 @@ export interface CredentialUpdateInput {
 export interface CredentialBatchInput {
   resourcePoolId: string
   items: Array<{ name: string; secret: string }>
-  modelBindings: Array<Omit<CredentialModelBinding, 'modelName'>>
   rpmLimit?: number
   tpmLimit?: number
   concurrencyLimit?: number
+}
+
+export interface ModelDiscoveryResult {
+  credential: Credential
+  status: 'succeeded' | 'failed' | 'unavailable' | 'uncertain'
+  errorKind?: string
+  retryable: boolean
+  latencyMillis: number
+  models: string[]
 }
 
 export interface CredentialBatchResult {
@@ -302,12 +304,18 @@ export interface GatewayKey {
   ownerName: string
   name: string
   prefix: string
-  status: 'active' | 'revoked' | 'expired'
-  authorizedModelIds: string[]
-  authorizedModels: string[]
+  status: 'active' | 'deleted' | 'expired'
+  routes: GatewayKeyRoute[]
   expiresAt?: string
   createdAt: string
   lastUsedAt?: string
+}
+
+export interface GatewayKeyRoute {
+  modelId: string
+  modelName: string
+  resourcePoolId: string
+  resourcePoolName: string
 }
 
 export interface CreatedGatewayKey {
@@ -319,7 +327,6 @@ export interface SessionRevocation {
   revokedSessions: number
 }
 
-export type PlanKind = 'token' | 'coding'
 export type PlanStatus = 'active' | 'disabled' | 'archived'
 
 export interface PlanRoute {
@@ -334,11 +341,6 @@ export interface PlanRoute {
 export interface PlanVersion {
   id: string
   version: number
-  tokenQuota: number
-  validityDays: number
-  concurrencyLimit: number
-  rpmLimit?: number
-  tpmLimit?: number
   routes: PlanRoute[]
   createdAt: string
 }
@@ -348,7 +350,6 @@ export interface ServicePlan {
   slug: string
   name: string
   description: string
-  kind: PlanKind
   status: PlanStatus
   currentVersion?: PlanVersion
   activeSubscriptionCount: number
@@ -359,12 +360,6 @@ export interface ServicePlan {
 export interface PlanInput {
   name: string
   description: string
-  kind: PlanKind
-  tokenQuota: number
-  validityDays: number
-  concurrencyLimit: number
-  rpmLimit?: number
-  tpmLimit?: number
   routes: Array<{ modelId: string; resourcePoolId: string }>
 }
 
@@ -378,17 +373,11 @@ export interface Subscription {
   servicePlanId: string
   servicePlanVersionId: string
   servicePlanName: string
-  planKind: PlanKind
   planVersion: number
   status: SubscriptionStatus
-  grantedTokens: number
-  balanceTokens: number
   startsAt: string
-  expiresAt: string
+  expiresAt?: string
   notes: string
-  concurrencyLimit: number
-  rpmLimit?: number
-  tpmLimit?: number
   routes: PlanRoute[]
   suspendedAt?: string
   canceledAt?: string
@@ -399,16 +388,14 @@ export interface Subscription {
 export interface SubscriptionInput {
   userId: string
   servicePlanId: string
-  grantedTokens: number
   startsAt: string
-  expiresAt: string
+  expiresAt?: string
   notes: string
 }
 
 export interface SubscriptionUpdateInput {
-  grantedTokens: number
   startsAt: string
-  expiresAt: string
+  expiresAt?: string
   notes: string
   expectedUpdatedAt: string
 }
@@ -460,59 +447,6 @@ export interface RequestAttempt {
 export interface RequestLogDetail {
   request: RequestLog
   attempts: RequestAttempt[]
-}
-
-export interface ModelPriceVersion {
-  id: string
-  modelId: string
-  modelAlias: string
-  currency: string
-  inputPricePerMillionTokens: string
-  outputPricePerMillionTokens: string
-  effectiveAt: string
-  createdAt: string
-}
-
-export interface ModelPriceInput {
-  modelId: string
-  currency: string
-  inputPricePerMillionTokens: string
-  outputPricePerMillionTokens: string
-  effectiveAt: string
-}
-
-export interface CostSummary {
-  userId: string
-  userName: string
-  subscriptionId: string
-  servicePlanName: string
-  planKind: PlanKind
-  modelId: string
-  modelAlias: string
-  providerId: string
-  providerName: string
-  resourcePoolId: string
-  resourcePoolName: string
-  currency: string
-  requestCount: number
-  inputTokens: number
-  outputTokens: number
-  inputCostNanos: string
-  outputCostNanos: string
-  totalCostNanos: string
-}
-
-export interface LedgerEntry {
-  id: string
-  occurredAt: string
-  ownerName: string
-  subscriptionId: string
-  servicePlanName: string
-  kind: 'grant' | 'reservation' | 'settlement' | 'release' | 'compensation'
-  tokenDelta: number
-  reason: string
-  requestId?: string
-  actorName: string
 }
 
 export type OperationPhase =

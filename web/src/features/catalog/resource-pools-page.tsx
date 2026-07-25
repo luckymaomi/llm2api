@@ -39,6 +39,7 @@ export function ResourcePoolsPage() {
       {
         accessorKey: 'name',
         header: '资源池',
+        meta: { align: 'center' },
         cell: ({ row }) => (
           <div>
             <strong>{row.original.name}</strong>
@@ -48,17 +49,27 @@ export function ResourcePoolsPage() {
           </div>
         ),
       },
-      { accessorKey: 'providerName', header: '上游平台' },
+      { accessorKey: 'providerName', header: '上游平台', meta: { align: 'center' } },
       {
         id: 'models',
         header: '模型',
-        cell: ({ row }) => row.original.models.map((model) => model.displayName).join('、'),
+        meta: { align: 'center' },
+        cell: ({ row }) =>
+          row.original.models.length > 0 ? (
+            <div className="pool-model-list">
+              {row.original.models.map((model) => (
+                <code key={model.id}>{model.publicName}</code>
+              ))}
+            </div>
+          ) : (
+            <span className="table-muted">等待上游 Key</span>
+          ),
       },
-      { accessorKey: 'credentialCount', header: '上游 Key 总数', meta: { align: 'right' } },
+      { accessorKey: 'credentialCount', header: '上游 Key 总数', meta: { align: 'center' } },
       {
         accessorKey: 'activeCredentialCount',
         header: '可用 Key',
-        meta: { align: 'right' },
+        meta: { align: 'center' },
       },
       {
         accessorKey: 'status',

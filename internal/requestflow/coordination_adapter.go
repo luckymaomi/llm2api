@@ -21,13 +21,10 @@ type Capacity struct {
 type CoordinationConfig struct {
 	Global            Capacity
 	ResourcePool      Capacity
-	User              Capacity
-	GatewayKey        Capacity
 	Model             Capacity
 	Provider          Capacity
 	DefaultCredential Capacity
 	LeaseTTL          time.Duration
-	RetryInterval     time.Duration
 }
 
 type CoordinationAdapter struct {
@@ -42,11 +39,10 @@ type AdmissionAdapter struct {
 }
 
 type AdmissionCoordinationConfig struct {
-	MaxActive        int64
-	MaxActivePerUser int64
-	MaxQueueWait     time.Duration
-	RetryInterval    time.Duration
-	LeaseTTL         time.Duration
+	MaxActive     int64
+	MaxQueueWait  time.Duration
+	RetryInterval time.Duration
+	LeaseTTL      time.Duration
 }
 
 type CapacityError struct {
@@ -58,7 +54,7 @@ func (e *CapacityError) Error() string {
 }
 
 func NewAdmissionAdapter(gate *admission.Gate, coordinator *coordination.Coordinator, config AdmissionCoordinationConfig) (*AdmissionAdapter, error) {
-	if gate == nil || coordinator == nil || config.MaxActive < 1 || config.MaxActivePerUser < 1 || config.MaxActivePerUser > config.MaxActive ||
+	if gate == nil || coordinator == nil || config.MaxActive < 1 ||
 		config.MaxQueueWait <= 0 || config.RetryInterval < 10*time.Millisecond || config.RetryInterval > time.Second ||
 		config.LeaseTTL < 3*time.Second || config.LeaseTTL > time.Hour {
 		return nil, errors.New("admission coordination configuration is invalid")
@@ -71,12 +67,8 @@ func (a *AdmissionAdapter) Acquire(ctx context.Context, request AdmissionRequest
 		return nil, 0, fmt.Errorf("%w: admission identity is required", ErrCoordinationFailed)
 	}
 	startedAt := time.Now()
-	capacityWaitDeadline := startedAt.Add(a.config.MaxQueueWait)
-	waitContext, cancel := context.WithDeadline(ctx, capacityWaitDeadline)
+	waitContext, cancel := context.WithTimeout(ctx, a.config.MaxQueueWait)
 	defer cancel()
-	if deadline, ok := waitContext.Deadline(); ok {
-		capacityWaitDeadline = deadline
-	}
 	for {
 		localPermit, _, err := a.gate.Acquire(waitContext, admission.Request{
 			ID: admission.TicketID(request.RequestID.String()), UserID: admission.UserID(request.UserID.String()),
@@ -89,7 +81,6 @@ func (a *AdmissionAdapter) Acquire(ctx context.Context, request AdmissionRequest
 		}
 		decision, err := a.coordinator.AcquireLease(waitContext, request.RequestID.String(), a.config.LeaseTTL, []coordination.ConcurrencyLimit{
 			{Dimension: coordination.GlobalDimension(), MaxInFlight: a.config.MaxActive},
-			{Dimension: coordination.Dimension{Scope: coordination.ScopeUser, SubjectID: request.UserID.String()}, MaxInFlight: a.config.MaxActivePerUser},
 		})
 		if err != nil {
 			localPermit.Release()
@@ -98,7 +89,7 @@ func (a *AdmissionAdapter) Acquire(ctx context.Context, request AdmissionRequest
 		if decision.Granted {
 			permit := &sharedAdmissionPermit{
 				local: localPermit, coordinator: a.coordinator, reference: decision.Lease,
-				ttl: a.config.LeaseTTL, capacityWaitDeadline: capacityWaitDeadline,
+				ttl:  a.config.LeaseTTL,
 				done: make(chan struct{}), stopped: make(chan struct{}),
 			}
 			go permit.renew()
@@ -123,21 +114,13 @@ func (a *AdmissionAdapter) Acquire(ctx context.Context, request AdmissionRequest
 }
 
 type sharedAdmissionPermit struct {
-	local                *admission.Permit
-	coordinator          *coordination.Coordinator
-	reference            coordination.LeaseRef
-	ttl                  time.Duration
-	capacityWaitDeadline time.Time
-	done                 chan struct{}
-	stopped              chan struct{}
-	once                 sync.Once
-}
-
-func (p *sharedAdmissionPermit) CapacityWaitDeadline() time.Time {
-	if p == nil {
-		return time.Time{}
-	}
-	return p.capacityWaitDeadline
+	local       *admission.Permit
+	coordinator *coordination.Coordinator
+	reference   coordination.LeaseRef
+	ttl         time.Duration
+	done        chan struct{}
+	stopped     chan struct{}
+	once        sync.Once
 }
 
 func (p *sharedAdmissionPermit) Release() {
@@ -174,11 +157,10 @@ func (p *sharedAdmissionPermit) renew() {
 }
 
 func NewCoordinationAdapter(coordinator *coordination.Coordinator, config CoordinationConfig) (*CoordinationAdapter, error) {
-	if coordinator == nil || config.LeaseTTL < 3*time.Second || config.LeaseTTL > time.Hour ||
-		config.RetryInterval < 10*time.Millisecond || config.RetryInterval > time.Second {
+	if coordinator == nil || config.LeaseTTL < 3*time.Second || config.LeaseTTL > time.Hour {
 		return nil, errors.New("coordination adapter configuration is invalid")
 	}
-	for _, capacity := range []Capacity{config.Global, config.ResourcePool, config.User, config.GatewayKey, config.Model, config.Provider, config.DefaultCredential} {
+	for _, capacity := range []Capacity{config.Global, config.ResourcePool, config.Model, config.Provider, config.DefaultCredential} {
 		if capacity.RequestsPerMinute < 1 || capacity.TokensPerMinute < 1 || capacity.Concurrency < 1 {
 			return nil, errors.New("all coordination capacity defaults must be positive")
 		}
@@ -201,20 +183,16 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 	if request.Concurrency != nil {
 		credentialCapacity.Concurrency = int64(*request.Concurrency)
 	}
-	capacities := []Capacity{a.config.Global, a.config.ResourcePool, a.config.User, a.config.GatewayKey, a.config.Model, a.config.Provider, credentialCapacity}
+	capacities := []Capacity{a.config.Global, a.config.ResourcePool, a.config.Model, a.config.Provider, credentialCapacity}
 	concurrencyLimits := make([]coordination.ConcurrencyLimit, len(dimensions), len(dimensions)+1)
 	for index := range dimensions {
 		concurrencyLimits[index] = coordination.ConcurrencyLimit{Dimension: dimensions[index], MaxInFlight: capacities[index].Concurrency}
 	}
-	if request.SubscriptionID != uuid.Nil && request.SubscriptionConcurrency > 0 {
-		concurrencyLimits = append(concurrencyLimits, coordination.ConcurrencyLimit{
-			Dimension:   coordination.Dimension{Scope: coordination.ScopeSubscription, SubjectID: request.SubscriptionID.String()},
-			MaxInFlight: int64(request.SubscriptionConcurrency),
-		})
-	}
-	leaseDecision, wait, err := a.acquireConcurrency(ctx, request.ExecutionID.String(), concurrencyLimits, request.CapacityWaitDeadline)
+	startedAt := time.Now()
+	leaseDecision, err := a.coordinator.AcquireLease(ctx, request.ExecutionID.String(), a.config.LeaseTTL, concurrencyLimits)
+	wait := time.Since(startedAt)
 	if err != nil {
-		return nil, wait, err
+		return nil, wait, fmt.Errorf("%w: acquire concurrency: %v", ErrCoordinationFailed, err)
 	}
 	if !leaseDecision.Granted {
 		return nil, wait, &CapacityError{RetryAt: leaseDecision.RetryAt}
@@ -227,15 +205,6 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 			minuteBucket(dimension, coordination.MetricRequests, capacity.RequestsPerMinute, 1),
 			minuteBucket(dimension, coordination.MetricTokens, capacity.TokensPerMinute, request.EstimatedTokens),
 		)
-	}
-	if request.SubscriptionID != uuid.Nil {
-		subscriptionDimension := coordination.Dimension{Scope: coordination.ScopeSubscription, SubjectID: request.SubscriptionID.String()}
-		if request.SubscriptionRPMLimit != nil {
-			rateLimits = append(rateLimits, minuteBucket(subscriptionDimension, coordination.MetricRequests, int64(*request.SubscriptionRPMLimit), 1))
-		}
-		if request.SubscriptionTPMLimit != nil {
-			rateLimits = append(rateLimits, minuteBucket(subscriptionDimension, coordination.MetricTokens, *request.SubscriptionTPMLimit, request.EstimatedTokens))
-		}
 	}
 	rateDecision, err := a.coordinator.AcquireRate(ctx, rateLimits)
 	if err != nil {
@@ -253,37 +222,6 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 	}
 	go lease.renew()
 	return lease, wait, nil
-}
-
-func (a *CoordinationAdapter) acquireConcurrency(ctx context.Context, leaseID string, limits []coordination.ConcurrencyLimit, deadline time.Time) (coordination.LeaseDecision, time.Duration, error) {
-	startedAt := time.Now()
-	for {
-		decision, err := a.coordinator.AcquireLease(ctx, leaseID, a.config.LeaseTTL, limits)
-		if err != nil {
-			return coordination.LeaseDecision{}, time.Since(startedAt), fmt.Errorf("%w: acquire concurrency: %v", ErrCoordinationFailed, err)
-		}
-		if decision.Granted || deadline.IsZero() || !time.Now().Before(deadline) {
-			return decision, time.Since(startedAt), nil
-		}
-
-		delay := a.config.RetryInterval
-		if untilRetry := time.Until(decision.RetryAt); untilRetry > 0 && untilRetry < delay {
-			delay = untilRetry
-		}
-		if untilDeadline := time.Until(deadline); untilDeadline < delay {
-			delay = untilDeadline
-		}
-		if delay <= 0 {
-			return decision, time.Since(startedAt), nil
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return coordination.LeaseDecision{}, time.Since(startedAt), fmt.Errorf("%w: execution capacity wait canceled: %v", ErrAdmissionCanceled, ctx.Err())
-		case <-timer.C:
-		}
-	}
 }
 
 func admissionGateError(err error) error {
@@ -304,8 +242,6 @@ func requestDimensions(request LeaseRequest) []coordination.Dimension {
 	return []coordination.Dimension{
 		coordination.GlobalDimension(),
 		{Scope: coordination.ScopeResourcePool, SubjectID: request.ResourcePoolID.String()},
-		{Scope: coordination.ScopeUser, SubjectID: request.UserID.String()},
-		{Scope: coordination.ScopeGatewayKey, SubjectID: request.GatewayKeyID.String()},
 		{Scope: coordination.ScopeModel, SubjectID: request.ModelID.String()},
 		{Scope: coordination.ScopeProvider, SubjectID: request.ProviderID.String()},
 		{Scope: coordination.ScopeCredential, SubjectID: request.CredentialID.String()},

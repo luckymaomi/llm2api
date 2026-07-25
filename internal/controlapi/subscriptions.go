@@ -12,15 +12,9 @@ import (
 )
 
 type planInput struct {
-	Name             string                `json:"name"`
-	Description      string                `json:"description"`
-	Kind             subscription.PlanKind `json:"kind"`
-	TokenQuota       int64                 `json:"tokenQuota"`
-	ValidityDays     int32                 `json:"validityDays"`
-	ConcurrencyLimit int32                 `json:"concurrencyLimit"`
-	RPMLimit         *int32                `json:"rpmLimit"`
-	TPMLimit         *int64                `json:"tpmLimit"`
-	Routes           []struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Routes      []struct {
 		ModelID        uuid.UUID `json:"modelId"`
 		ResourcePoolID uuid.UUID `json:"resourcePoolId"`
 	} `json:"routes"`
@@ -60,9 +54,7 @@ func (a *API) publishPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item, err := a.subscriptions.PublishPlan(r.Context(), principalFromContext(r.Context()), subscription.PlanDraft{
-		ID: planID, Name: input.Name, Description: input.Description, Kind: input.Kind,
-		TokenQuota: input.TokenQuota, ValidityDays: input.ValidityDays, ConcurrencyLimit: input.ConcurrencyLimit,
-		RPMLimit: input.RPMLimit, TPMLimit: input.TPMLimit, Routes: routes,
+		ID: planID, Name: input.Name, Description: input.Description, Routes: routes,
 	}, mutation)
 	if err != nil {
 		a.writeSubscriptionError(w, r, err)
@@ -120,12 +112,11 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) createSubscription(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		UserID        uuid.UUID `json:"userId"`
-		ServicePlanID uuid.UUID `json:"servicePlanId"`
-		GrantedTokens int64     `json:"grantedTokens"`
-		StartsAt      time.Time `json:"startsAt"`
-		ExpiresAt     time.Time `json:"expiresAt"`
-		Notes         string    `json:"notes"`
+		UserID        uuid.UUID  `json:"userId"`
+		ServicePlanID uuid.UUID  `json:"servicePlanId"`
+		StartsAt      time.Time  `json:"startsAt"`
+		ExpiresAt     *time.Time `json:"expiresAt"`
+		Notes         string     `json:"notes"`
 	}
 	if err := decodeJSON(w, r, &input); err != nil {
 		writeDecodeError(w, r, err)
@@ -135,7 +126,7 @@ func (a *API) createSubscription(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := a.subscriptions.CreateSubscription(r.Context(), principalFromContext(r.Context()), subscription.NewSubscription{UserID: input.UserID, ServicePlanID: input.ServicePlanID, GrantedTokens: input.GrantedTokens, StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Notes: input.Notes}, mutation)
+	item, err := a.subscriptions.CreateSubscription(r.Context(), principalFromContext(r.Context()), subscription.NewSubscription{UserID: input.UserID, ServicePlanID: input.ServicePlanID, StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Notes: input.Notes}, mutation)
 	if err != nil {
 		a.writeSubscriptionError(w, r, err)
 		return
@@ -149,11 +140,10 @@ func (a *API) updateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		GrantedTokens     int64     `json:"grantedTokens"`
-		StartsAt          time.Time `json:"startsAt"`
-		ExpiresAt         time.Time `json:"expiresAt"`
-		Notes             string    `json:"notes"`
-		ExpectedUpdatedAt time.Time `json:"expectedUpdatedAt"`
+		StartsAt          time.Time  `json:"startsAt"`
+		ExpiresAt         *time.Time `json:"expiresAt"`
+		Notes             string     `json:"notes"`
+		ExpectedUpdatedAt time.Time  `json:"expectedUpdatedAt"`
 	}
 	if err := decodeJSON(w, r, &input); err != nil {
 		writeDecodeError(w, r, err)
@@ -163,7 +153,7 @@ func (a *API) updateSubscription(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := a.subscriptions.UpdateSubscription(r.Context(), principalFromContext(r.Context()), subscription.SubscriptionChange{ID: id, GrantedTokens: input.GrantedTokens, StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Notes: input.Notes, ExpectedUpdatedAt: input.ExpectedUpdatedAt}, mutation)
+	item, err := a.subscriptions.UpdateSubscription(r.Context(), principalFromContext(r.Context()), subscription.SubscriptionChange{ID: id, StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Notes: input.Notes, ExpectedUpdatedAt: input.ExpectedUpdatedAt}, mutation)
 	if err != nil {
 		a.writeSubscriptionError(w, r, err)
 		return

@@ -87,17 +87,23 @@ type BootstrapCredentials struct {
 }
 
 type GatewayKey struct {
-	ID                 uuid.UUID   `json:"id"`
-	UserID             uuid.UUID   `json:"user_id"`
-	Name               string      `json:"name"`
-	Prefix             string      `json:"prefix"`
-	Secret             string      `json:"secret,omitempty"`
-	AuthorizedModelIDs []uuid.UUID `json:"authorized_model_ids"`
-	AuthorizedModels   []string    `json:"authorized_models"`
-	ExpiresAt          *time.Time  `json:"expires_at,omitempty"`
-	RevokedAt          *time.Time  `json:"revoked_at,omitempty"`
-	LastUsedAt         *time.Time  `json:"last_used_at,omitempty"`
-	CreatedAt          time.Time   `json:"created_at"`
+	ID         uuid.UUID         `json:"id"`
+	UserID     uuid.UUID         `json:"user_id"`
+	Name       string            `json:"name"`
+	Prefix     string            `json:"prefix"`
+	Secret     string            `json:"secret,omitempty"`
+	Routes     []GatewayKeyRoute `json:"routes"`
+	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
+	DeletedAt  *time.Time        `json:"deleted_at,omitempty"`
+	LastUsedAt *time.Time        `json:"last_used_at,omitempty"`
+	CreatedAt  time.Time         `json:"created_at"`
+}
+
+type GatewayKeyRoute struct {
+	ModelID          uuid.UUID `json:"model_id"`
+	ModelName        string    `json:"model_name,omitempty"`
+	ResourcePoolID   uuid.UUID `json:"resource_pool_id"`
+	ResourcePoolName string    `json:"resource_pool_name,omitempty"`
 }
 
 type MutationRequest struct {
@@ -141,13 +147,13 @@ type MemberChange struct {
 }
 
 type NewGatewayKey struct {
-	UserID             uuid.UUID
-	Name               string
-	Prefix             string
-	SecretDigest       []byte
-	AuthorizedModelIDs []uuid.UUID
-	ExpiresAt          *time.Time
-	ReplacesKeyID      *uuid.UUID
+	UserID        uuid.UUID
+	Name          string
+	Prefix        string
+	SecretDigest  []byte
+	Routes        []GatewayKeyRoute
+	ExpiresAt     *time.Time
+	ReplacesKeyID *uuid.UUID
 }
 
 type SessionRevocation struct {
@@ -200,7 +206,7 @@ type Repository interface {
 	CreateGatewayKey(context.Context, NewGatewayKey, uuid.UUID, GatewayKeyMutation) (GatewayKey, error)
 	GatewayKeyForReplacement(context.Context, uuid.UUID) (GatewayKey, error)
 	ListGatewayKeys(context.Context, uuid.UUID) ([]GatewayKey, error)
-	RevokeGatewayKey(context.Context, uuid.UUID, uuid.UUID, bool) error
+	DeleteGatewayKey(context.Context, uuid.UUID, uuid.UUID, bool) error
 	FindGatewayPrincipal(context.Context, []byte) (GatewayPrincipal, error)
 	FindGatewayPrincipalByID(context.Context, uuid.UUID) (GatewayPrincipal, error)
 	TouchGatewayKey(context.Context, uuid.UUID) error

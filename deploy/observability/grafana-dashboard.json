@@ -42,9 +42,9 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Quota operations",
+      "title": "Usage persistence operations",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "refId": "A", "expr": "sum by (operation, outcome) (rate(llmgateway_quota_operations_total[5m]))", "legendFormat": "{{operation}} {{outcome}}" }],
+      "targets": [{ "refId": "A", "expr": "sum by (operation, outcome) (rate(llmgateway_usage_operations_total[5m]))", "legendFormat": "{{operation}} {{outcome}}" }],
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
     },
     {

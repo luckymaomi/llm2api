@@ -10,22 +10,28 @@ import (
 )
 
 type gatewayKeyView struct {
-	ID                 string     `json:"id"`
-	OwnerID            string     `json:"ownerId"`
-	OwnerName          string     `json:"ownerName"`
-	Name               string     `json:"name"`
-	Prefix             string     `json:"prefix"`
-	Status             string     `json:"status"`
-	AuthorizedModelIDs []string   `json:"authorizedModelIds"`
-	AuthorizedModels   []string   `json:"authorizedModels"`
-	ExpiresAt          *time.Time `json:"expiresAt,omitempty"`
-	CreatedAt          time.Time  `json:"createdAt"`
-	LastUsedAt         *time.Time `json:"lastUsedAt,omitempty"`
+	ID         string                `json:"id"`
+	OwnerID    string                `json:"ownerId"`
+	OwnerName  string                `json:"ownerName"`
+	Name       string                `json:"name"`
+	Prefix     string                `json:"prefix"`
+	Status     string                `json:"status"`
+	Routes     []gatewayKeyRouteView `json:"routes"`
+	ExpiresAt  *time.Time            `json:"expiresAt,omitempty"`
+	CreatedAt  time.Time             `json:"createdAt"`
+	LastUsedAt *time.Time            `json:"lastUsedAt,omitempty"`
 }
 
 type createdGatewayKeyView struct {
 	Key    gatewayKeyView `json:"key"`
 	Secret string         `json:"secret"`
+}
+
+type gatewayKeyRouteView struct {
+	ModelID          string `json:"modelId"`
+	ModelName        string `json:"modelName"`
+	ResourcePoolID   string `json:"resourcePoolId"`
+	ResourcePoolName string `json:"resourcePoolName"`
 }
 
 type ownedGatewayKey struct {
@@ -35,10 +41,13 @@ type ownedGatewayKey struct {
 
 func (a *API) createKey(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		OwnerID            uuid.UUID   `json:"ownerId"`
-		Name               string      `json:"name"`
-		AuthorizedModelIDs []uuid.UUID `json:"authorizedModelIds"`
-		ExpiresAt          *time.Time  `json:"expiresAt"`
+		OwnerID uuid.UUID `json:"ownerId"`
+		Name    string    `json:"name"`
+		Routes  []struct {
+			ModelID        uuid.UUID `json:"modelId"`
+			ResourcePoolID uuid.UUID `json:"resourcePoolId"`
+		} `json:"routes"`
+		ExpiresAt *time.Time `json:"expiresAt"`
 	}
 	if err := decodeJSON(w, r, &input); err != nil {
 		writeDecodeError(w, r, err)
@@ -69,7 +78,11 @@ func (a *API) createKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	key, err := a.identity.CreateGatewayKey(r.Context(), principal, ownerID, input.Name, input.AuthorizedModelIDs, input.ExpiresAt, mutation)
+	routes := make([]identity.GatewayKeyRoute, 0, len(input.Routes))
+	for _, route := range input.Routes {
+		routes = append(routes, identity.GatewayKeyRoute{ModelID: route.ModelID, ResourcePoolID: route.ResourcePoolID})
+	}
+	key, err := a.identity.CreateGatewayKey(r.Context(), principal, ownerID, input.Name, routes, input.ExpiresAt, mutation)
 	if err != nil {
 		a.writeIdentityError(w, r, err)
 		return
@@ -100,33 +113,17 @@ func (a *API) listKeys(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, paginate(views, query))
 }
 
-func (a *API) revokeKey(w http.ResponseWriter, r *http.Request) {
+func (a *API) deleteKey(w http.ResponseWriter, r *http.Request) {
 	keyID, err := uuid.Parse(chi.URLParam(r, "keyID"))
 	if err != nil {
 		writeDecodeError(w, r, err)
 		return
 	}
-	items, err := a.collectKeys(r)
-	if err != nil {
+	if err := a.identity.DeleteGatewayKey(r.Context(), principalFromContext(r.Context()), keyID); err != nil {
 		a.writeIdentityError(w, r, err)
 		return
 	}
-	var selected *ownedGatewayKey
-	for index := range items {
-		if items[index].Key.ID == keyID {
-			selected = &items[index]
-			break
-		}
-	}
-	if selected == nil {
-		a.writeIdentityError(w, r, identity.ErrNotFound)
-		return
-	}
-	if err := a.identity.RevokeGatewayKey(r.Context(), principalFromContext(r.Context()), keyID); err != nil {
-		a.writeIdentityError(w, r, err)
-		return
-	}
-	writeData(w, http.StatusOK, presentGatewayKey(selected.Key, selected.OwnerName, "revoked"))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) replaceKey(w http.ResponseWriter, r *http.Request) {
@@ -198,30 +195,29 @@ func presentGatewayKey(key identity.GatewayKey, ownerName, forcedStatus string) 
 	status := forcedStatus
 	if status == "" {
 		switch {
-		case key.RevokedAt != nil:
-			status = "revoked"
+		case key.DeletedAt != nil:
+			status = "deleted"
 		case key.ExpiresAt != nil && !key.ExpiresAt.After(time.Now().UTC()):
 			status = "expired"
 		default:
 			status = "active"
 		}
 	}
-	modelIDs := make([]string, 0, len(key.AuthorizedModelIDs))
-	for _, modelID := range key.AuthorizedModelIDs {
-		modelIDs = append(modelIDs, modelID.String())
+	routes := make([]gatewayKeyRouteView, 0, len(key.Routes))
+	for _, route := range key.Routes {
+		routes = append(routes, gatewayKeyRouteView{ModelID: route.ModelID.String(), ModelName: route.ModelName, ResourcePoolID: route.ResourcePoolID.String(), ResourcePoolName: route.ResourcePoolName})
 	}
 	return gatewayKeyView{
-		ID:                 key.ID.String(),
-		OwnerID:            key.UserID.String(),
-		OwnerName:          ownerName,
-		Name:               key.Name,
-		Prefix:             key.Prefix,
-		Status:             status,
-		AuthorizedModelIDs: modelIDs,
-		AuthorizedModels:   append([]string(nil), key.AuthorizedModels...),
-		ExpiresAt:          utcTimePointer(key.ExpiresAt),
-		CreatedAt:          key.CreatedAt.UTC(),
-		LastUsedAt:         utcTimePointer(key.LastUsedAt),
+		ID:         key.ID.String(),
+		OwnerID:    key.UserID.String(),
+		OwnerName:  ownerName,
+		Name:       key.Name,
+		Prefix:     key.Prefix,
+		Status:     status,
+		Routes:     routes,
+		ExpiresAt:  utcTimePointer(key.ExpiresAt),
+		CreatedAt:  key.CreatedAt.UTC(),
+		LastUsedAt: utcTimePointer(key.LastUsedAt),
 	}
 }
 

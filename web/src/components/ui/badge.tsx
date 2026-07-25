@@ -21,7 +21,6 @@ const statusLabels: Record<string, string> = {
   issued: '已签发',
   claimed: '已领取',
   expired: '已过期',
-  revoked: '已撤销',
   suspended: '已停用',
   draft: '草稿',
   validating: '校验中',

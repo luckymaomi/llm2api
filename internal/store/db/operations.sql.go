@@ -20,22 +20,22 @@ SELECT
   (SELECT count(*) FROM models) AS model_count,
   (SELECT count(*) FROM provider_credentials WHERE status <> 'retired') AS credential_count,
   (SELECT count(*) FROM provider_credentials WHERE status = 'active') AS active_credential_count,
-  (SELECT count(*) FROM provider_credentials WHERE status = 'cooling') AS cooling_credential_count,
+  (SELECT count(*) FROM provider_credentials WHERE status = 'active' AND health_status = 'cooling') AS cooling_credential_count,
   (SELECT count(*) FROM provider_credentials WHERE last_probe_status = 'succeeded') AS successful_credential_probe_count,
   (SELECT count(*) FROM users WHERE role = 'member' AND status = 'active') AS active_member_count,
   (SELECT count(*) FROM gateway_keys key JOIN users member ON member.id = key.user_id
-   WHERE member.status = 'active' AND key.revoked_at IS NULL
+   WHERE member.status = 'active' AND key.deleted_at IS NULL
      AND (key.expires_at IS NULL OR key.expires_at > $1)) AS active_gateway_key_count,
   (SELECT count(*) FROM service_plans WHERE status = 'active' AND current_version_id IS NOT NULL) AS active_service_plan_count,
   (SELECT count(*) FROM subscriptions subscription
    WHERE subscription.status IN ('scheduled', 'active')
-     AND subscription.starts_at <= $1 AND subscription.expires_at > $1) AS active_subscription_count,
+     AND subscription.starts_at <= $1
+     AND (subscription.expires_at IS NULL OR subscription.expires_at > $1)) AS active_subscription_count,
   EXISTS (
     SELECT 1 FROM resource_pools pool
     JOIN provider_credentials credential ON credential.resource_pool_id = pool.id
     WHERE pool.status = 'active' AND credential.status = 'active'
   ) AS has_active_upstream,
-  EXISTS (SELECT 1 FROM model_price_versions WHERE effective_at <= $1) AS has_model_price,
   EXISTS (SELECT 1 FROM requests WHERE status = 'completed') AS has_completed_request
 `
 
@@ -53,7 +53,6 @@ type GetAdministratorResourceSummaryRow struct {
 	ActiveServicePlanCount         int64 `json:"active_service_plan_count"`
 	ActiveSubscriptionCount        int64 `json:"active_subscription_count"`
 	HasActiveUpstream              bool  `json:"has_active_upstream"`
-	HasModelPrice                  bool  `json:"has_model_price"`
 	HasCompletedRequest            bool  `json:"has_completed_request"`
 }
 
@@ -74,7 +73,6 @@ func (q *Queries) GetAdministratorResourceSummary(ctx context.Context, observedA
 		&i.ActiveServicePlanCount,
 		&i.ActiveSubscriptionCount,
 		&i.HasActiveUpstream,
-		&i.HasModelPrice,
 		&i.HasCompletedRequest,
 	)
 	return i, err
@@ -112,27 +110,18 @@ func (q *Queries) GetAttemptLatencySummary(ctx context.Context, arg GetAttemptLa
 const getMemberAccessSummary = `-- name: GetMemberAccessSummary :one
 SELECT
   (SELECT count(*) FROM gateway_keys key
-   WHERE key.user_id = $1 AND key.revoked_at IS NULL
+   WHERE key.user_id = $1 AND key.deleted_at IS NULL
      AND (key.expires_at IS NULL OR key.expires_at > $2)) AS active_gateway_key_count,
   (SELECT count(*) FROM subscriptions subscription
    WHERE subscription.user_id = $1
      AND subscription.status IN ('scheduled', 'active')
-     AND subscription.starts_at <= $2 AND subscription.expires_at > $2) AS active_subscription_count,
-  COALESCE((
-    SELECT sum(balance.tokens)
-    FROM subscriptions subscription
-    CROSS JOIN LATERAL (
-      SELECT COALESCE(sum(event.token_delta), 0)::bigint AS tokens
-      FROM ledger_events event WHERE event.subscription_id = subscription.id
-    ) balance
-    WHERE subscription.user_id = $1
-      AND subscription.status IN ('scheduled', 'active')
-      AND subscription.starts_at <= $2 AND subscription.expires_at > $2
-  ), 0)::bigint AS remaining_tokens,
+     AND subscription.starts_at <= $2
+     AND (subscription.expires_at IS NULL OR subscription.expires_at > $2)) AS active_subscription_count,
   (SELECT min(subscription.expires_at)::timestamptz FROM subscriptions subscription
    WHERE subscription.user_id = $1
      AND subscription.status IN ('scheduled', 'active')
-     AND subscription.starts_at <= $2 AND subscription.expires_at > $2) AS nearest_subscription_expiry
+     AND subscription.starts_at <= $2
+     AND subscription.expires_at > $2) AS nearest_subscription_expiry
 `
 
 type GetMemberAccessSummaryParams struct {
@@ -143,19 +132,13 @@ type GetMemberAccessSummaryParams struct {
 type GetMemberAccessSummaryRow struct {
 	ActiveGatewayKeyCount     int64              `json:"active_gateway_key_count"`
 	ActiveSubscriptionCount   int64              `json:"active_subscription_count"`
-	RemainingTokens           int64              `json:"remaining_tokens"`
 	NearestSubscriptionExpiry pgtype.Timestamptz `json:"nearest_subscription_expiry"`
 }
 
 func (q *Queries) GetMemberAccessSummary(ctx context.Context, arg GetMemberAccessSummaryParams) (GetMemberAccessSummaryRow, error) {
 	row := q.db.QueryRow(ctx, getMemberAccessSummary, arg.UserID, arg.ObservedAt)
 	var i GetMemberAccessSummaryRow
-	err := row.Scan(
-		&i.ActiveGatewayKeyCount,
-		&i.ActiveSubscriptionCount,
-		&i.RemainingTokens,
-		&i.NearestSubscriptionExpiry,
-	)
+	err := row.Scan(&i.ActiveGatewayKeyCount, &i.ActiveSubscriptionCount, &i.NearestSubscriptionExpiry)
 	return i, err
 }
 

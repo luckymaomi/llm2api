@@ -1,75 +1,19 @@
 -- name: GetActiveGatewayKeyForRequest :one
-SELECT k.user_id
+SELECT k.user_id, u.role
 FROM gateway_keys k
 JOIN users u ON u.id = k.user_id
 WHERE k.id = sqlc.arg(gateway_key_id)
   AND k.user_id = sqlc.arg(user_id)
-  AND k.revoked_at IS NULL
+  AND k.deleted_at IS NULL
   AND (k.expires_at IS NULL OR k.expires_at > now())
   AND u.status = 'active'
 FOR SHARE OF k, u;
 
--- name: CreateLedgerEvent :one
-INSERT INTO ledger_events (user_id, subscription_id, request_id, reservation_id, kind, token_delta, reserved_tokens, input_tokens, output_tokens, usage_source, source_event_id, note, created_by)
-VALUES (sqlc.arg(user_id), sqlc.arg(subscription_id), sqlc.narg(request_id), sqlc.narg(reservation_id), sqlc.arg(kind), sqlc.arg(token_delta), sqlc.arg(reserved_tokens), sqlc.arg(input_tokens), sqlc.arg(output_tokens), sqlc.arg(usage_source), sqlc.narg(source_event_id), sqlc.narg(note), sqlc.narg(created_by))
-RETURNING *;
-
--- name: SubscriptionBalance :one
-SELECT coalesce(sum(token_delta), 0)::bigint FROM ledger_events WHERE subscription_id = sqlc.arg(subscription_id);
-
--- name: ListLedgerEventsBySubscription :many
-SELECT * FROM ledger_events WHERE subscription_id = sqlc.arg(subscription_id) ORDER BY created_at, id;
-
--- name: CreateLedgerReservation :one
-INSERT INTO ledger_reservations (id, subscription_id, request_id, state, reserved_tokens, reserve_event_id)
-VALUES (sqlc.arg(id), sqlc.arg(subscription_id), sqlc.arg(request_id), 'reserved', sqlc.arg(reserved_tokens), sqlc.arg(reserve_event_id))
-RETURNING *;
-
--- name: GetLedgerReservationForUpdate :one
-SELECT * FROM ledger_reservations WHERE id = sqlc.arg(id) FOR UPDATE;
-
--- name: GetLedgerReservationByRequest :one
-SELECT * FROM ledger_reservations WHERE request_id = sqlc.arg(request_id);
-
--- name: GetLedgerReservationByRequestForUpdate :one
-SELECT * FROM ledger_reservations WHERE request_id = sqlc.arg(request_id) FOR UPDATE;
-
--- name: CompleteLedgerReservation :one
-UPDATE ledger_reservations
-SET state = sqlc.arg(state), charged_tokens = sqlc.arg(charged_tokens), usage_source = sqlc.arg(usage_source), terminal_event_id = sqlc.arg(terminal_event_id), updated_at = now()
-WHERE id = sqlc.arg(id) AND state = 'reserved'
-RETURNING *;
-
--- name: CountLedgerEvents :one
-SELECT count(*)
-FROM ledger_events event
-JOIN users owner ON owner.id = event.user_id
-JOIN subscriptions subscription ON subscription.id = event.subscription_id
-JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
-JOIN service_plans plan ON plan.id = version.service_plan_id
-LEFT JOIN users actor ON actor.id = event.created_by
-WHERE (sqlc.narg(user_id)::uuid IS NULL OR event.user_id = sqlc.narg(user_id))
-  AND (sqlc.narg(subscription_id)::uuid IS NULL OR event.subscription_id = sqlc.narg(subscription_id))
-  AND (sqlc.arg(search)::text = '' OR concat_ws(' ', owner.display_name, owner.email, plan.name, actor.display_name, actor.email, event.note, event.request_id::text) ILIKE '%' || sqlc.arg(search)::text || '%');
-
--- name: ListLedgerEvents :many
-SELECT event.*, plan.name AS service_plan_name, owner.display_name AS owner_name, actor.display_name AS actor_name
-FROM ledger_events event
-JOIN users owner ON owner.id = event.user_id
-JOIN subscriptions subscription ON subscription.id = event.subscription_id
-JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
-JOIN service_plans plan ON plan.id = version.service_plan_id
-LEFT JOIN users actor ON actor.id = event.created_by
-WHERE (sqlc.narg(user_id)::uuid IS NULL OR event.user_id = sqlc.narg(user_id))
-  AND (sqlc.narg(subscription_id)::uuid IS NULL OR event.subscription_id = sqlc.narg(subscription_id))
-  AND (sqlc.arg(search)::text = '' OR concat_ws(' ', owner.display_name, owner.email, plan.name, actor.display_name, actor.email, event.note, event.request_id::text) ILIKE '%' || sqlc.arg(search)::text || '%')
-ORDER BY event.created_at DESC, event.id LIMIT sqlc.arg(page_size) OFFSET sqlc.arg(page_offset);
-
 -- name: CreateRequest :one
 INSERT INTO requests (id, idempotency_key, request_digest, user_id, gateway_key_id, model_id, subscription_id, resource_pool_id,
-                      price_version_id, cost_currency, input_rate_nanos_per_million, output_rate_nanos_per_million, status, stream)
-VALUES (sqlc.arg(id), sqlc.narg(idempotency_key), sqlc.arg(request_digest), sqlc.arg(user_id), sqlc.arg(gateway_key_id), sqlc.arg(model_id), sqlc.arg(subscription_id), sqlc.arg(resource_pool_id),
-        sqlc.arg(price_version_id), sqlc.arg(cost_currency), sqlc.arg(input_rate_nanos_per_million), sqlc.arg(output_rate_nanos_per_million), sqlc.arg(status), sqlc.arg(stream))
+                      status, stream)
+VALUES (sqlc.arg(id), sqlc.narg(idempotency_key), sqlc.arg(request_digest), sqlc.arg(user_id), sqlc.arg(gateway_key_id), sqlc.arg(model_id), sqlc.narg(subscription_id), sqlc.arg(resource_pool_id),
+        sqlc.arg(status), sqlc.arg(stream))
 RETURNING *;
 
 -- name: GetRequestByIdempotencyKey :one
@@ -166,7 +110,7 @@ WITH stale AS (
 )
 SELECT count(*)::bigint FROM fenced_requests;
 
--- name: ListRecoverableRequestSettlements :many
+-- name: ListRecoverableRequestCompletions :many
 SELECT request.id AS request_id,
        request.execution_id,
        request.execution_generation,
@@ -174,8 +118,6 @@ SELECT request.id AS request_id,
        completed_attempt.output_tokens,
        completed_attempt.usage_source
 FROM requests AS request
-JOIN ledger_reservations AS reservation
-  ON reservation.request_id = request.id AND reservation.state = 'reserved'
 JOIN LATERAL (
     SELECT attempt.input_tokens, attempt.output_tokens, attempt.usage_source
     FROM request_attempts AS attempt
@@ -198,8 +140,6 @@ LIMIT sqlc.arg(batch_size);
 -- name: ListStaleQueuedRequests :many
 SELECT request.id
 FROM requests AS request
-JOIN ledger_reservations AS reservation
-  ON reservation.request_id = request.id AND reservation.state = 'reserved'
 WHERE request.status = 'queued'
   AND request.execution_id IS NULL
   AND request.execution_generation = 0
@@ -209,7 +149,6 @@ LIMIT sqlc.arg(batch_size);
 
 -- name: CompleteRequest :one
 UPDATE requests SET status = 'completed', input_tokens = sqlc.arg(input_tokens), output_tokens = sqlc.arg(output_tokens), usage_source = sqlc.arg(usage_source),
-    input_cost_nanos = sqlc.arg(input_cost_nanos), output_cost_nanos = sqlc.arg(output_cost_nanos), total_cost_nanos = sqlc.arg(total_cost_nanos),
     error_kind = NULL, error_detail = NULL, completed_at = now(), updated_at = now()
 WHERE id = sqlc.arg(id)
   AND execution_id = sqlc.arg(execution_id)
@@ -232,7 +171,6 @@ RETURNING *;
 -- name: FailRequestWithUsage :one
 UPDATE requests
 SET status = 'failed', input_tokens = sqlc.arg(input_tokens), output_tokens = sqlc.arg(output_tokens), usage_source = sqlc.arg(usage_source),
-    input_cost_nanos = sqlc.arg(input_cost_nanos), output_cost_nanos = sqlc.arg(output_cost_nanos), total_cost_nanos = sqlc.arg(total_cost_nanos),
     error_kind = sqlc.arg(error_kind), error_detail = sqlc.narg(error_detail), completed_at = now(), updated_at = now()
 WHERE id = sqlc.arg(id)
   AND execution_id = sqlc.arg(execution_id)

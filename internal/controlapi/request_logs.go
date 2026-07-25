@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/luckymaomi/llmgateway/internal/identity"
-	"github.com/luckymaomi/llmgateway/internal/quota"
+	"github.com/luckymaomi/llmgateway/internal/usage"
 )
 
 type requestLogView struct {
@@ -23,11 +23,11 @@ type requestLogView struct {
 	ResourcePoolID   string              `json:"resourcePoolId"`
 	ResourcePoolName string              `json:"resourcePoolName"`
 	ResourcePoolSlug string              `json:"resourcePoolSlug"`
-	Status           quota.RequestStatus `json:"status"`
+	Status           usage.RequestStatus `json:"status"`
 	Stream           bool                `json:"stream"`
 	InputTokens      *int64              `json:"inputTokens,omitempty"`
 	OutputTokens     *int64              `json:"outputTokens,omitempty"`
-	UsageSource      quota.UsageSource   `json:"usageSource"`
+	UsageSource      usage.UsageSource   `json:"usageSource"`
 	ErrorKind        *string             `json:"errorKind,omitempty"`
 	AttemptCount     int64               `json:"attemptCount"`
 }
@@ -46,7 +46,7 @@ type requestAttemptView struct {
 	CompletedAt    *time.Time        `json:"completedAt,omitempty"`
 	InputTokens    *int64            `json:"inputTokens,omitempty"`
 	OutputTokens   *int64            `json:"outputTokens,omitempty"`
-	UsageSource    quota.UsageSource `json:"usageSource"`
+	UsageSource    usage.UsageSource `json:"usageSource"`
 	CreatedAt      time.Time         `json:"createdAt"`
 }
 
@@ -55,7 +55,7 @@ type requestLogDetailView struct {
 	Attempts []requestAttemptView `json:"attempts"`
 }
 
-func presentRequestLogs(principal identity.Principal, items []quota.RequestLog) ([]requestLogView, error) {
+func presentRequestLogs(principal identity.Principal, items []usage.RequestLog) ([]requestLogView, error) {
 	views := make([]requestLogView, 0, len(items))
 	for _, item := range items {
 		view, err := presentRequestLog(principal, item)
@@ -67,7 +67,7 @@ func presentRequestLogs(principal identity.Principal, items []quota.RequestLog) 
 	return views, nil
 }
 
-func presentRequestLogDetail(principal identity.Principal, detail quota.RequestLogDetail) (requestLogDetailView, error) {
+func presentRequestLogDetail(principal identity.Principal, detail usage.RequestLogDetail) (requestLogDetailView, error) {
 	request, err := presentRequestLog(principal, detail.RequestLog)
 	if err != nil {
 		return requestLogDetailView{}, err
@@ -86,7 +86,7 @@ func presentRequestLogDetail(principal identity.Principal, detail quota.RequestL
 	return requestLogDetailView{Request: request, Attempts: attempts}, nil
 }
 
-func presentRequestLog(principal identity.Principal, item quota.RequestLog) (requestLogView, error) {
+func presentRequestLog(principal identity.Principal, item usage.RequestLog) (requestLogView, error) {
 	if principal.Role == identity.RoleMember && item.UserID != principal.UserID {
 		return requestLogView{}, errors.New("member request scope invariant violated")
 	}

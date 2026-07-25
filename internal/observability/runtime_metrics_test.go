@@ -22,13 +22,13 @@ func TestRuntimeMetricsExposeBoundedDomainOutcomes(t *testing.T) {
 	metrics := NewRuntimeMetrics(registry, slog.New(slog.NewJSONHandler(&logs, nil)))
 	metrics.ProviderAttempt(providers.KindGemini, "uncertain", "uncertain")
 	metrics.BackgroundResponse("completed")
-	metrics.RequestRecovery(requestflow.RecoveryResult{Settled: 2, Released: 1, Uncertain: 1})
+	metrics.RequestRecovery(requestflow.RecoveryResult{Completed: 2, FailedAccepted: 1, Uncertain: 1})
 
 	if got := testutil.ToFloat64(metrics.providerAttempts.WithLabelValues("gemini", "uncertain", "uncertain")); got != 1 {
 		t.Fatalf("Provider attempts = %v", got)
 	}
-	if got := testutil.ToFloat64(metrics.requestRecovery.WithLabelValues("settled")); got != 2 {
-		t.Fatalf("settled recoveries = %v", got)
+	if got := testutil.ToFloat64(metrics.requestRecovery.WithLabelValues("completed")); got != 2 {
+		t.Fatalf("completed recoveries = %v", got)
 	}
 	if count, err := registry.Gather(); err != nil || len(count) < 8 {
 		t.Fatalf("Gather() families = %d, error = %v", len(count), err)

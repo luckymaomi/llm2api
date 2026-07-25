@@ -172,10 +172,6 @@ var defaultCatalog = mustCatalog([]Definition{
 		Presets: []ProviderPreset{{
 			ID: "siliconflow", Slug: "siliconflow", Name: "硅基流动", BaseURL: "https://api.siliconflow.cn/v1",
 			SourceURL: "https://api-docs.siliconflow.cn/docs/api/chat-completions-post", VerifiedAt: "2026-07-22",
-			Models: []ModelPreset{{
-				PublicName: "qwen3.5-9b", UpstreamName: "Qwen/Qwen3.5-9B", DisplayName: "Qwen3.5 9B",
-				Capabilities: []string{"streaming", "tools", "reasoning"}, ReasoningMode: "toggle", ContextTokens: 131072,
-			}},
 		}},
 		Build: func(options AdapterOptions) (Adapter, error) {
 			return NewOpenAICompatible(OpenAICompatibleOptions{BaseURL: options.BaseURL, Capabilities: options.Capabilities})
@@ -186,15 +182,11 @@ var defaultCatalog = mustCatalog([]Definition{
 		Contract: ContractInfo{
 			ReferenceURL: "https://docs.bigmodel.cn/cn/guide/develop/http/introduction", ContractSnapshot: "2026-07-22",
 			VerifiedAt: "2026-07-22", VerifiedModels: []string{"glm-5.2"},
-			LiveCapabilities: []string{"models", "chat", "stream", "tools", "reasoning", "usage", "quota_error", "priority_takeover"}, Status: VerificationVerified,
+			LiveCapabilities: []string{"models", "chat", "stream", "tools", "reasoning", "usage", "quota_error", "same_pool_takeover"}, Status: VerificationVerified,
 		},
 		Presets: []ProviderPreset{{
 			ID: "zhipu", Slug: "zhipu", Name: "智谱 GLM", BaseURL: "https://open.bigmodel.cn/api/paas/v4",
 			SourceURL: "https://docs.bigmodel.cn/cn/guide/develop/http/introduction", VerifiedAt: "2026-07-22",
-			Models: []ModelPreset{{
-				PublicName: "glm-5.2", UpstreamName: "glm-5.2", DisplayName: "GLM-5.2",
-				Capabilities: []string{"streaming", "tools", "reasoning"}, ReasoningMode: "hybrid", ContextTokens: 131072,
-			}},
 		}},
 		Build: func(options AdapterOptions) (Adapter, error) { return NewZhipuWithBaseURL(options.BaseURL) },
 	},
@@ -208,10 +200,6 @@ var defaultCatalog = mustCatalog([]Definition{
 		Presets: []ProviderPreset{{
 			ID: "agnes", Slug: "agnes", Name: "Agnes", BaseURL: "https://apihub.agnes-ai.com/v1",
 			SourceURL: "https://apihub.agnes-ai.com/v1", VerifiedAt: "2026-07-22",
-			Models: []ModelPreset{{
-				PublicName: "agnes-2.0-flash", UpstreamName: "agnes-2.0-flash", DisplayName: "Agnes 2.0 Flash",
-				Capabilities: []string{"streaming", "tools", "reasoning"}, ReasoningMode: "toggle", ContextTokens: 131072,
-			}},
 		}},
 		Build: func(options AdapterOptions) (Adapter, error) { return NewAgnesWithBaseURL(options.BaseURL) },
 	},
@@ -225,10 +213,6 @@ var defaultCatalog = mustCatalog([]Definition{
 		Presets: []ProviderPreset{{
 			ID: "gemini", Slug: "gemini", Name: "Google Gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 			SourceURL: "https://ai.google.dev/gemini-api/docs/openai", VerifiedAt: "2026-07-22",
-			Models: []ModelPreset{{
-				PublicName: "gemini-3.5-flash", UpstreamName: "gemini-3.5-flash", DisplayName: "Gemini 3.5 Flash",
-				Capabilities: []string{"streaming", "tools", "reasoning"}, ReasoningMode: "effort", ContextTokens: 131072,
-			}},
 		}},
 		Build: func(options AdapterOptions) (Adapter, error) { return NewGeminiWithBaseURL(options.BaseURL) },
 	},

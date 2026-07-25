@@ -4,7 +4,7 @@ Prometheus 从 backend 网络分别抓取 `gateway-a:8080/metrics` 与 `gateway-
 
 ## Not Ready
 
-先分别请求两个实例的 `/health/ready`，再检查 PostgreSQL `pg_isready`、Valkey `PING`、磁盘空间和连接池。一个实例失败时让 Caddy 摘除它；两个实例均失败时停止新流量。恢复存储后确认 readiness、quota reservation 和 request recovery 不再失败，再逐实例恢复。不要用跳过 readiness 或 fail-open 绕过存储故障。
+先分别请求两个实例的 `/health/ready`，再检查 PostgreSQL `pg_isready`、Valkey `PING`、磁盘空间和连接池。一个实例失败时让 Caddy 摘除它；两个实例均失败时停止新流量。恢复存储后确认 readiness、usage persistence 和 request recovery 不再失败，再逐实例恢复。不要用跳过 readiness 或 fail-open 绕过存储故障。
 
 ## Admission Saturated
 
@@ -18,9 +18,9 @@ Prometheus 从 backend 网络分别抓取 `gateway-a:8080/metrics` 与 `gateway-
 
 立即记录 request ID、attempt 状态、credential prefix 和时间窗口，禁止客户端或值班人员自动重放。确认 PostgreSQL request/attempt/reservation 为 `uncertain+reserved`，对照 Provider 账单/请求 ID人工裁决；无法权威裁决时继续保留预留。流已提交时只向客户端发送终止事件，不拼接另一 Provider。
 
-## Quota Failures
+## Usage Persistence Failures
 
-停止新增请求并检查 PostgreSQL 事务、锁、磁盘和 migration。对照 requests、ledger reservations/events 与 usage；任何重复 settle/release 必须保持幂等。恢复后先运行定向账本不变量，再开放流量，不直接修改余额凑平。
+停止新增请求并检查 PostgreSQL 事务、锁、磁盘和 migration。对照 requests、request_attempts 与 usage 终态；重复完成、失败和恢复必须保持幂等。恢复后先运行定向请求事实与 usage 不变量，再开放流量，不手工伪造请求结果。
 
 ## Background Failures
 
@@ -42,4 +42,4 @@ Prometheus 从 backend 网络分别抓取 `gateway-a:8080/metrics` 与 `gateway-
 
 每班检查 `llmgateway-backup.timer`、`llmgateway-backup-freshness.timer`、最近一次 service 退出码、最后快照时间和 Restic check。备份每 2 小时调度，单次失败在 10 分钟后重试一次，新鲜度每 15 分钟检查；最后成功恢复点超过 6 小时、远端 backend 不可达或 check 失败立即告警。不要删除共享维护锁、跳过 check 或把本机 staging 当备份。数据库、主密钥与 pepper 同属恢复集合，Restic password 和远端凭据必须在另一保管路径。
 
-主机或卷丢失时停止旧入口写流量，先列出快照并记录要恢复的完整 64 位 ID；禁止用 `latest` 隐式选择。在新主机只向空目录恢复经过 manifest 与 checksum 验证的快照，只向新数据库执行 `pg_restore`。依次核对 dump SHA-256、migration version、管理员/成员登录、成员管理 API 403、资源池、套餐版本、订阅、上游 API Key 可解密、API 密钥/额度/账本，再启动 Caddy。DNS/TLS 切换后观察 readiness、5xx、quota/recovery 指标和日志至少一个业务窗口。回切使用恢复库和逐实例 readiness；未知副作用请求保持 uncertain，不因灾备自动重放。
+主机或卷丢失时停止旧入口写流量，先列出快照并记录要恢复的完整 64 位 ID；禁止用 `latest` 隐式选择。在新主机只向空目录恢复经过 manifest 与 checksum 验证的快照，只向新数据库执行 `pg_restore`。依次核对 dump SHA-256、migration version、管理员/成员登录、成员管理 API 403、资源池、套餐版本、服务授权、上游 API Key 可解密、API 密钥、请求和 usage，再启动 Caddy。DNS/TLS 切换后观察 readiness、5xx、usage/recovery 指标和日志至少一个业务窗口。回切使用恢复库和逐实例 readiness；未知副作用请求保持 uncertain，不因灾备自动重放。

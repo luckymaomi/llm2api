@@ -88,11 +88,6 @@ interface PlanRouteWire {
 interface PlanVersionWire {
   id: string
   version: number
-  token_quota: number
-  validity_days: number
-  concurrency_limit: number
-  rpm_limit?: number
-  tpm_limit?: number
   routes: PlanRouteWire[]
   created_at: string
 }
@@ -102,7 +97,6 @@ interface ServicePlanWire {
   slug: string
   name: string
   description: string
-  kind: ServicePlan['kind']
   status: ServicePlan['status']
   current_version?: PlanVersionWire
   active_subscription_count: number
@@ -118,17 +112,11 @@ interface SubscriptionWire {
   service_plan_id: string
   service_plan_version_id: string
   service_plan_name: string
-  plan_kind: Subscription['planKind']
   plan_version: number
   status: Subscription['status']
-  granted_tokens: number
-  balance_tokens: number
   starts_at: string
-  expires_at: string
+  expires_at?: string
   notes: string
-  concurrency_limit: number
-  rpm_limit?: number
-  tpm_limit?: number
   routes: PlanRouteWire[]
   suspended_at?: string
   canceled_at?: string
@@ -142,22 +130,12 @@ function mapPlan(plan: ServicePlanWire): ServicePlan {
     slug: plan.slug,
     name: plan.name,
     description: plan.description,
-    kind: plan.kind,
     status: plan.status,
     ...(plan.current_version
       ? {
           currentVersion: {
             id: plan.current_version.id,
             version: plan.current_version.version,
-            tokenQuota: plan.current_version.token_quota,
-            validityDays: plan.current_version.validity_days,
-            concurrencyLimit: plan.current_version.concurrency_limit,
-            ...(plan.current_version.rpm_limit !== undefined
-              ? { rpmLimit: plan.current_version.rpm_limit }
-              : {}),
-            ...(plan.current_version.tpm_limit !== undefined
-              ? { tpmLimit: plan.current_version.tpm_limit }
-              : {}),
             routes: plan.current_version.routes.map((route) => ({
               modelId: route.model_id,
               modelName: route.model_name ?? route.model_id,
@@ -185,17 +163,11 @@ function mapSubscription(value: SubscriptionWire): Subscription {
     servicePlanId: value.service_plan_id,
     servicePlanVersionId: value.service_plan_version_id,
     servicePlanName: value.service_plan_name,
-    planKind: value.plan_kind,
     planVersion: value.plan_version,
     status: value.status,
-    grantedTokens: value.granted_tokens,
-    balanceTokens: value.balance_tokens,
     startsAt: value.starts_at,
-    expiresAt: value.expires_at,
+    ...(value.expires_at ? { expiresAt: value.expires_at } : {}),
     notes: value.notes,
-    concurrencyLimit: value.concurrency_limit,
-    ...(value.rpm_limit !== undefined ? { rpmLimit: value.rpm_limit } : {}),
-    ...(value.tpm_limit !== undefined ? { tpmLimit: value.tpm_limit } : {}),
     routes: value.routes.map((route) => ({
       modelId: route.model_id,
       modelName: route.model_name ?? route.model_id,

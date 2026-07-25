@@ -16,8 +16,6 @@ type Candidate struct {
 	CredentialActive     bool
 	Capabilities         []Capability
 	CooldownUntil        time.Time
-	AdminPriority        int32
-	Weight               int32
 }
 
 type Requirements struct {
@@ -57,23 +55,17 @@ type Evaluation struct {
 	Exclusions  []Exclusion
 }
 
-type RankedCandidate struct {
-	CandidateID CandidateID
-	Priority    int32
-	Weight      int32
-}
-
 type SelectionMode string
 
 const (
-	SelectionNone             SelectionMode = "none"
-	SelectionPriorityWeighted SelectionMode = "priority_weighted"
+	SelectionNone        SelectionMode = "none"
+	SelectionEqualRotate SelectionMode = "equal_rotate"
 )
 
 type Decision struct {
 	SelectedCandidateID CandidateID
 	Mode                SelectionMode
-	Ranked              []RankedCandidate
+	Eligible            []CandidateID
 	Evaluations         []Evaluation
 	NextAvailableAt     time.Time
 }

@@ -38,14 +38,6 @@ func (r *RegistryRepository) CreateResourcePool(ctx context.Context, input regis
 		if err != nil {
 			return registry.ResourcePool{}, translateRegistryError(err)
 		}
-		for _, modelID := range input.ModelIDs {
-			if _, err := queries.GetModelForCredentialBinding(ctx, db.GetModelForCredentialBindingParams{ID: modelID, ResourcePoolID: created.ID}); err == nil {
-				return registry.ResourcePool{}, registry.ErrConflict
-			}
-			if err := queries.BindResourcePoolModel(ctx, db.BindResourcePoolModelParams{ResourcePoolID: created.ID, ModelID: modelID}); err != nil {
-				return registry.ResourcePool{}, translateRegistryError(err)
-			}
-		}
 		return resourcePoolByID(ctx, queries, created.ID)
 	})
 }

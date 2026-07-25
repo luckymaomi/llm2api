@@ -8,7 +8,7 @@ type Router struct {
 
 func NewRouter(random Random) (*Router, error) {
 	if random == nil {
-		return nil, newError(ErrorRandomSource, "weighted routing requires a random source", "")
+		return nil, newError(ErrorRandomSource, "candidate rotation requires a random source", "")
 	}
 	return &Router{random: random}, nil
 }
@@ -42,44 +42,20 @@ func (r *Router) Select(requirements Requirements, candidates []Candidate) (Deci
 			decision.NextAvailableAt = reasons[0].AvailableAt
 		}
 		if len(reasons) == 0 {
-			decision.Ranked = append(decision.Ranked, RankedCandidate{CandidateID: candidate.ID, Priority: candidate.AdminPriority, Weight: candidate.Weight})
+			decision.Eligible = append(decision.Eligible, candidate.ID)
 		}
 	}
-	if len(decision.Ranked) == 0 {
+	if len(decision.Eligible) == 0 {
 		return decision, nil
 	}
-	sort.Slice(decision.Ranked, func(i, j int) bool {
-		if decision.Ranked[i].Priority == decision.Ranked[j].Priority {
-			return decision.Ranked[i].CandidateID < decision.Ranked[j].CandidateID
-		}
-		return decision.Ranked[i].Priority < decision.Ranked[j].Priority
+	sort.Slice(decision.Eligible, func(i, j int) bool {
+		return decision.Eligible[i] < decision.Eligible[j]
 	})
-
-	bestPriority := decision.Ranked[0].Priority
-	totalWeight := 0
-	eligibleCount := 0
-	for _, candidate := range decision.Ranked {
-		if candidate.Priority != bestPriority {
-			break
-		}
-		totalWeight += int(candidate.Weight)
-		eligibleCount++
+	selected := r.random.Intn(len(decision.Eligible))
+	if selected < 0 || selected >= len(decision.Eligible) {
+		return Decision{}, newError(ErrorRandomSource, "random source returned a value outside its requested range", "")
 	}
-	selected := 0
-	if eligibleCount > 1 {
-		roll := r.random.Intn(totalWeight)
-		if roll < 0 || roll >= totalWeight {
-			return Decision{}, newError(ErrorRandomSource, "random source returned a value outside its requested range", "")
-		}
-		for index := 0; index < eligibleCount; index++ {
-			roll -= int(decision.Ranked[index].Weight)
-			if roll < 0 {
-				selected = index
-				break
-			}
-		}
-	}
-	decision.SelectedCandidateID = decision.Ranked[selected].CandidateID
-	decision.Mode = SelectionPriorityWeighted
+	decision.SelectedCandidateID = decision.Eligible[selected]
+	decision.Mode = SelectionEqualRotate
 	return decision, nil
 }

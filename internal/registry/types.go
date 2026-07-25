@@ -16,6 +16,7 @@ var (
 	ErrForbidden           = errors.New("registry operation forbidden")
 	ErrIdempotencyConflict = errors.New("registry idempotency key conflict")
 	ErrOutcomeUnknown      = errors.New("registry operation outcome is unknown")
+	ErrModelDiscovery      = errors.New("upstream model discovery failed")
 )
 
 type MutationRequest struct {
@@ -86,14 +87,6 @@ type ProviderProjection struct {
 	BaseURL    string
 	SourceURL  string
 	VerifiedAt time.Time
-	Models     []ModelProjection
-}
-
-type ModelProjection struct {
-	PublicName   string
-	UpstreamName string
-	DisplayName  string
-	Capabilities ModelCapabilities
 }
 
 type ResourcePoolStatus string
@@ -128,7 +121,6 @@ type NewResourcePool struct {
 	ProviderID uuid.UUID
 	Slug       string
 	Name       string
-	ModelIDs   []uuid.UUID
 }
 
 type ResourcePoolChange struct {
@@ -141,7 +133,6 @@ type CredentialStatus string
 
 const (
 	CredentialActive   CredentialStatus = "active"
-	CredentialCooling  CredentialStatus = "cooling"
 	CredentialDisabled CredentialStatus = "disabled"
 	CredentialRetired  CredentialStatus = "retired"
 )
@@ -149,9 +140,21 @@ const (
 type CredentialModelBinding struct {
 	ModelID   uuid.UUID `json:"model_id"`
 	ModelName string    `json:"model_name,omitempty"`
-	Priority  int32     `json:"priority"`
-	Weight    int32     `json:"weight"`
 }
+
+type DiscoveredModel struct {
+	UpstreamName string
+	Capabilities ModelCapabilities
+}
+
+type CredentialHealthStatus string
+
+const (
+	CredentialHealthy        CredentialHealthStatus = "healthy"
+	CredentialHealthCooling  CredentialHealthStatus = "cooling"
+	CredentialHealthProbing  CredentialHealthStatus = "probing"
+	CredentialRepairRequired CredentialHealthStatus = "repair_required"
+)
 
 type Credential struct {
 	ID                  uuid.UUID                `json:"id"`
@@ -164,6 +167,8 @@ type Credential struct {
 	ProviderBaseURL     string                   `json:"provider_base_url"`
 	Name                string                   `json:"name"`
 	Status              CredentialStatus         `json:"status"`
+	HealthStatus        CredentialHealthStatus   `json:"health_status"`
+	HealthGeneration    int64                    `json:"health_generation"`
 	RPMLimit            *int32                   `json:"rpm_limit,omitempty"`
 	TPMLimit            *int64                   `json:"tpm_limit,omitempty"`
 	ConcurrencyLimit    *int32                   `json:"concurrency_limit,omitempty"`
@@ -194,7 +199,8 @@ type NewCredential struct {
 	RPMLimit         *int32
 	TPMLimit         *int64
 	ConcurrencyLimit *int32
-	ModelBindings    []CredentialModelBinding
+	DiscoveredModels []DiscoveredModel
+	Discovery        ModelDiscoveryExecution
 }
 
 type CredentialChange struct {
@@ -202,10 +208,13 @@ type CredentialChange struct {
 	Name              string
 	EncryptedSecret   []byte
 	ReplaceSecret     bool
+	ReplaceModels     bool
 	RPMLimit          *int32
 	TPMLimit          *int64
 	ConcurrencyLimit  *int32
 	ModelBindings     []CredentialModelBinding
+	DiscoveredModels  []DiscoveredModel
+	Discovery         ModelDiscoveryExecution
 	ExpectedUpdatedAt time.Time
 }
 
@@ -247,6 +256,23 @@ type CredentialProbeExecution struct {
 
 type CredentialProbeExecutor interface {
 	Execute(context.Context, CredentialProbeTarget) CredentialProbeExecution
+}
+
+type ModelDiscoveryTarget struct {
+	Provider Provider
+	Secret   string
+}
+
+type ModelDiscoveryExecution struct {
+	Status        string   `json:"status"`
+	ErrorKind     *string  `json:"error_kind,omitempty"`
+	Retryable     bool     `json:"retryable"`
+	LatencyMillis int64    `json:"latency_ms"`
+	Models        []string `json:"models"`
+}
+
+type ModelDiscoveryExecutor interface {
+	Discover(context.Context, ModelDiscoveryTarget) ModelDiscoveryExecution
 }
 
 type Repository interface {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/luckymaomi/llmgateway/internal/canonical"
 )
@@ -26,17 +28,41 @@ func (a *openAIAdapter) Probe(ctx context.Context, credential Credential) (Probe
 }
 
 func (a *openAIAdapter) ValidateProbe(kind ProbeKind, statusCode int, headers http.Header, body []byte) *canonical.Error {
+	_, providerError := a.ParseProbe(kind, statusCode, headers, body)
+	return providerError
+}
+
+func (a *openAIAdapter) ParseProbe(kind ProbeKind, statusCode int, headers http.Header, body []byte) ([]DiscoveredModel, *canonical.Error) {
 	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
-		return a.ClassifyError(statusCode, headers, body)
+		return nil, a.ClassifyError(statusCode, headers, body)
 	}
 	if kind != ProbeModels {
-		return a.requestError(canonical.ErrorProviderConfiguration, "unsupported_probe", "provider probe is not supported", "")
+		return nil, a.requestError(canonical.ErrorProviderConfiguration, "unsupported_probe", "provider probe is not supported", "")
 	}
 	var envelope struct {
-		Data []json.RawMessage `json:"data"`
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil || envelope.Data == nil {
-		return a.requestError(canonical.ErrorProviderConfiguration, "invalid_probe_response", "provider returned an invalid models response", "")
+		return nil, a.requestError(canonical.ErrorProviderConfiguration, "invalid_probe_response", "provider returned an invalid models response", "")
 	}
-	return nil
+	if len(envelope.Data) > 5000 {
+		return nil, a.requestError(canonical.ErrorProviderConfiguration, "too_many_models", "provider returned too many models", "")
+	}
+	seen := make(map[string]struct{}, len(envelope.Data))
+	models := make([]DiscoveredModel, 0, len(envelope.Data))
+	for _, item := range envelope.Data {
+		id := strings.TrimSpace(item.ID)
+		if id == "" || len(id) > 256 || strings.IndexFunc(id, unicode.IsControl) >= 0 {
+			return nil, a.requestError(canonical.ErrorProviderConfiguration, "invalid_model_id", "provider returned an invalid model identifier", "")
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		models = append(models, DiscoveredModel{ID: id})
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+	return models, nil
 }

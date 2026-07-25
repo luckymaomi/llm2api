@@ -1,4 +1,4 @@
-package quota
+package usage
 
 import (
 	"context"
@@ -11,21 +11,6 @@ import (
 	"github.com/luckymaomi/llmgateway/internal/execution"
 	"github.com/luckymaomi/llmgateway/internal/identity"
 )
-
-func (s *Service) ListLedger(ctx context.Context, actor identity.Principal, filter LedgerFilter) (PageResult[LedgerEvent], error) {
-	filter.Page = normalizePage(filter.Page)
-	filter.Search = strings.TrimSpace(filter.Search)
-	if actor.Status != identity.StatusActive || len(filter.Search) > 200 {
-		return PageResult[LedgerEvent]{}, ErrForbidden
-	}
-	if !actor.CanManageUsers() {
-		if filter.UserID != nil && *filter.UserID != actor.UserID {
-			return PageResult[LedgerEvent]{}, ErrForbidden
-		}
-		filter.UserID = &actor.UserID
-	}
-	return s.repository.ListLedger(ctx, filter)
-}
 
 func (s *Service) ListRequestLogs(ctx context.Context, actor identity.Principal, query RequestLogQuery) (PageResult[RequestLog], error) {
 	query.Page = normalizePage(query.Page)
@@ -59,7 +44,7 @@ func (s *Service) GetRequestLog(ctx context.Context, actor identity.Principal, r
 }
 
 func (s *Service) AcceptRequest(ctx context.Context, input AcceptInput) (AcceptedRequest, error) {
-	if input.RequestID == uuid.Nil || input.UserID == uuid.Nil || input.GatewayKeyID == uuid.Nil || input.ModelID == uuid.Nil || input.ReservedTokens < 1 || len(input.RequestDigest) != 32 {
+	if input.RequestID == uuid.Nil || input.UserID == uuid.Nil || input.GatewayKeyID == uuid.Nil || input.ModelID == uuid.Nil || len(input.RequestDigest) != 32 {
 		return AcceptedRequest{}, ErrInvalidInput
 	}
 	if input.IdempotencyKey != nil {
@@ -73,33 +58,33 @@ func (s *Service) AcceptRequest(ctx context.Context, input AcceptInput) (Accepte
 	return s.repository.AcceptRequest(ctx, input)
 }
 
-func (s *Service) Settle(ctx context.Context, requestID uuid.UUID, claim execution.Claim, inputTokens, outputTokens int64, source UsageSource) (Resolution, error) {
+func (s *Service) Complete(ctx context.Context, requestID uuid.UUID, claim execution.Claim, inputTokens, outputTokens int64, source UsageSource) (Resolution, error) {
 	if source == UsageUnknown && inputTokens == 0 && outputTokens == 0 {
 		return Resolution{}, ErrUsageUnknown
 	}
 	if requestID == uuid.Nil || claim.RequestID != requestID || !claim.Valid() || !validKnownUsage(inputTokens, outputTokens, source) {
 		return Resolution{}, ErrInvalidInput
 	}
-	return s.repository.Settle(ctx, requestID, claim, inputTokens, outputTokens, source)
+	return s.repository.Complete(ctx, requestID, claim, inputTokens, outputTokens, source)
 }
 
-func (s *Service) Release(ctx context.Context, requestID uuid.UUID, claim execution.Claim, errorKind, errorDetail string) (Resolution, error) {
+func (s *Service) Fail(ctx context.Context, requestID uuid.UUID, claim execution.Claim, errorKind, errorDetail string) (Resolution, error) {
 	errorKind, errorDetail = normalizeFailure(errorKind, errorDetail)
 	if requestID == uuid.Nil || claim.RequestID != requestID || !claim.Valid() || errorKind == "" {
 		return Resolution{}, ErrInvalidInput
 	}
-	return s.repository.Release(ctx, requestID, claim, errorKind, errorDetail)
+	return s.repository.Fail(ctx, requestID, claim, errorKind, errorDetail)
 }
 
-func (s *Service) ReleaseAccepted(ctx context.Context, requestID uuid.UUID, errorKind, errorDetail string) (Resolution, error) {
+func (s *Service) FailAccepted(ctx context.Context, requestID uuid.UUID, errorKind, errorDetail string) (Resolution, error) {
 	errorKind, errorDetail = normalizeFailure(errorKind, errorDetail)
 	if requestID == uuid.Nil || errorKind == "" {
 		return Resolution{}, ErrInvalidInput
 	}
-	return s.repository.ReleaseAccepted(ctx, requestID, errorKind, errorDetail)
+	return s.repository.FailAccepted(ctx, requestID, errorKind, errorDetail)
 }
 
-func (s *Service) Compensate(ctx context.Context, requestID uuid.UUID, claim execution.Claim, inputTokens, outputTokens int64, source UsageSource, errorKind, errorDetail string) (Resolution, error) {
+func (s *Service) FailWithUsage(ctx context.Context, requestID uuid.UUID, claim execution.Claim, inputTokens, outputTokens int64, source UsageSource, errorKind, errorDetail string) (Resolution, error) {
 	errorKind, errorDetail = normalizeFailure(errorKind, errorDetail)
 	if source == UsageUnknown && inputTokens == 0 && outputTokens == 0 {
 		return Resolution{}, ErrUsageUnknown
@@ -107,7 +92,7 @@ func (s *Service) Compensate(ctx context.Context, requestID uuid.UUID, claim exe
 	if requestID == uuid.Nil || claim.RequestID != requestID || !claim.Valid() || errorKind == "" || !validKnownUsage(inputTokens, outputTokens, source) {
 		return Resolution{}, ErrInvalidInput
 	}
-	return s.repository.Compensate(ctx, requestID, claim, inputTokens, outputTokens, source, errorKind, errorDetail)
+	return s.repository.FailWithUsage(ctx, requestID, claim, inputTokens, outputTokens, source, errorKind, errorDetail)
 }
 
 func validRequestStatus(status RequestStatus) bool {

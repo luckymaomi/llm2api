@@ -20,6 +20,7 @@ type Service struct {
 	repository Repository
 	envelope   *security.EnvelopeCipher
 	prober     CredentialProbeExecutor
+	discoverer ModelDiscoveryExecutor
 	catalog    *providers.Catalog
 }
 
@@ -32,6 +33,9 @@ func NewService(repository Repository, envelope *security.EnvelopeCipher, urls *
 
 func (s *Service) WithCredentialProbeExecutor(prober CredentialProbeExecutor) *Service {
 	s.prober = prober
+	if discoverer, ok := prober.(ModelDiscoveryExecutor); ok {
+		s.discoverer = discoverer
+	}
 	return s
 }
 
@@ -46,34 +50,10 @@ func (s *Service) SyncCatalog(ctx context.Context) error {
 		projection := ProviderProjection{
 			CatalogID: preset.ID, Slug: preset.Slug, Name: preset.Name, Kind: preset.Kind,
 			BaseURL: preset.BaseURL, SourceURL: preset.SourceURL, VerifiedAt: verifiedAt.UTC(),
-			Models: make([]ModelProjection, 0, len(preset.Models)),
-		}
-		for _, model := range preset.Models {
-			projection.Models = append(projection.Models, ModelProjection{
-				PublicName: model.PublicName, UpstreamName: model.UpstreamName, DisplayName: model.DisplayName,
-				Capabilities: modelCapabilities(model),
-			})
 		}
 		projections = append(projections, projection)
 	}
 	return s.repository.SyncCatalog(ctx, projections)
-}
-
-func modelCapabilities(model providers.ModelPreset) ModelCapabilities {
-	capabilities := ModelCapabilities{Chat: true, ContextTokens: model.ContextTokens, OutputTokens: min(model.ContextTokens, 8192), ReasoningMode: ReasoningMode(model.ReasoningMode)}
-	for _, capability := range model.Capabilities {
-		switch capability {
-		case "streaming":
-			capabilities.Streaming = true
-		case "tools":
-			capabilities.Tools = true
-		case "reasoning":
-			capabilities.Reasoning = true
-		case "structured_output":
-			capabilities.StructuredOutput = true
-		}
-	}
-	return capabilities
 }
 
 func (s *Service) ListProviders(ctx context.Context, actor identity.Principal) ([]Provider, error) {
@@ -130,23 +110,10 @@ func (s *Service) CreateResourcePool(ctx context.Context, actor identity.Princip
 		return ResourcePool{}, ErrForbidden
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if input.ProviderID == uuid.Nil || request.IdempotencyKey == uuid.Nil || utf8.RuneCountInString(input.Name) < 1 || utf8.RuneCountInString(input.Name) > 80 || !validModelIDs(input.ModelIDs) {
+	if input.ProviderID == uuid.Nil || request.IdempotencyKey == uuid.Nil || utf8.RuneCountInString(input.Name) < 1 || utf8.RuneCountInString(input.Name) > 80 {
 		return ResourcePool{}, ErrInvalidInput
 	}
 	input.Slug = "pool-" + strings.ReplaceAll(request.IdempotencyKey.String(), "-", "")
-	models, err := s.repository.ListModels(ctx)
-	if err != nil {
-		return ResourcePool{}, err
-	}
-	available := make(map[uuid.UUID]uuid.UUID, len(models))
-	for _, model := range models {
-		available[model.ID] = model.ProviderID
-	}
-	for _, modelID := range input.ModelIDs {
-		if available[modelID] != input.ProviderID {
-			return ResourcePool{}, ErrInvalidInput
-		}
-	}
 	mutation, err := resourcePoolMutation(request, "resource_pool.create", input)
 	if err != nil {
 		return ResourcePool{}, err
@@ -209,8 +176,16 @@ func (s *Service) CreateCredential(ctx context.Context, actor identity.Principal
 	}
 	input.ID = uuid.New()
 	input.Name = strings.TrimSpace(input.Name)
-	if input.ResourcePoolID == uuid.Nil || len(secret) < 8 || len(secret) > 8192 || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, input.ModelBindings) {
+	if input.ResourcePoolID == uuid.Nil || len(secret) < 8 || len(secret) > 8192 || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit) {
 		return Credential{}, ErrInvalidInput
+	}
+	pool, err := s.repository.GetResourcePool(ctx, input.ResourcePoolID)
+	if err != nil {
+		return Credential{}, err
+	}
+	input.DiscoveredModels, input.Discovery, err = s.discoverModels(ctx, providerFromPool(pool), secret)
+	if err != nil {
+		return Credential{}, err
 	}
 	mutation, err := credentialCreateMutation(request, input, secret)
 	if err != nil {
@@ -223,7 +198,7 @@ func (s *Service) CreateCredential(ctx context.Context, actor identity.Principal
 	return s.repository.CreateCredential(ctx, input, actor.UserID, mutation)
 }
 
-func (s *Service) ImportCredentials(ctx context.Context, actor identity.Principal, resourcePoolID uuid.UUID, items []CredentialBatchItem, bindings []CredentialModelBinding, rpmLimit *int32, tpmLimit *int64, concurrencyLimit *int32, request MutationRequest) ([]CredentialBatchResult, error) {
+func (s *Service) ImportCredentials(ctx context.Context, actor identity.Principal, resourcePoolID uuid.UUID, items []CredentialBatchItem, rpmLimit *int32, tpmLimit *int64, concurrencyLimit *int32, request MutationRequest) ([]CredentialBatchResult, error) {
 	if !activeAdministrator(actor) {
 		return nil, ErrForbidden
 	}
@@ -243,7 +218,7 @@ func (s *Service) ImportCredentials(ctx context.Context, actor identity.Principa
 		seen[item.Secret] = struct{}{}
 		childRequest := request
 		childRequest.IdempotencyKey = uuid.NewSHA1(request.IdempotencyKey, []byte(fmt.Sprintf("credential-line:%d", index+1)))
-		created, err := s.CreateCredential(ctx, actor, NewCredential{ResourcePoolID: resourcePoolID, Name: item.Name, RPMLimit: rpmLimit, TPMLimit: tpmLimit, ConcurrencyLimit: concurrencyLimit, ModelBindings: bindings}, item.Secret, childRequest)
+		created, err := s.CreateCredential(ctx, actor, NewCredential{ResourcePoolID: resourcePoolID, Name: item.Name, RPMLimit: rpmLimit, TPMLimit: tpmLimit, ConcurrencyLimit: concurrencyLimit}, item.Secret, childRequest)
 		if err != nil {
 			result.Status, result.ErrorKind = "rejected", credentialImportError(err)
 		} else {
@@ -260,6 +235,8 @@ func credentialImportError(err error) string {
 		return "invalid_input"
 	case errors.Is(err, ErrConflict), errors.Is(err, ErrIdempotencyConflict):
 		return "conflict"
+	case errors.Is(err, ErrModelDiscovery):
+		return "model_discovery_failed"
 	default:
 		return "persistence_failed"
 	}
@@ -270,8 +247,20 @@ func (s *Service) UpdateCredential(ctx context.Context, actor identity.Principal
 		return Credential{}, ErrForbidden
 	}
 	input.Name, input.ReplaceSecret, input.ExpectedUpdatedAt = strings.TrimSpace(input.Name), secret != "", input.ExpectedUpdatedAt.UTC()
-	if input.ID == uuid.Nil || input.ExpectedUpdatedAt.IsZero() || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, input.ModelBindings) || input.ReplaceSecret && (len(secret) < 8 || len(secret) > 8192) {
+	if input.ID == uuid.Nil || input.ExpectedUpdatedAt.IsZero() || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit) || input.ReplaceSecret && (len(secret) < 8 || len(secret) > 8192) {
 		return Credential{}, ErrInvalidInput
+	}
+	var err error
+	if input.ReplaceSecret {
+		current, loadErr := s.repository.GetCredential(ctx, input.ID)
+		if loadErr != nil {
+			return Credential{}, loadErr
+		}
+		input.ReplaceModels = true
+		input.DiscoveredModels, input.Discovery, err = s.discoverModels(ctx, providerFromCredential(current), secret)
+		if err != nil {
+			return Credential{}, err
+		}
 	}
 	mutation, err := credentialUpdateMutation(request, input, secret)
 	if err != nil {
@@ -284,6 +273,92 @@ func (s *Service) UpdateCredential(ctx context.Context, actor identity.Principal
 		}
 	}
 	return s.repository.UpdateCredential(ctx, input, actor.UserID, mutation)
+}
+
+func (s *Service) RefreshCredentialModels(ctx context.Context, actor identity.Principal, id uuid.UUID, expectedUpdatedAt time.Time, request MutationRequest) (ModelDiscoveryExecution, Credential, error) {
+	if !activeAdministrator(actor) || id == uuid.Nil || expectedUpdatedAt.IsZero() {
+		return ModelDiscoveryExecution{}, Credential{}, ErrForbidden
+	}
+	current, err := s.repository.GetCredential(ctx, id)
+	if err != nil {
+		return ModelDiscoveryExecution{}, Credential{}, err
+	}
+	secret, err := s.CredentialSecret(ctx, id)
+	if err != nil {
+		return ModelDiscoveryExecution{}, Credential{}, err
+	}
+	models, execution, err := s.discoverModels(ctx, providerFromCredential(current), secret)
+	if err != nil {
+		probe := CredentialProbeExecution{
+			Kind: "models", Status: execution.Status, ErrorKind: execution.ErrorKind,
+			Retryable: execution.Retryable, MayUseTokens: false, LatencyMillis: execution.LatencyMillis,
+		}
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), credentialProbePersistenceTimeout)
+		defer cancel()
+		if recorded, recordErr := s.repository.RecordCredentialProbe(persistCtx, id, time.Now().UTC(), probe, actor.UserID, request.RequestID); recordErr == nil {
+			current = recorded
+		}
+		return execution, current, err
+	}
+	change := CredentialChange{
+		ID: id, Name: current.Name, RPMLimit: current.RPMLimit, TPMLimit: current.TPMLimit,
+		ConcurrencyLimit: current.ConcurrencyLimit, ReplaceModels: true, DiscoveredModels: models,
+		Discovery: execution, ExpectedUpdatedAt: expectedUpdatedAt.UTC(),
+	}
+	mutation, err := credentialUpdateMutation(request, change, "")
+	if err != nil {
+		return execution, current, err
+	}
+	updated, err := s.repository.UpdateCredential(ctx, change, actor.UserID, mutation)
+	return execution, updated, err
+}
+
+func (s *Service) discoverModels(ctx context.Context, provider Provider, secret string) ([]DiscoveredModel, ModelDiscoveryExecution, error) {
+	if s.discoverer == nil {
+		return nil, ModelDiscoveryExecution{}, ErrModelDiscovery
+	}
+	execution := s.discoverer.Discover(ctx, ModelDiscoveryTarget{Provider: provider, Secret: secret})
+	if execution.Status != "succeeded" {
+		return nil, execution, ErrModelDiscovery
+	}
+	capabilities, err := s.discoveredModelCapabilities(provider)
+	if err != nil {
+		return nil, execution, err
+	}
+	models := make([]DiscoveredModel, 0, len(execution.Models))
+	for _, upstreamName := range execution.Models {
+		models = append(models, DiscoveredModel{UpstreamName: upstreamName, Capabilities: capabilities})
+	}
+	return models, execution, nil
+}
+
+func (s *Service) discoveredModelCapabilities(provider Provider) (ModelCapabilities, error) {
+	adapter, err := s.catalog.Build(provider.Kind, providers.AdapterOptions{BaseURL: provider.BaseURL, Capabilities: providers.NarrowOpenAICompatibleCapabilities()})
+	if err != nil {
+		return ModelCapabilities{}, err
+	}
+	capability := adapter.Capabilities()
+	reasoningMode := ReasoningMode("")
+	if capability.ReasoningToggle && capability.ReasoningEffort {
+		reasoningMode = ReasoningHybrid
+	} else if capability.ReasoningToggle {
+		reasoningMode = ReasoningToggle
+	} else if capability.ReasoningEffort {
+		reasoningMode = ReasoningEffort
+	}
+	return ModelCapabilities{
+		Chat: capability.Chat, Streaming: capability.Streaming, Tools: capability.Tools,
+		Reasoning:     capability.ReasoningToggle || capability.ReasoningEffort || capability.ReasoningContent,
+		ReasoningMode: reasoningMode, StructuredOutput: capability.JSONOutput,
+	}, nil
+}
+
+func providerFromPool(pool ResourcePool) Provider {
+	return Provider{ID: pool.ProviderID, CatalogID: pool.ProviderCatalogID, Slug: pool.ProviderSlug, Name: pool.ProviderName, Kind: pool.ProviderKind, BaseURL: pool.ProviderBaseURL}
+}
+
+func providerFromCredential(credential Credential) Provider {
+	return Provider{ID: credential.ProviderID, Name: credential.ProviderName, Kind: credential.ProviderKind, BaseURL: credential.ProviderBaseURL}
 }
 
 func (s *Service) SetCredentialStatus(ctx context.Context, actor identity.Principal, id uuid.UUID, status CredentialStatus, expectedUpdatedAt time.Time, request MutationRequest) (Credential, error) {
@@ -394,38 +469,9 @@ func activeAdministrator(actor identity.Principal) bool {
 	return actor.Status == identity.StatusActive && actor.Role == identity.RoleAdministrator
 }
 
-func validModelIDs(modelIDs []uuid.UUID) bool {
-	if len(modelIDs) == 0 || len(modelIDs) > 100 {
-		return false
-	}
-	seen := make(map[uuid.UUID]struct{}, len(modelIDs))
-	for _, modelID := range modelIDs {
-		if modelID == uuid.Nil {
-			return false
-		}
-		if _, found := seen[modelID]; found {
-			return false
-		}
-		seen[modelID] = struct{}{}
-	}
-	return true
-}
-
-func validCredentialFields(name string, rpmLimit *int32, tpmLimit *int64, concurrencyLimit *int32, bindings []CredentialModelBinding) bool {
-	if name == "" || utf8.RuneCountInString(name) > 120 || rpmLimit != nil && *rpmLimit < 1 || tpmLimit != nil && *tpmLimit < 1 || concurrencyLimit != nil && *concurrencyLimit < 1 || len(bindings) == 0 || len(bindings) > 100 {
-		return false
-	}
-	seen := make(map[uuid.UUID]struct{}, len(bindings))
-	for _, binding := range bindings {
-		if binding.ModelID == uuid.Nil || binding.Priority < 0 || binding.Priority > 1000 || binding.Weight < 1 || binding.Weight > 1000 {
-			return false
-		}
-		if _, found := seen[binding.ModelID]; found {
-			return false
-		}
-		seen[binding.ModelID] = struct{}{}
-	}
-	return true
+func validCredentialFields(name string, rpmLimit *int32, tpmLimit *int64, concurrencyLimit *int32) bool {
+	return name != "" && utf8.RuneCountInString(name) <= 120 &&
+		(rpmLimit == nil || *rpmLimit > 0) && (tpmLimit == nil || *tpmLimit > 0) && (concurrencyLimit == nil || *concurrencyLimit > 0)
 }
 
 func CredentialEncryptionContext(id uuid.UUID) []byte {

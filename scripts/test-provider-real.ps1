@@ -30,37 +30,18 @@ function New-ResourcePool {
     }).data
 }
 
-function New-ModelPrice {
-  param(
-    [Parameter(Mandatory = $true)][string] $ModelID,
-    [string] $Currency = "USD",
-    [string] $InputPricePerMillionTokens = "0",
-    [string] $OutputPricePerMillionTokens = "0"
-  )
-
-  return (Invoke-ControlJSON -Method Post -Path "/api/control/model-prices" -Idempotent -Body @{
-    modelId = $ModelID
-    currency = $Currency
-    inputPricePerMillionTokens = $InputPricePerMillionTokens
-    outputPricePerMillionTokens = $OutputPricePerMillionTokens
-    effectiveAt = (Get-Date).ToUniversalTime().AddMinutes(-1).ToString("o")
-  }).data
-}
-
 function New-Credential {
   param(
     [Parameter(Mandatory = $true)][string] $ResourcePoolID,
     [Parameter(Mandatory = $true)][string] $Name,
     [Parameter(Mandatory = $true)][string] $Secret,
-    [Parameter(Mandatory = $true)][string] $ModelID,
-    [Parameter(Mandatory = $true)][int] $Priority,
-    [Parameter(Mandatory = $true)][int] $Weight
+    [Parameter(Mandatory = $true)][string] $ModelID
   )
 
   $result = (Invoke-ControlJSON -Method Post -Path "/api/control/credentials/batch" -Idempotent -Body @{
       resourcePoolId = $ResourcePoolID
       items = @(@{ name = $Name; secret = $Secret })
-      modelBindings = @(@{ model_id = $ModelID; priority = $Priority; weight = $Weight })
+      modelBindings = @(@{ model_id = $ModelID })
       rpmLimit = 60
       tpmLimit = 1000000
       concurrencyLimit = 4
@@ -361,30 +342,19 @@ try {
     throw "A real Provider resource pool did not become active."
   }
 
-  $null = New-ModelPrice -ModelID $agnesModel.id
-  $null = New-ModelPrice -ModelID $zhipuModel.id
-  $null = New-ModelPrice -ModelID $geminiModel.id -InputPricePerMillionTokens "1.5" -OutputPricePerMillionTokens "9"
-  $null = New-ModelPrice -ModelID $siliconModel.id -Currency "CNY" -InputPricePerMillionTokens "1.5" -OutputPricePerMillionTokens "12"
-
   for ($index = 0; $index -lt 3; $index++) {
     New-Credential -ResourcePoolID $agnesPool.id -Name "Agnes dedicated $($index + 1)" -Secret $agnesKeys[$index] `
-      -ModelID $agnesModel.id -Priority (($index + 1) * 10) -Weight 100 | Out-Null
+      -ModelID $agnesModel.id | Out-Null
   }
-  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu quota 1" -Secret $zhipuQuotaKeys[0] -ModelID $zhipuModel.id -Priority 10 -Weight 100 | Out-Null
-  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu success" -Secret $zhipuSuccessKeys[0] -ModelID $zhipuModel.id -Priority 30 -Weight 100 | Out-Null
-  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu quota 3" -Secret $zhipuQuotaKeys[1] -ModelID $zhipuModel.id -Priority 20 -Weight 100 | Out-Null
-  New-Credential -ResourcePoolID $geminiPool.id -Name "Gemini dedicated 1" -Secret $geminiKeys[0] -ModelID $geminiModel.id -Priority 10 -Weight 100 | Out-Null
-  New-Credential -ResourcePoolID $siliconPool.id -Name "SiliconFlow dedicated 1" -Secret $siliconKeys[0] -ModelID $siliconModel.id -Priority 10 -Weight 100 | Out-Null
+  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu quota 1" -Secret $zhipuQuotaKeys[0] -ModelID $zhipuModel.id | Out-Null
+  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu success" -Secret $zhipuSuccessKeys[0] -ModelID $zhipuModel.id | Out-Null
+  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu quota 3" -Secret $zhipuQuotaKeys[1] -ModelID $zhipuModel.id | Out-Null
+  New-Credential -ResourcePoolID $geminiPool.id -Name "Gemini dedicated 1" -Secret $geminiKeys[0] -ModelID $geminiModel.id | Out-Null
+  New-Credential -ResourcePoolID $siliconPool.id -Name "SiliconFlow dedicated 1" -Secret $siliconKeys[0] -ModelID $siliconModel.id | Out-Null
 
   $plan = Invoke-ControlJSON -Method Post -Path "/api/control/plans" -Idempotent -Body @{
     name = "Real Provider Plan"
     description = "Isolated real Provider acceptance"
-    kind = "token"
-    tokenQuota = 1000000
-    validityDays = 1
-    concurrencyLimit = 4
-    rpmLimit = 120
-    tpmLimit = 1000000
     routes = @(
       @{ modelId = $agnesModel.id; resourcePoolId = $agnesPool.id },
       @{ modelId = $zhipuModel.id; resourcePoolId = $zhipuPool.id },
@@ -398,7 +368,6 @@ try {
   $subscription = Invoke-ControlJSON -Method Post -Path "/api/control/subscriptions" -Idempotent -Body @{
     userId = $setup.data.userId
     servicePlanId = $plan.data.id
-    grantedTokens = 1000000
     startsAt = (Get-Date).ToUniversalTime().AddMinutes(-1).ToString("o")
     expiresAt = (Get-Date).ToUniversalTime().AddDays(1).ToString("o")
     notes = "Real Provider acceptance"
@@ -409,7 +378,12 @@ try {
   $keyResult = Invoke-ControlJSON -Method Post -Path "/api/control/keys" -Idempotent -Body @{
     ownerId = $setup.data.userId
     name = "Real Provider SDK"
-    authorizedModelIds = @($agnesModel.id, $zhipuModel.id, $geminiModel.id, $siliconModel.id)
+    routes = @(
+      @{ modelId = $agnesModel.id; resourcePoolId = $agnesPool.id }
+      @{ modelId = $zhipuModel.id; resourcePoolId = $zhipuPool.id }
+      @{ modelId = $geminiModel.id; resourcePoolId = $geminiPool.id }
+      @{ modelId = $siliconModel.id; resourcePoolId = $siliconPool.id }
+    )
     expiresAt = $null
   }
   $script:GatewayKey = $keyResult.data.secret
@@ -529,77 +503,6 @@ try {
   if ($LASTEXITCODE -ne 0 -or $zhipuFacts -ne "Zhipu quota 1:cooling:quota,Zhipu quota 3:cooling:quota,Zhipu success:active:ok") {
     throw "Real Zhipu quota exclusion and healthy credential takeover did not persist."
   }
-  $attemptFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_provider -Atc `
-    "SELECT string_agg(credential.name || ':' || coalesce(attempt.error_kind, 'ok'), ',' ORDER BY attempt.created_at, attempt.id) FROM request_attempts attempt JOIN provider_credentials credential ON credential.id = attempt.credential_id JOIN requests request ON request.id = attempt.request_id WHERE request.model_id = '$($zhipuModel.id)'"
-  if ($LASTEXITCODE -ne 0 -or $attemptFacts -ne "Zhipu quota 1:quota,Zhipu quota 3:quota,Zhipu success:ok") {
-    throw "Real Zhipu attempt order did not prove priority, exclusion, and takeover."
-  }
-
-  if (-not $geminiAvailability) {
-    $geminiCostFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_provider -Atc `
-      "SELECT count(*) || '|' || sum(input_tokens) || '|' || sum(output_tokens) || '|' || sum(total_cost_nanos) || '|' || bool_and(cost_currency = 'USD' AND input_rate_nanos_per_million = 1500000000 AND output_rate_nanos_per_million = 9000000000 AND input_cost_nanos = ceil(input_tokens::numeric * 1500000000 / 1000000)::bigint AND output_cost_nanos = ceil(output_tokens::numeric * 9000000000 / 1000000)::bigint AND total_cost_nanos = input_cost_nanos + output_cost_nanos)::text FROM requests WHERE model_id = '$($geminiModel.id)' AND status = 'completed' AND usage_source = 'authoritative' AND total_cost_nanos IS NOT NULL"
-    if ($LASTEXITCODE -ne 0) { throw "Could not read the real Gemini cost ledger." }
-    $geminiCostSegments = @($geminiCostFacts.Split('|'))
-    if ($geminiCostSegments.Count -ne 5 -or [int]$geminiCostSegments[0] -lt 2 -or $geminiCostSegments[4] -ne "true") {
-      throw "Real Gemini authoritative usage did not reconcile to the frozen official paid-tier cost snapshot: $geminiCostFacts"
-    }
-    $geminiSummary = Invoke-RestMethod -Uri "$script:BaseURL/api/control/costs?search=gemini-3.5-flash&page=1&pageSize=20" -WebSession $script:AdminSession -TimeoutSec 30
-    $geminiSummaryItem = @($geminiSummary.data.items | Where-Object { $_.modelId -eq $geminiModel.id }) | Select-Object -First 1
-    if (-not $geminiSummaryItem -or $geminiSummaryItem.totalCostNanos -ne $geminiCostSegments[3]) {
-      throw "Administrator cost aggregation did not reconcile to the real Gemini request ledger."
-    }
-    $costEvidenceDirectory = Join-Path $root ".build\acceptance-evidence"
-    New-Item -ItemType Directory -Force $costEvidenceDirectory | Out-Null
-    $costReport = [ordered]@{
-      provider = "Google Gemini"
-      model = "gemini-3.5-flash"
-      officialPricingURL = "https://ai.google.dev/gemini-api/docs/pricing"
-      pricingSnapshotDate = "2026-07-22"
-      pricingTier = "standard-paid"
-      currency = "USD"
-      inputPricePerMillionTokens = "1.5"
-      outputPricePerMillionTokens = "9"
-      authoritativeRequests = [int64]$geminiCostSegments[0]
-      inputTokens = [int64]$geminiCostSegments[1]
-      outputTokens = [int64]$geminiCostSegments[2]
-      totalCostNanos = [string]$geminiCostSegments[3]
-      aggregateReconciled = $true
-      customerContractMargin = "not_provided"
-    }
-    [IO.File]::WriteAllText((Join-Path $costEvidenceDirectory "provider-cost-report.json"), ($costReport | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-  }
-
-  $siliconCostFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_provider -Atc `
-    "SELECT count(*) || '|' || sum(input_tokens) || '|' || sum(output_tokens) || '|' || sum(total_cost_nanos) || '|' || bool_and(cost_currency = 'CNY' AND input_rate_nanos_per_million = 1500000000 AND output_rate_nanos_per_million = 12000000000 AND input_cost_nanos = ceil(input_tokens::numeric * 1500000000 / 1000000)::bigint AND output_cost_nanos = ceil(output_tokens::numeric * 12000000000 / 1000000)::bigint AND total_cost_nanos = input_cost_nanos + output_cost_nanos)::text FROM requests WHERE model_id = '$($siliconModel.id)' AND status = 'completed' AND usage_source = 'authoritative' AND total_cost_nanos IS NOT NULL"
-  if ($LASTEXITCODE -ne 0) { throw "Could not read the real SiliconFlow cost ledger." }
-  $siliconCostSegments = @($siliconCostFacts.Split('|'))
-  if ($siliconCostSegments.Count -ne 5 -or [int]$siliconCostSegments[0] -lt 2 -or $siliconCostSegments[4] -ne "true") {
-    throw "Real SiliconFlow authoritative usage did not reconcile to the frozen official cost snapshot: $siliconCostFacts"
-  }
-  $siliconSummary = Invoke-RestMethod -Uri "$script:BaseURL/api/control/costs?search=qwen3.5-9b&page=1&pageSize=20" -WebSession $script:AdminSession -TimeoutSec 30
-  $siliconSummaryItem = @($siliconSummary.data.items | Where-Object { $_.modelId -eq $siliconModel.id }) | Select-Object -First 1
-  if (-not $siliconSummaryItem -or $siliconSummaryItem.totalCostNanos -ne $siliconCostSegments[3]) {
-    throw "Administrator cost aggregation did not reconcile to the real SiliconFlow request ledger."
-  }
-  $costEvidenceDirectory = Join-Path $root ".build\acceptance-evidence"
-  New-Item -ItemType Directory -Force $costEvidenceDirectory | Out-Null
-  $costReport = [ordered]@{
-    provider = "SiliconFlow"
-    model = "Qwen/Qwen3.5-9B"
-    officialPricingURL = "https://siliconflow.cn/pricing"
-    pricingSnapshotDate = "2026-07-22"
-    currency = "CNY"
-    inputPricePerMillionTokens = "1.5"
-    outputPricePerMillionTokens = "12"
-    authoritativeRequests = [int64]$siliconCostSegments[0]
-    inputTokens = [int64]$siliconCostSegments[1]
-    outputTokens = [int64]$siliconCostSegments[2]
-    totalCostNanos = [string]$siliconCostSegments[3]
-    aggregateReconciled = $true
-    customerContractMargin = "not_provided"
-  }
-  [IO.File]::WriteAllText((Join-Path $costEvidenceDirectory "provider-cost-report.json"), ($costReport | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-
   foreach ($secret in $keys) {
     if (Select-String -LiteralPath @($stdoutPath, $stderrPath) -SimpleMatch -Quiet -Pattern $secret) {
       throw "A real Provider credential appeared in a Gateway runtime log."

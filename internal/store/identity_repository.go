@@ -20,19 +20,19 @@ import (
 )
 
 type IdentityRepository struct {
-	pool                       *pgxpool.Pool
-	queries                    *db.Queries
-	commitMemberMutation       func(context.Context, pgx.Tx) error
-	commitGatewayKeyMutation   func(context.Context, pgx.Tx) error
-	commitGatewayKeyRevocation func(context.Context, pgx.Tx) error
+	pool                     *pgxpool.Pool
+	queries                  *db.Queries
+	commitMemberMutation     func(context.Context, pgx.Tx) error
+	commitGatewayKeyMutation func(context.Context, pgx.Tx) error
+	commitGatewayKeyDeletion func(context.Context, pgx.Tx) error
 }
 
 func NewIdentityRepository(pool *pgxpool.Pool) *IdentityRepository {
 	return &IdentityRepository{
 		pool: pool, queries: db.New(pool),
-		commitMemberMutation:       func(ctx context.Context, tx pgx.Tx) error { return tx.Commit(ctx) },
-		commitGatewayKeyMutation:   func(ctx context.Context, tx pgx.Tx) error { return tx.Commit(ctx) },
-		commitGatewayKeyRevocation: func(ctx context.Context, tx pgx.Tx) error { return tx.Commit(ctx) },
+		commitMemberMutation:     func(ctx context.Context, tx pgx.Tx) error { return tx.Commit(ctx) },
+		commitGatewayKeyMutation: func(ctx context.Context, tx pgx.Tx) error { return tx.Commit(ctx) },
+		commitGatewayKeyDeletion: func(ctx context.Context, tx pgx.Tx) error { return tx.Commit(ctx) },
 	}
 }
 
@@ -181,11 +181,11 @@ func (r *IdentityRepository) DeleteMember(ctx context.Context, userID, actorID u
 		if err != nil {
 			return identity.User{}, "", nil, translateStoreError(err)
 		}
-		revokedKeys, err := queries.RevokeGatewayKeysForUser(ctx, userID)
+		deletedKeys, err := queries.DeleteGatewayKeysForUser(ctx, userID)
 		if err != nil {
 			return identity.User{}, "", nil, translateStoreError(err)
 		}
-		return userFromDB(updated), "identity.member_deleted", map[string]any{"revoked_sessions": revokedSessions, "revoked_api_keys": revokedKeys}, nil
+		return userFromDB(updated), "identity.member_deleted", map[string]any{"revoked_sessions": revokedSessions, "deleted_api_keys": deletedKeys}, nil
 	})
 }
 
@@ -403,12 +403,14 @@ func (r *IdentityRepository) CreateGatewayKey(ctx context.Context, input identit
 		if bindingErr != nil {
 			return identity.GatewayKey{}, bindingErr
 		}
-		originalModelIDs := make([]uuid.UUID, 0, len(bindings))
+		originalRoutes := make([]identity.GatewayKeyRoute, 0, len(bindings))
 		for _, binding := range bindings {
-			originalModelIDs = append(originalModelIDs, binding.ModelID)
+			originalRoutes = append(originalRoutes, identity.GatewayKeyRoute{ModelID: binding.ModelID, ResourcePoolID: binding.ResourcePoolID})
 		}
-		sort.Slice(originalModelIDs, func(i, j int) bool { return originalModelIDs[i].String() < originalModelIDs[j].String() })
-		if !slices.Equal(originalModelIDs, input.AuthorizedModelIDs) {
+		sort.Slice(originalRoutes, func(i, j int) bool { return originalRoutes[i].ModelID.String() < originalRoutes[j].ModelID.String() })
+		if !slices.EqualFunc(originalRoutes, input.Routes, func(left, right identity.GatewayKeyRoute) bool {
+			return left.ModelID == right.ModelID && left.ResourcePoolID == right.ResourcePoolID
+		}) {
 			return identity.GatewayKey{}, identity.ErrConflict
 		}
 	}
@@ -419,28 +421,27 @@ func (r *IdentityRepository) CreateGatewayKey(ctx context.Context, input identit
 	if user.Status != db.UserStatusActive {
 		return identity.GatewayKey{}, identity.ErrDisabled
 	}
-	modelNames := make([]string, 0, len(input.AuthorizedModelIDs))
-	for _, modelID := range input.AuthorizedModelIDs {
-		model, modelErr := queries.GetModelForGatewayKeyBinding(ctx, db.GetModelForGatewayKeyBindingParams{ID: modelID, UserID: input.UserID})
-		if modelErr != nil {
-			return identity.GatewayKey{}, translateStoreError(modelErr)
+	validatedRoutes := make([]identity.GatewayKeyRoute, 0, len(input.Routes))
+	for _, route := range input.Routes {
+		validated, routeErr := queries.GetRouteForGatewayKeyBinding(ctx, db.GetRouteForGatewayKeyBindingParams{ModelID: route.ModelID, ResourcePoolID: route.ResourcePoolID, UserID: input.UserID})
+		if routeErr != nil {
+			return identity.GatewayKey{}, translateStoreError(routeErr)
 		}
-		modelNames = append(modelNames, model.PublicName)
+		validatedRoutes = append(validatedRoutes, identity.GatewayKeyRoute{ModelID: validated.ModelID, ModelName: validated.PublicName, ResourcePoolID: validated.ResourcePoolID, ResourcePoolName: validated.ResourcePoolName})
 	}
 	created, err := queries.CreateGatewayKey(ctx, db.CreateGatewayKeyParams{UserID: input.UserID, Name: input.Name, Prefix: input.Prefix, SecretDigest: input.SecretDigest, ExpiresAt: optionalTimestamp(input.ExpiresAt)})
 	if err != nil {
 		return identity.GatewayKey{}, translateStoreError(err)
 	}
-	for _, modelID := range input.AuthorizedModelIDs {
-		if err := queries.BindGatewayKeyModel(ctx, db.BindGatewayKeyModelParams{GatewayKeyID: created.ID, ModelID: modelID}); err != nil {
+	for _, route := range validatedRoutes {
+		if err := queries.BindGatewayKeyRoute(ctx, db.BindGatewayKeyRouteParams{GatewayKeyID: created.ID, ModelID: route.ModelID, ResourcePoolID: route.ResourcePoolID}); err != nil {
 			return identity.GatewayKey{}, translateStoreError(err)
 		}
 	}
-	result := gatewayKeyFromDB(created.ID, created.UserID, created.Name, created.Prefix, created.ExpiresAt, created.RevokedAt, created.LastUsedAt, created.CreatedAt)
-	result.AuthorizedModelIDs = append([]uuid.UUID(nil), input.AuthorizedModelIDs...)
-	result.AuthorizedModels = append([]string(nil), modelNames...)
+	result := gatewayKeyFromDB(created.ID, created.UserID, created.Name, created.Prefix, created.ExpiresAt, created.DeletedAt, created.LastUsedAt, created.CreatedAt)
+	result.Routes = validatedRoutes
 	action := "gateway_key.created"
-	detail := map[string]any{"user_id": input.UserID, "prefix": input.Prefix, "model_ids": input.AuthorizedModelIDs, "expires_at": input.ExpiresAt}
+	detail := map[string]any{"user_id": input.UserID, "prefix": input.Prefix, "routes": validatedRoutes, "expires_at": input.ExpiresAt}
 	if input.ReplacesKeyID != nil {
 		action = "gateway_key.replaced"
 		detail["replaces_key_id"] = *input.ReplacesKeyID
@@ -472,16 +473,14 @@ func (r *IdentityRepository) ListGatewayKeys(ctx context.Context, userID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	modelIDs := make(map[uuid.UUID][]uuid.UUID)
-	modelNames := make(map[uuid.UUID][]string)
+	routes := make(map[uuid.UUID][]identity.GatewayKeyRoute)
 	for _, binding := range bindings {
-		modelIDs[binding.GatewayKeyID] = append(modelIDs[binding.GatewayKeyID], binding.ModelID)
-		modelNames[binding.GatewayKeyID] = append(modelNames[binding.GatewayKeyID], binding.PublicName)
+		routes[binding.GatewayKeyID] = append(routes[binding.GatewayKeyID], identity.GatewayKeyRoute{ModelID: binding.ModelID, ModelName: binding.PublicName, ResourcePoolID: binding.ResourcePoolID, ResourcePoolName: binding.ResourcePoolName})
 	}
 	result := make([]identity.GatewayKey, 0, len(items))
 	for _, item := range items {
-		key := gatewayKeyFromDB(item.ID, item.UserID, item.Name, item.Prefix, item.ExpiresAt, item.RevokedAt, item.LastUsedAt, item.CreatedAt)
-		key.AuthorizedModelIDs, key.AuthorizedModels = modelIDs[item.ID], modelNames[item.ID]
+		key := gatewayKeyFromDB(item.ID, item.UserID, item.Name, item.Prefix, item.ExpiresAt, item.DeletedAt, item.LastUsedAt, item.CreatedAt)
+		key.Routes = routes[item.ID]
 		result = append(result, key)
 	}
 	return result, nil
@@ -496,46 +495,45 @@ func (r *IdentityRepository) GatewayKeyForReplacement(ctx context.Context, keyID
 	if err != nil {
 		return identity.GatewayKey{}, err
 	}
-	key := gatewayKeyFromDB(item.ID, item.UserID, item.Name, item.Prefix, item.ExpiresAt, item.RevokedAt, item.LastUsedAt, item.CreatedAt)
+	key := gatewayKeyFromDB(item.ID, item.UserID, item.Name, item.Prefix, item.ExpiresAt, item.DeletedAt, item.LastUsedAt, item.CreatedAt)
 	for _, binding := range bindings {
-		key.AuthorizedModelIDs = append(key.AuthorizedModelIDs, binding.ModelID)
-		key.AuthorizedModels = append(key.AuthorizedModels, binding.PublicName)
+		key.Routes = append(key.Routes, identity.GatewayKeyRoute{ModelID: binding.ModelID, ModelName: binding.PublicName, ResourcePoolID: binding.ResourcePoolID, ResourcePoolName: binding.ResourcePoolName})
 	}
-	if len(key.AuthorizedModelIDs) == 0 {
+	if len(key.Routes) == 0 {
 		return identity.GatewayKey{}, identity.ErrConflict
 	}
 	return key, nil
 }
 
-func (r *IdentityRepository) RevokeGatewayKey(ctx context.Context, keyID, actorID uuid.UUID, allowAny bool) error {
+func (r *IdentityRepository) DeleteGatewayKey(ctx context.Context, keyID, actorID uuid.UUID, allowAny bool) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	queries := r.queries.WithTx(tx)
-	key, err := queries.GetGatewayKeyForRevocation(ctx, keyID)
+	key, err := queries.GetGatewayKeyForDeletion(ctx, keyID)
 	if err != nil {
 		return translateStoreError(err)
 	}
 	if key.UserID != actorID && !allowAny {
 		return identity.ErrForbidden
 	}
-	if key.RevokedAt.Valid {
+	if key.DeletedAt.Valid {
 		return nil
 	}
-	rows, err := queries.MarkGatewayKeyRevoked(ctx, keyID)
+	rows, err := queries.MarkGatewayKeyDeleted(ctx, keyID)
 	if err != nil {
 		return translateStoreError(err)
 	}
 	if rows != 1 {
 		return identity.ErrConflict
 	}
-	if _, err := queries.CreateAuditEvent(ctx, auditParams(&actorID, "gateway_key.revoked", "gateway_key", keyID.String(), map[string]any{"owner_id": key.UserID})); err != nil {
+	if _, err := queries.CreateAuditEvent(ctx, auditParams(&actorID, "gateway_key.deleted", "gateway_key", keyID.String(), map[string]any{"owner_id": key.UserID})); err != nil {
 		return err
 	}
-	if err := r.commitGatewayKeyRevocation(ctx, tx); err != nil {
-		return r.reconcileGatewayKeyRevocation(ctx, keyID, actorID, allowAny, err)
+	if err := r.commitGatewayKeyDeletion(ctx, tx); err != nil {
+		return r.reconcileGatewayKeyDeletion(ctx, keyID, actorID, allowAny, err)
 	}
 	return nil
 }
@@ -643,16 +641,16 @@ func (r *IdentityRepository) reconcileGatewayKeyMutation(ctx context.Context, ac
 	}
 }
 
-func (r *IdentityRepository) reconcileGatewayKeyRevocation(ctx context.Context, keyID, actorID uuid.UUID, allowAny bool, commitErr error) error {
+func (r *IdentityRepository) reconcileGatewayKeyDeletion(ctx context.Context, keyID, actorID uuid.UUID, allowAny bool, commitErr error) error {
 	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	for delay := 20 * time.Millisecond; ; delay = minDuration(delay*2, 250*time.Millisecond) {
-		state, err := r.queries.GetGatewayKeyRevocationState(reconcileCtx, keyID)
+		state, err := r.queries.GetGatewayKeyDeletionState(reconcileCtx, keyID)
 		if err == nil {
 			if state.UserID != actorID && !allowAny {
 				return identity.ErrForbidden
 			}
-			if state.RevokedAt.Valid {
+			if state.DeletedAt.Valid {
 				return nil
 			}
 		}
@@ -666,8 +664,8 @@ func userFromDB(user db.User) identity.User {
 	return identity.User{ID: user.ID, Email: user.Email, DisplayName: user.DisplayName, PasswordHash: user.PasswordHash, Role: identity.Role(user.Role), Status: identity.Status(user.Status), DisabledAt: timePointer(user.DisabledAt), DeletedAt: timePointer(user.DeletedAt), CreatedAt: user.CreatedAt.Time.UTC(), UpdatedAt: user.UpdatedAt.Time.UTC()}
 }
 
-func gatewayKeyFromDB(id, userID uuid.UUID, name, prefix string, expiresAt, revokedAt, lastUsedAt, createdAt pgtype.Timestamptz) identity.GatewayKey {
-	return identity.GatewayKey{ID: id, UserID: userID, Name: name, Prefix: prefix, ExpiresAt: timePointer(expiresAt), RevokedAt: timePointer(revokedAt), LastUsedAt: timePointer(lastUsedAt), CreatedAt: createdAt.Time.UTC()}
+func gatewayKeyFromDB(id, userID uuid.UUID, name, prefix string, expiresAt, deletedAt, lastUsedAt, createdAt pgtype.Timestamptz) identity.GatewayKey {
+	return identity.GatewayKey{ID: id, UserID: userID, Name: name, Prefix: prefix, ExpiresAt: timePointer(expiresAt), DeletedAt: timePointer(deletedAt), LastUsedAt: timePointer(lastUsedAt), CreatedAt: createdAt.Time.UTC()}
 }
 
 func timestamp(value time.Time) pgtype.Timestamptz {

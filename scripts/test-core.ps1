@@ -90,11 +90,6 @@ try {
   New-Item -ItemType Directory -Force $buildDirectory | Out-Null
   $postgres = Start-LLMGatewayTestPostgres -RunID $runID -DatabaseName "llmgateway_core" -Password "core-postgres-fixture"
   $docker = Get-LLMGatewayDockerCommand
-  $quotaDatabaseName = "llmgateway_core_quota"
-  & $docker exec $postgres.Container createdb -U llmgateway $quotaDatabaseName
-  if ($LASTEXITCODE -ne 0) { throw "Could not create the isolated quota test database." }
-  $quotaDatabaseURL = $postgres.DatabaseURL.Replace("/llmgateway_core?", "/$quotaDatabaseName`?")
-  if ($quotaDatabaseURL -eq $postgres.DatabaseURL) { throw "Could not derive the quota test database URL." }
 
   $valkeyPassword = "core-valkey-fixture"
   $valkey = Start-LLMGatewayTestValkey -RunID $runID -Password $valkeyPassword
@@ -120,22 +115,19 @@ try {
   $env:LLMGATEWAY_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15"
   $env:LLMGATEWAY_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
   $env:LLMGATEWAY_REQUEST_MAX_ACTIVE = "2"
-  $env:LLMGATEWAY_REQUEST_MAX_ACTIVE_PER_USER = "2"
   $env:LLMGATEWAY_REQUEST_MAX_QUEUE_WAIT = "5s"
   $env:LLMGATEWAY_REQUEST_LEASE_TTL = "3s"
   $env:LLMGATEWAY_REQUEST_EXECUTION_HEARTBEAT_INTERVAL = "100ms"
   $env:LLMGATEWAY_REQUEST_EXECUTION_STALE_AFTER = "1s"
   $env:LLMGATEWAY_REQUEST_RECOVERY_INTERVAL = "200ms"
-  $env:LLMGATEWAY_TEST_DATABASE_URL = $quotaDatabaseURL
+  $env:LLMGATEWAY_CONTROL_TEST_DATABASE_URL = $postgres.DatabaseURL
   $env:LLMGATEWAY_TEST_VALKEY_ADDRESS = $valkey.Address
   $env:LLMGATEWAY_TEST_VALKEY_PASSWORD = $valkeyPassword
   $env:LLMGATEWAY_TEST_VALKEY_DATABASE = "1"
   $env:LLMGATEWAY_TEST_VALKEY_REQUIRED = "true"
 
-  & go test ./internal/quota -run '^TestPersistentSubscriptionQuotaIsIdempotentAndAtomic$' -count=1
-  if ($LASTEXITCODE -ne 0) { throw "Persistent quota integration test failed." }
-  & go test ./internal/store -run '^TestRequestExecutionClaimFencesStaleWritersAndRecoveryHoldsReservation$' -count=1
-  if ($LASTEXITCODE -ne 0) { throw "Request execution fencing integration test failed." }
+  & go test ./internal/store -run '^Test(CredentialRecoveryPermitIsSharedAndFencedAcrossRepositories|GatewayKeyDeletion)' -count=1
+  if ($LASTEXITCODE -ne 0) { throw "Shared credential health or API key deletion integration test failed." }
   & go test ./internal/coordination -run '^TestValkey' -count=1
   if ($LASTEXITCODE -ne 0) { throw "Valkey coordination integration tests failed." }
 
@@ -232,7 +224,7 @@ try {
   $credentialSecret = "core-upstream-secret"
   $credentialBatch = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/credentials/batch" -WebSession $adminSession `
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
-    -Body (@{ resourcePoolId = $pool.data.id; items = @(@{ name = "Core Upstream Key"; secret = $credentialSecret }); modelBindings = @(@{ model_id = $model.id; priority = 10; weight = 100 }); rpmLimit = 60; tpmLimit = 50000; concurrencyLimit = 2 } | ConvertTo-Json -Depth 6)
+    -Body (@{ resourcePoolId = $pool.data.id; items = @(@{ name = "Core Upstream Key"; secret = $credentialSecret }); modelBindings = @(@{ model_id = $model.id }); rpmLimit = 60; tpmLimit = 50000; concurrencyLimit = 2 } | ConvertTo-Json -Depth 6)
   $credential = @($credentialBatch.data | Select-Object -First 1)[0]
   if ($credential.status -ne "created" -or $credential.credential.status -ne "active" -or $credential.credential.model_bindings.Count -ne 1) { throw "Upstream API Key creation did not persist routing eligibility." }
   $probe = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/credentials/$($credential.credential.id)/probe" -WebSession $adminSession `
@@ -242,14 +234,9 @@ try {
     throw "Upstream API Key probe did not return a successful execution and Request ID."
   }
 
-  $null = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/model-prices" -WebSession $adminSession `
-    -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
-    -Body (@{ modelId = $model.id; currency = "USD"; inputPricePerMillionTokens = "0.1"; outputPricePerMillionTokens = "0.2"; effectiveAt = (Get-Date).ToUniversalTime().AddMinutes(-1).ToString("o") } | ConvertTo-Json)
-
   $naturalPlanName = -join ([char[]]@(0x6838, 0x5FC3, 0x5957, 0x9910))
   $naturalPlanBody = [System.Text.Encoding]::UTF8.GetBytes((@{
-      name = $naturalPlanName; description = ""; kind = "token"; tokenQuota = 50000; validityDays = 30
-      concurrencyLimit = 2; rpmLimit = 60; tpmLimit = 50000
+      name = $naturalPlanName; description = ""
       routes = @(@{ modelId = $model.id; resourcePoolId = $pool.data.id })
     } | ConvertTo-Json -Depth 6))
   $plan = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/plans" -WebSession $adminSession `
@@ -270,7 +257,7 @@ try {
 
   $subscription = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/subscriptions" -WebSession $adminSession `
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
-    -Body (@{ userId = $member.id; servicePlanId = $plan.data.id; grantedTokens = 50000; startsAt = (Get-Date).ToUniversalTime().AddMinutes(-1).ToString("o"); expiresAt = (Get-Date).ToUniversalTime().AddDays(30).ToString("o"); notes = "" } | ConvertTo-Json)
+    -Body (@{ userId = $member.id; servicePlanId = $plan.data.id; startsAt = (Get-Date).ToUniversalTime().AddMinutes(-1).ToString("o"); expiresAt = (Get-Date).ToUniversalTime().AddDays(30).ToString("o"); notes = "" } | ConvertTo-Json)
   if ($subscription.data.status -ne "active" -or $subscription.data.service_plan_version_id -ne $plan.data.current_version.id) {
     throw "Subscription did not freeze the published plan version."
   }
@@ -286,7 +273,7 @@ try {
 
   $createdKey = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/keys" -WebSession $memberSession `
     -Headers (New-MutationHeaders -CSRF $memberCSRF) -ContentType "application/json" `
-    -Body (@{ ownerId = $member.id; name = "Core Member Key"; authorizedModelIds = @($model.id) } | ConvertTo-Json -Depth 5)
+    -Body (@{ ownerId = $member.id; name = "Core Member Key"; routes = @(@{ modelId = $model.id; resourcePoolId = $pool.data.id }) } | ConvertTo-Json -Depth 5)
   $gatewayKeySecret = [string]$createdKey.data.secret
   if ($gatewayKeySecret -notmatch '^llmg_[A-Za-z0-9_-]+$') { throw "Member API key creation did not return the one-time secret." }
 
@@ -337,18 +324,17 @@ try {
     -Body (@{ status = "active"; expectedUpdatedAt = $disabledCredential.data.updated_at } | ConvertTo-Json)
 
   $requestFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_core -Atc `
-    "SELECT request.status || '|' || request.input_tokens || '|' || request.output_tokens || '|' || reservation.state || '|' || reservation.charged_tokens || '|' || (SELECT count(*) FROM request_attempts attempt WHERE attempt.request_id = request.id AND attempt.status = 'completed') FROM requests request JOIN ledger_reservations reservation ON reservation.request_id = request.id WHERE request.gateway_key_id = '$($createdKey.data.key.id)' AND request.idempotency_key = '$requestIdempotencyKey'"
-  if ($LASTEXITCODE -ne 0 -or $requestFacts -ne "completed|4|2|settled|6|1") {
-    throw "Request, attempt, and subscription ledger facts did not settle exactly once: $requestFacts"
+    "SELECT request.status || '|' || request.input_tokens || '|' || request.output_tokens || '|' || (SELECT count(*) FROM request_attempts attempt WHERE attempt.request_id = request.id AND attempt.status = 'completed') FROM requests request WHERE request.gateway_key_id = '$($createdKey.data.key.id)' AND request.idempotency_key = '$requestIdempotencyKey'"
+  if ($LASTEXITCODE -ne 0 -or $requestFacts -ne "completed|4|2|1") {
+    throw "Request usage and upstream attempt facts did not complete exactly once: $requestFacts"
   }
   $secretFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_core -Atc `
     "SELECT (SELECT count(*) FROM credential_mutations WHERE result::text LIKE '%$credentialSecret%') || '|' || (SELECT count(*) FROM audit_events WHERE detail::text LIKE '%$credentialSecret%') || '|' || (SELECT count(*) FROM gateway_key_mutations WHERE result ? 'secret')"
   if ($LASTEXITCODE -ne 0 -or $secretFacts -ne "0|0|0") { throw "A one-time secret crossed a mutation or audit boundary: $secretFacts" }
 
-  $revokedKey = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/keys/$($createdKey.data.key.id)/revoke" -WebSession $memberSession `
+  Invoke-RestMethod -Method Delete -Uri "$baseURL/api/control/keys/$($createdKey.data.key.id)" -WebSession $memberSession `
     -Headers @{ "X-CSRF-Token" = $memberCSRF }
-  if ($revokedKey.data.status -ne "revoked") { throw "Member API key revocation did not become visible." }
-  Assert-HTTPFailureStatus -ExpectedStatus 401 -FailureMessage "A revoked API key still read the public catalog." -Action {
+  Assert-HTTPFailureStatus -ExpectedStatus 401 -FailureMessage "A deleted API key still read the public catalog." -Action {
     Invoke-RestMethod -Uri "$baseURL/v1/models" -Headers @{ Authorization = "Bearer $gatewayKeySecret" }
   }
 
@@ -400,4 +386,4 @@ try {
   if ($cleanupFailures.Count -gt 0) { throw "Core gateway cleanup failed: $($cleanupFailures -join '; ')" }
 }
 
-Write-Host "Core subscription eligibility, public API idempotency, restart recovery, fail-closed routing, ledger, identity, and secret-boundary flow passed."
+Write-Host "Core subscription eligibility, public API idempotency, restart recovery, fail-closed routing, usage, identity, and secret-boundary flow passed."

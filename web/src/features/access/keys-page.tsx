@@ -26,7 +26,7 @@ export function KeysPage() {
   const { state, setPage, setSearch, setStatus } = useListSearch()
   const [creating, setCreating] = useState(false)
   const [replacementKey, setReplacementKey] = useState<GatewayKey | null>(null)
-  const [revokeKey, setRevokeKey] = useState<GatewayKey | null>(null)
+  const [deleteKey, setDeleteKey] = useState<GatewayKey | null>(null)
   const [testKey, setTestKey] = useState<GatewayKey | null>(null)
   const queryClient = useQueryClient()
   const query = useQuery({
@@ -34,10 +34,10 @@ export function KeysPage() {
     queryFn: ({ signal }) => accessApi.keys(state, signal),
     placeholderData: keepPreviousData,
   })
-  const revoke = useMutation({
-    mutationFn: accessApi.revokeKey,
+  const remove = useMutation({
+    mutationFn: accessApi.deleteKey,
     onSuccess: () => {
-      setRevokeKey(null)
+      setDeleteKey(null)
       return queryClient.invalidateQueries({ queryKey: ['gateway-keys'] })
     },
     onError: () => queryClient.invalidateQueries({ queryKey: ['gateway-keys'] }),
@@ -60,9 +60,12 @@ export function KeysPage() {
         ? []
         : [{ accessorKey: 'ownerName', header: '所属成员' } as ColumnDef<GatewayKey, unknown>]),
       {
-        accessorKey: 'authorizedModels',
+        id: 'routes',
         header: '模型授权',
-        cell: ({ row }) => row.original.authorizedModels.join('、'),
+        cell: ({ row }) =>
+          row.original.routes
+            .map((route) => `${route.modelName} · ${route.resourcePoolName}`)
+            .join('、'),
       },
       {
         accessorKey: 'status',
@@ -92,7 +95,7 @@ export function KeysPage() {
                   label="测试"
                   icon={<CirclePlay size={16} />}
                   data-onboarding="test-api-key"
-                  disabled={revoke.isPending}
+                  disabled={remove.isPending}
                   onClick={() => setTestKey(row.original)}
                 />
               ) : null}
@@ -101,17 +104,17 @@ export function KeysPage() {
                   <TableAction
                     label="更换"
                     icon={<RotateCw size={16} />}
-                    disabled={revoke.isPending}
+                    disabled={remove.isPending}
                     onClick={() => setReplacementKey(row.original)}
                   />
                   <RowActionMenu>
                     <RowActionItem
                       icon={<XCircle size={15} />}
                       danger
-                      disabled={revoke.isPending}
-                      onSelect={() => setRevokeKey(row.original)}
+                      disabled={remove.isPending}
+                      onSelect={() => setDeleteKey(row.original)}
                     >
-                      撤销 API 密钥
+                      删除 API 密钥
                     </RowActionItem>
                   </RowActionMenu>
                 </>
@@ -120,7 +123,7 @@ export function KeysPage() {
           ) : null,
       },
     ],
-    [canRevoke, canTest, revoke, session.role],
+    [canRevoke, canTest, remove, session.role],
   )
   return (
     <Page>
@@ -139,7 +142,7 @@ export function KeysPage() {
         }
       />
       <PageSection>
-        <FormProblem error={revoke.error} />
+        <FormProblem error={remove.error} />
         <TableToolbar
           search={state.search}
           onSearchChange={setSearch}
@@ -148,7 +151,6 @@ export function KeysPage() {
           onStatusChange={setStatus}
           statusOptions={[
             { value: 'active', label: '可用' },
-            { value: 'revoked', label: '已撤销' },
             { value: 'expired', label: '已过期' },
           ]}
         />
@@ -180,13 +182,13 @@ export function KeysPage() {
         />
       ) : null}
       <ConfirmDialog
-        open={revokeKey !== null}
-        onOpenChange={(open) => !open && setRevokeKey(null)}
-        title="撤销 API 密钥"
-        description={`撤销 ${revokeKey?.name ?? ''} 后，使用该 API 密钥的请求将立即失败。`}
-        confirmLabel="确认撤销"
-        onConfirm={() => revokeKey && revoke.mutate(revokeKey.id)}
-        pending={revoke.isPending}
+        open={deleteKey !== null}
+        onOpenChange={(open) => !open && setDeleteKey(null)}
+        title="删除 API 密钥"
+        description={`删除 ${deleteKey?.name ?? ''} 后，它将立即失效并从列表中移除；已发生请求仍保留脱敏历史记录。`}
+        confirmLabel="确认删除"
+        onConfirm={() => deleteKey && remove.mutate(deleteKey.id)}
+        pending={remove.isPending}
         danger
       />
     </Page>

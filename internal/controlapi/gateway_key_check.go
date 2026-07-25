@@ -167,7 +167,7 @@ func (a *API) gatewayKeyTestPrincipal(r *http.Request, keyID uuid.UUID) (identit
 		if key.ID != keyID {
 			continue
 		}
-		if key.RevokedAt != nil || key.ExpiresAt != nil && !key.ExpiresAt.After(now) {
+		if key.DeletedAt != nil || key.ExpiresAt != nil && !key.ExpiresAt.After(now) {
 			return identity.GatewayPrincipal{}, identity.ErrInvalidCredential
 		}
 		return identity.GatewayPrincipal{KeyID: key.ID, UserID: key.UserID, Status: identity.StatusActive, KeyPrefix: key.Prefix, ExpiresAt: key.ExpiresAt}, nil

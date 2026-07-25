@@ -1,8 +1,6 @@
 import {
   Activity,
   CircleUserRound,
-  CircleDollarSign,
-  FileClock,
   KeyRound,
   LayoutDashboard,
   PackageCheck,
@@ -73,18 +71,6 @@ const administratorNavigation: NavigationGroup[] = [
     label: '运营数据',
     items: [
       { label: 'API 日志', to: '/api-logs', capability: 'operations:read', icon: ScrollText },
-      {
-        label: '额度记录',
-        to: '/quota-records',
-        capability: 'operations:read',
-        icon: FileClock,
-      },
-      {
-        label: '上游成本',
-        to: '/costs',
-        capability: 'operations:read',
-        icon: CircleDollarSign,
-      },
     ],
   },
   {
@@ -113,7 +99,6 @@ const memberNavigation: NavigationGroup[] = [
       },
       { label: 'API 密钥', to: '/api-keys', capability: 'keys:write', icon: KeyRound },
       { label: 'API 日志', to: '/api-logs', capability: 'usage:read', icon: ScrollText },
-      { label: '额度记录', to: '/quota-records', capability: 'usage:read', icon: FileClock },
       {
         label: '账号操作',
         to: '/account',

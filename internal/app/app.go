@@ -11,14 +11,12 @@ import (
 
 	"github.com/luckymaomi/llmgateway/internal/config"
 	"github.com/luckymaomi/llmgateway/internal/controlapi"
-	"github.com/luckymaomi/llmgateway/internal/costing"
 	"github.com/luckymaomi/llmgateway/internal/credentialprobe"
 	"github.com/luckymaomi/llmgateway/internal/httpserver"
 	"github.com/luckymaomi/llmgateway/internal/identity"
 	"github.com/luckymaomi/llmgateway/internal/observability"
 	"github.com/luckymaomi/llmgateway/internal/operations"
 	"github.com/luckymaomi/llmgateway/internal/publicapi"
-	"github.com/luckymaomi/llmgateway/internal/quota"
 	"github.com/luckymaomi/llmgateway/internal/registry"
 	"github.com/luckymaomi/llmgateway/internal/requestflow"
 	responseowner "github.com/luckymaomi/llmgateway/internal/responses"
@@ -26,6 +24,7 @@ import (
 	"github.com/luckymaomi/llmgateway/internal/siteprofile"
 	"github.com/luckymaomi/llmgateway/internal/store"
 	"github.com/luckymaomi/llmgateway/internal/subscription"
+	"github.com/luckymaomi/llmgateway/internal/usage"
 	webassets "github.com/luckymaomi/llmgateway/web"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -94,25 +93,19 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return nil, fmt.Errorf("initialize subscription service: %w", err)
 	}
 	loginGuard := store.NewLoginGuard(connections.Valkey, cfg.Security.LoginAccountAttempts, cfg.Security.LoginAddressAttempts, cfg.Security.LoginWindow)
-	quotaService, err := quota.NewService(store.NewQuotaRepository(connections))
+	usageService, err := usage.NewService(store.NewUsageRepository(connections))
 	if err != nil {
 		connections.Close()
-		return nil, fmt.Errorf("initialize quota service: %w", err)
+		return nil, fmt.Errorf("initialize usage service: %w", err)
 	}
-	quotaAPI := controlapi.NewQuotaAPI(quotaService, logger)
-	costingService, err := costing.NewService(store.NewCostRepository(connections))
-	if err != nil {
-		return nil, fmt.Errorf("costing service: %w", err)
-	}
-	costingAPI := controlapi.NewCostingAPI(costingService, logger)
+	usageAPI := controlapi.NewUsageAPI(usageService, logger)
 	siteProfileService, err := siteprofile.NewService(store.NewSiteProfileRepository(connections))
 	if err != nil {
 		connections.Close()
 		return nil, fmt.Errorf("initialize site profile service: %w", err)
 	}
 	controlAPI := controlapi.New(identityService, registryService, subscriptionService, loginGuard, cfg.Security, logger).
-		WithQuotaAPI(quotaAPI).
-		WithCostingAPI(costingAPI).
+		WithUsageAPI(usageAPI).
 		WithSiteProfileAPI(controlapi.NewSiteProfileAPI(siteProfileService, logger))
 	operationsService, err := operations.NewService(store.NewOperationsRepository(connections))
 	if err != nil {
@@ -120,7 +113,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return nil, fmt.Errorf("initialize operations service: %w", err)
 	}
 	controlAPI.WithOperationsAPI(controlapi.NewOperationsAPI(operationsService, logger))
-	workflow, err := newRequestWorkflow(cfg, connections, registryService, quotaService, runtimeMetrics)
+	workflow, err := newRequestWorkflow(cfg, connections, registryService, usageService, runtimeMetrics)
 	if err != nil {
 		connections.Close()
 		return nil, err
@@ -204,8 +197,8 @@ func (a *Application) runRequestRecovery(ctx context.Context) {
 			return
 		}
 		a.metrics.RequestRecovery(result)
-		if result.Settled > 0 || result.Released > 0 || result.Uncertain > 0 {
-			a.logger.Info("request recovery completed", "event", "request.recovery_completed", "settled", result.Settled, "released", result.Released, "uncertain", result.Uncertain)
+		if result.Completed > 0 || result.FailedAccepted > 0 || result.Uncertain > 0 {
+			a.logger.Info("request recovery completed", "event", "request.recovery_completed", "completed", result.Completed, "failed_accepted", result.FailedAccepted, "uncertain", result.Uncertain)
 		}
 	}
 	run()

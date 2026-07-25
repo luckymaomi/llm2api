@@ -117,7 +117,7 @@ export function KeyReplacementDialog({ gatewayKey, onOpenChange }: KeyReplacemen
             </div>
             <div>
               <dt>模型授权</dt>
-              <dd>{created.key.authorizedModels.join(', ')}</dd>
+              <dd>{created.key.routes.map(routeLabel).join(', ')}</dd>
             </div>
           </dl>
         </>
@@ -130,7 +130,7 @@ export function KeyReplacementDialog({ gatewayKey, onOpenChange }: KeyReplacemen
             </div>
             <div>
               <dt>模型授权</dt>
-              <dd>{gatewayKey?.authorizedModels.join(', ')}</dd>
+              <dd>{gatewayKey?.routes.map(routeLabel).join(', ')}</dd>
             </div>
           </dl>
           <FormProblem error={mutation.error} />
@@ -138,4 +138,8 @@ export function KeyReplacementDialog({ gatewayKey, onOpenChange }: KeyReplacemen
       )}
     </DialogFrame>
   )
+}
+
+function routeLabel(route: GatewayKey['routes'][number]): string {
+  return `${route.modelName} · ${route.resourcePoolName}`
 }

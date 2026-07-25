@@ -39,12 +39,7 @@ const SubscriptionsPage = lazyRouteComponent(
 )
 const UsersPage = lazyRouteComponent(() => import('@/features/access/users-page'), 'UsersPage')
 const KeysPage = lazyRouteComponent(() => import('@/features/access/keys-page'), 'KeysPage')
-const UsagePage = lazyRouteComponent(() => import('@/features/ledger/usage-page'), 'UsagePage')
-const EntriesPage = lazyRouteComponent(
-  () => import('@/features/ledger/entries-page'),
-  'EntriesPage',
-)
-const CostsPage = lazyRouteComponent(() => import('@/features/ledger/costs-page'), 'CostsPage')
+const UsagePage = lazyRouteComponent(() => import('@/features/usage/usage-page'), 'UsagePage')
 const SettingsPage = lazyRouteComponent(
   () => import('@/features/settings/settings-page'),
   'SettingsPage',
@@ -204,14 +199,6 @@ const usageRoute = createRoute({
   validateSearch: listSearch,
   component: UsagePage,
 })
-const entriesRoute = createRoute({
-  getParentRoute: () => authenticatedLayout,
-  path: '/quota-records',
-  beforeLoad: usageGuard,
-  validateSearch: listSearch,
-  component: EntriesPage,
-})
-const costsRoute = protectedRoute('/costs', 'operations:read', CostsPage, true, ['administrator'])
 const settingsRoute = protectedRoute('/site-settings', 'members:write', SettingsPage, false, [
   'administrator',
 ])
@@ -272,8 +259,6 @@ const routeTree = rootRoute.addChildren([
     usersRoute,
     keysRoute,
     usageRoute,
-    entriesRoute,
-    costsRoute,
     settingsRoute,
     overviewRoute,
     operationsRoute,

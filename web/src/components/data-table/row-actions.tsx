@@ -1,4 +1,4 @@
-import { DropdownMenu } from 'radix-ui'
+import { DropdownMenu, Tooltip } from 'radix-ui'
 import { Ellipsis } from 'lucide-react'
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
@@ -8,16 +8,18 @@ interface TableActionProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   label: string
   icon: ReactNode
   tone?: 'default' | 'positive' | 'warning' | 'danger'
+  showTooltip?: boolean
 }
 
 export function TableAction({
   label,
   icon,
   tone = 'default',
+  showTooltip = true,
   className,
   ...props
 }: TableActionProps) {
-  return (
+  const button = (
     <button
       type="button"
       className={cn('table-action', `table-action--${tone}`, className)}
@@ -25,8 +27,19 @@ export function TableAction({
       {...props}
     >
       {icon}
-      <span>{label}</span>
     </button>
+  )
+  if (!showTooltip) return button
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>{button}</Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content className="tooltip" sideOffset={7}>
+          {label}
+          <Tooltip.Arrow className="tooltip__arrow" />
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   )
 }
 
@@ -40,7 +53,7 @@ export function RowActionMenu({
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <TableAction label={label} icon={<Ellipsis size={17} />} />
+        <TableAction label={label} icon={<Ellipsis size={17} />} showTooltip={false} />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="row-action-menu" align="end" sideOffset={6}>

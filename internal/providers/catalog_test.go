@@ -45,14 +45,14 @@ func TestDefaultCatalogPublishesIndependentCodeOwnedPlatformPresets(t *testing.T
 		t.Fatalf("Provider presets = %#v, want four verified entry points", presets)
 	}
 	for _, preset := range presets {
-		if preset.ID == "" || preset.Kind == "" || preset.BaseURL == "" || len(preset.Models) == 0 {
+		if preset.ID == "" || preset.Kind == "" || preset.BaseURL == "" {
 			t.Fatalf("Provider preset is incomplete: %#v", preset)
 		}
 	}
-	presets[0].Models[0].Capabilities[0] = "mutated"
+	presets[0].Name = "mutated"
 	reloaded, found := DefaultCatalog().Preset(presets[0].ID)
-	if !found || reloaded.Models[0].Capabilities[0] == "mutated" {
-		t.Fatal("Provider preset catalog exposed mutable capability facts")
+	if !found || reloaded.Name == "mutated" {
+		t.Fatal("Provider preset catalog exposed mutable platform facts")
 	}
 }
 

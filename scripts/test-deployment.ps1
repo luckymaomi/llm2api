@@ -282,7 +282,7 @@ try {
 
   $caddyContainer = Get-ComposeContainer "caddy"
   $backendMetrics = @(& $docker exec $caddyContainer wget -qO- http://gateway-a:8080/metrics 2>$null) -join "`n"
-  if ($LASTEXITCODE -ne 0 -or $backendMetrics -notmatch 'llmgateway_admission_requests_total' -or $backendMetrics -notmatch 'llmgateway_provider_attempts_total' -or $backendMetrics -notmatch 'llmgateway_quota_operations_total') {
+  if ($LASTEXITCODE -ne 0 -or $backendMetrics -notmatch 'llmgateway_admission_requests_total' -or $backendMetrics -notmatch 'llmgateway_provider_attempts_total' -or $backendMetrics -notmatch 'llmgateway_usage_operations_total') {
     throw "The backend metrics scrape did not expose the domain metric contract."
   }
   $report.backendMetricsScrape = $true

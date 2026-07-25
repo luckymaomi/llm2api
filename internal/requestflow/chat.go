@@ -23,16 +23,16 @@ func (s *Service) Chat(ctx context.Context, command ChatCommand) (ChatResult, *c
 	defer run.stopExecution()
 	ctx = run.context
 	if run.request.Stream {
-		_ = s.accounting.Release(context.WithoutCancel(ctx), run.claim, "invalid_request", "stream request used non-stream workflow")
+		_ = s.accounting.Fail(context.WithoutCancel(ctx), run.claim, "invalid_request", "stream request used non-stream workflow")
 		return ChatResult{}, &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "stream_requires_stream_endpoint", Message: "streaming request requires a stream sink", Parameter: "stream", HTTPStatus: http.StatusBadRequest}
 	}
 
 	excluded := make([]routing.CandidateID, 0, len(run.candidates))
 	startedAt := s.clock.Now().UTC()
 	for attemptNumber := 1; ; attemptNumber++ {
-		candidate, circuitPermit, lease, selectionError := s.attemptDecision(ctx, &run, excluded, attemptNumber)
+		candidate, circuitPermit, lease, selectionError := s.attemptDecision(ctx, &run, &excluded, attemptNumber)
 		if selectionError != nil {
-			_ = s.accounting.Release(context.WithoutCancel(ctx), run.claim, selectionError.Code, selectionError.Message)
+			_ = s.accounting.Fail(context.WithoutCancel(ctx), run.claim, selectionError.Code, selectionError.Message)
 			return ChatResult{}, selectionError
 		}
 		result, attemptError := s.nonStreamAttempt(ctx, run, candidate, circuitPermit, attemptNumber, lease)
@@ -43,6 +43,10 @@ func (s *Service) Chat(ctx context.Context, command ChatCommand) (ChatResult, *c
 		if attemptError.Kind == canonical.ErrorUncertain {
 			return ChatResult{}, attemptError
 		}
+		if shouldTryNextCandidate(attemptError) && len(excluded)+1 < len(run.candidates) {
+			excluded = append(excluded, routing.CandidateID(candidate.ID.String()))
+			continue
+		}
 		decision, err := s.retry.Decide(resilience.RetryInput{
 			Attempt: attemptNumber, RequestStartedAt: startedAt, Failure: failureClass(attemptError.Kind),
 			SendBoundary: resilience.SendRejected, ClientBoundary: resilience.ClientUncommitted,
@@ -50,7 +54,7 @@ func (s *Service) Chat(ctx context.Context, command ChatCommand) (ChatResult, *c
 		})
 		if err != nil || decision.Action != resilience.RetrySchedule {
 			s.ensureClientRetryAfter(attemptError)
-			_ = s.accounting.Release(context.WithoutCancel(ctx), run.claim, attemptError.Code, attemptError.Message)
+			_ = s.accounting.Fail(context.WithoutCancel(ctx), run.claim, attemptError.Code, attemptError.Message)
 			return ChatResult{}, attemptError
 		}
 		excluded = append(excluded, routing.CandidateID(candidate.ID.String()))
@@ -58,13 +62,13 @@ func (s *Service) Chat(ctx context.Context, command ChatCommand) (ChatResult, *c
 			excluded = excluded[:0]
 		}
 		if err := waitUntil(ctx, decision.NextAttemptAt, s.clock.Now()); err != nil {
-			_ = s.accounting.Release(context.WithoutCancel(ctx), run.claim, "canceled", "request canceled during retry wait")
+			_ = s.accounting.Fail(context.WithoutCancel(ctx), run.claim, "canceled", "request canceled during retry wait")
 			return ChatResult{}, &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "request_canceled", Message: "request was canceled", Cause: err}
 		}
 	}
 }
 
-func (s *Service) nonStreamAttempt(ctx context.Context, run workflowRun, candidate Candidate, circuitPermit *resilience.Permit, sequence int, lease Lease) (ChatResult, *canonical.Error) {
+func (s *Service) nonStreamAttempt(ctx context.Context, run workflowRun, candidate Candidate, circuitPermit *healthPermit, sequence int, lease Lease) (ChatResult, *canonical.Error) {
 	if lease == nil {
 		var err error
 		lease, _, err = s.coordinator.Acquire(ctx, s.leaseRequest(run.claim, run, candidate))
@@ -84,7 +88,7 @@ func (s *Service) nonStreamAttempt(ctx context.Context, run workflowRun, candida
 	adapter, client, request, buildError := s.buildUpstream(attemptContext, run, candidate)
 	if buildError != nil {
 		circuitPermit.Complete(resilience.PermitReleased)
-		_ = s.failAttempt(context.WithoutCancel(ctx), run.claim, attemptID, buildError, nil)
+		_ = s.failAttempt(context.WithoutCancel(ctx), run.claim, attemptID, buildError, nil, candidate.HealthGeneration)
 		return ChatResult{}, buildError
 	}
 	sentAt := s.clock.Now().UTC()
@@ -95,13 +99,13 @@ func (s *Service) nonStreamAttempt(ctx context.Context, run workflowRun, candida
 	response, err := client.Do(request)
 	if err != nil {
 		circuitPermit.Complete(resilience.PermitFailed)
-		return ChatResult{}, s.markNonStreamUncertain(ctx, run, attemptID, nil, err)
+		return ChatResult{}, s.markNonStreamUncertain(ctx, run, candidate, attemptID, nil, err)
 	}
 	defer response.Body.Close()
 	body, readError := readResponse(response, s.config.MaxResponseBytes)
 	if readError != nil {
 		circuitPermit.Complete(resilience.PermitFailed)
-		return ChatResult{}, s.markNonStreamUncertain(ctx, run, attemptID, &response.StatusCode, readError)
+		return ChatResult{}, s.markNonStreamUncertain(ctx, run, candidate, attemptID, &response.StatusCode, readError)
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		providerError := adapter.ClassifyError(response.StatusCode, response.Header, body)
@@ -111,15 +115,15 @@ func (s *Service) nonStreamAttempt(ctx context.Context, run workflowRun, candida
 			circuitPermit.Complete(resilience.PermitReleased)
 		}
 		if response.StatusCode >= http.StatusInternalServerError && !providerError.ReplaySafe {
-			return ChatResult{}, s.markNonStreamUncertain(ctx, run, attemptID, &response.StatusCode, providerError)
+			return ChatResult{}, s.markNonStreamUncertain(ctx, run, candidate, attemptID, &response.StatusCode, providerError)
 		}
-		_ = s.failAttempt(context.WithoutCancel(ctx), run.claim, attemptID, providerError, &response.StatusCode)
+		_ = s.failAttempt(context.WithoutCancel(ctx), run.claim, attemptID, providerError, &response.StatusCode, candidate.HealthGeneration)
 		return ChatResult{}, providerError
 	}
 	parsed, err := adapter.ParseResponse(response.StatusCode, response.Header, body)
 	if err != nil {
 		circuitPermit.Complete(resilience.PermitFailed)
-		return ChatResult{}, s.markNonStreamUncertain(ctx, run, attemptID, &response.StatusCode, err)
+		return ChatResult{}, s.markNonStreamUncertain(ctx, run, candidate, attemptID, &response.StatusCode, err)
 	}
 	completedAt := s.clock.Now().UTC()
 	status := response.StatusCode
@@ -133,14 +137,14 @@ func (s *Service) nonStreamAttempt(ctx context.Context, run workflowRun, candida
 	if err := s.repository.UpdateAttempt(ctx, run.claim, attemptID, AttemptUpdate{
 		Status: "completed", HTTPStatus: &status, UpstreamRequestID: optionalString(parsed.RequestID),
 		FirstByteAt: &completedAt, CompletedAt: &completedAt, Usage: &usage,
-		Credential: credentialSuccess(completedAt),
+		Credential: credentialSuccess(completedAt, candidate.HealthGeneration),
 	}); err != nil {
 		circuitPermit.Complete(resilience.PermitReleased)
 		return ChatResult{}, storageError("attempt_completion_failed", err)
 	}
-	if err := s.accounting.Settle(ctx, run.claim, usage); err != nil {
+	if err := s.accounting.Complete(ctx, run.claim, usage); err != nil {
 		circuitPermit.Complete(resilience.PermitReleased)
-		return ChatResult{}, storageError("usage_settlement_failed", err)
+		return ChatResult{}, storageError("usage_completion_failed", err)
 	}
 	circuitPermit.Complete(resilience.PermitSucceeded)
 	if resultPersistenceError != nil {
@@ -149,7 +153,7 @@ func (s *Service) nonStreamAttempt(ctx context.Context, run workflowRun, candida
 	return result, nil
 }
 
-func (s *Service) markNonStreamUncertain(ctx context.Context, run workflowRun, attemptID uuid.UUID, status *int, cause error) *canonical.Error {
+func (s *Service) markNonStreamUncertain(ctx context.Context, run workflowRun, candidate Candidate, attemptID uuid.UUID, status *int, cause error) *canonical.Error {
 	retryAt := s.clock.Now().UTC().Add(s.config.Circuit.OpenDuration)
 	providerError := &canonical.Error{
 		Kind: canonical.ErrorUncertain, Code: "upstream_outcome_uncertain", Message: "upstream request outcome is uncertain",
@@ -159,7 +163,7 @@ func (s *Service) markNonStreamUncertain(ctx context.Context, run workflowRun, a
 	completedAt := s.clock.Now().UTC()
 	stateErr := s.repository.MarkExecutionUncertain(context.WithoutCancel(ctx), run.claim, attemptID, AttemptUpdate{
 		Status: "uncertain", HTTPStatus: status, ErrorKind: &kind, CompletedAt: &completedAt,
-		Credential: s.credentialFailure(providerError, completedAt, ctx.Err() != nil || errors.Is(cause, context.Canceled)),
+		Credential: s.credentialFailure(providerError, completedAt, ctx.Err() != nil || errors.Is(cause, context.Canceled), candidate.HealthGeneration),
 	}, kind, providerError.Message)
 	if stateErr != nil && !errors.Is(stateErr, execution.ErrFenced) {
 		return storageError("uncertain_state_failed", stateErr)
@@ -188,10 +192,10 @@ func (s *Service) buildUpstream(ctx context.Context, run workflowRun, candidate 
 	return adapter, client, request, nil
 }
 
-func (s *Service) failAttempt(ctx context.Context, claim execution.Claim, attemptID uuid.UUID, providerError *canonical.Error, status *int) error {
+func (s *Service) failAttempt(ctx context.Context, claim execution.Claim, attemptID uuid.UUID, providerError *canonical.Error, status *int, healthGeneration int64) error {
 	completedAt := s.clock.Now().UTC()
 	kind := string(providerError.Kind)
-	observation := s.credentialFailure(providerError, completedAt, false)
+	observation := s.credentialFailure(providerError, completedAt, false, healthGeneration)
 	return s.repository.UpdateAttempt(ctx, claim, attemptID, AttemptUpdate{
 		Status: "failed", HTTPStatus: status, ErrorKind: &kind,
 		RetryAfterAt: retryAfterAt(providerError.RetryAfter, completedAt), CompletedAt: &completedAt,
@@ -199,15 +203,15 @@ func (s *Service) failAttempt(ctx context.Context, claim execution.Claim, attemp
 	})
 }
 
-func credentialSuccess(observedAt time.Time) *CredentialObservation {
-	return &CredentialObservation{Kind: CredentialSucceeded, ObservedAt: observedAt}
+func credentialSuccess(observedAt time.Time, healthGeneration int64) *CredentialObservation {
+	return &CredentialObservation{Kind: CredentialSucceeded, ObservedAt: observedAt, HealthGeneration: healthGeneration}
 }
 
-func (s *Service) credentialFailure(providerError *canonical.Error, observedAt time.Time, canceledLocally bool) *CredentialObservation {
+func (s *Service) credentialFailure(providerError *canonical.Error, observedAt time.Time, canceledLocally bool, healthGeneration int64) *CredentialObservation {
 	if providerError == nil || canceledLocally || providerError.Code == "client_stream_interrupted" {
 		return nil
 	}
-	observation := &CredentialObservation{Kind: CredentialFailed, ObservedAt: observedAt, ErrorKind: string(providerError.Kind)}
+	observation := &CredentialObservation{Kind: CredentialFailed, ObservedAt: observedAt, ErrorKind: string(providerError.Kind), HealthGeneration: healthGeneration}
 	switch providerError.Kind {
 	case canonical.ErrorRateLimit, canonical.ErrorProviderTemporary, canonical.ErrorStreamInterrupted, canonical.ErrorUncertain:
 		cooldownUntil := observedAt.Add(s.config.Circuit.OpenDuration)
@@ -283,6 +287,19 @@ func failureClass(kind canonical.ErrorKind) resilience.FailureClass {
 		return resilience.FailureUncertain
 	default:
 		return resilience.FailureInvalidRequest
+	}
+}
+
+func shouldTryNextCandidate(providerError *canonical.Error) bool {
+	if providerError == nil || !providerError.ReplaySafe {
+		return false
+	}
+	switch providerError.Kind {
+	case canonical.ErrorAuthentication, canonical.ErrorPermission, canonical.ErrorQuota,
+		canonical.ErrorRateLimit, canonical.ErrorProviderTemporary:
+		return true
+	default:
+		return false
 	}
 }
 

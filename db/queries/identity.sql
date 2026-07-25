@@ -102,8 +102,8 @@ UPDATE sessions SET revoked_at = now() WHERE id = sqlc.arg(id) AND revoked_at IS
 -- name: RevokeUserSessions :execrows
 UPDATE sessions SET revoked_at = now() WHERE user_id = sqlc.arg(user_id) AND revoked_at IS NULL;
 
--- name: RevokeGatewayKeysForUser :execrows
-UPDATE gateway_keys SET revoked_at = now() WHERE user_id = sqlc.arg(user_id) AND revoked_at IS NULL;
+-- name: DeleteGatewayKeysForUser :execrows
+UPDATE gateway_keys SET deleted_at = now() WHERE user_id = sqlc.arg(user_id) AND deleted_at IS NULL;
 
 -- name: RevokeUserSessionsExcept :execrows
 UPDATE sessions SET revoked_at = now()
@@ -134,71 +134,83 @@ WHERE id = sqlc.arg(id) RETURNING *;
 -- name: GetUserForGatewayKeyCreation :one
 SELECT * FROM users WHERE id = sqlc.arg(id) AND status = 'active' FOR SHARE;
 
--- name: GetModelForGatewayKeyBinding :one
-SELECT model.id, model.public_name
+-- name: GetRouteForGatewayKeyBinding :one
+SELECT model.id AS model_id, model.public_name, pool.id AS resource_pool_id, pool.name AS resource_pool_name
 FROM models model
-WHERE model.id = sqlc.arg(id)
-  AND EXISTS (
-    SELECT 1
-    FROM subscriptions subscription
-    JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
-    JOIN service_plan_version_routes route ON route.service_plan_version_id = version.id AND route.model_id = model.id
-    WHERE subscription.user_id = sqlc.arg(user_id)
-      AND subscription.status = 'active'
-      AND subscription.starts_at <= now() AND subscription.expires_at > now()
+JOIN resource_pool_models pool_model ON pool_model.model_id = model.id
+JOIN resource_pools pool ON pool.id = pool_model.resource_pool_id
+JOIN users owner ON owner.id = sqlc.arg(user_id)
+WHERE model.id = sqlc.arg(model_id) AND pool.id = sqlc.arg(resource_pool_id)
+  AND pool.status = 'active'
+  AND (
+    owner.role = 'administrator'
+    OR EXISTS (
+      SELECT 1
+      FROM subscriptions subscription
+      JOIN service_plan_version_routes route ON route.service_plan_version_id = subscription.service_plan_version_id
+      WHERE subscription.user_id = owner.id
+        AND route.model_id = model.id AND route.resource_pool_id = pool.id
+        AND subscription.status = 'active'
+        AND subscription.starts_at <= now()
+        AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+    )
   )
 FOR SHARE;
 
--- name: BindGatewayKeyModel :exec
-INSERT INTO gateway_key_models (gateway_key_id, model_id) VALUES (sqlc.arg(gateway_key_id), sqlc.arg(model_id));
+-- name: BindGatewayKeyRoute :exec
+INSERT INTO gateway_key_models (gateway_key_id, model_id, resource_pool_id)
+VALUES (sqlc.arg(gateway_key_id), sqlc.arg(model_id), sqlc.arg(resource_pool_id));
 
 -- name: ListGatewayKeyModelBindingsByUser :many
-SELECT gkm.gateway_key_id, gkm.model_id, model.public_name
+SELECT gkm.gateway_key_id, gkm.model_id, model.public_name, gkm.resource_pool_id, pool.name AS resource_pool_name
 FROM gateway_key_models gkm
 JOIN gateway_keys key ON key.id = gkm.gateway_key_id
 JOIN models model ON model.id = gkm.model_id
+JOIN resource_pools pool ON pool.id = gkm.resource_pool_id
 WHERE key.user_id = sqlc.arg(user_id)
 ORDER BY gkm.gateway_key_id, model.public_name, gkm.model_id;
 
--- name: IsGatewayKeyAuthorizedForModel :one
-SELECT EXISTS (SELECT 1 FROM gateway_key_models WHERE gateway_key_id = sqlc.arg(gateway_key_id) AND model_id = sqlc.arg(model_id));
+-- name: GetGatewayKeyRoute :one
+SELECT model_id, resource_pool_id FROM gateway_key_models
+WHERE gateway_key_id = sqlc.arg(gateway_key_id) AND model_id = sqlc.arg(model_id);
 
 -- name: GetGatewayKeyByDigest :one
 SELECT key.*, member.status AS user_status, member.role AS user_role
 FROM gateway_keys key JOIN users member ON member.id = key.user_id
-WHERE key.secret_digest = sqlc.arg(secret_digest) AND key.revoked_at IS NULL
+WHERE key.secret_digest = sqlc.arg(secret_digest) AND key.deleted_at IS NULL
   AND (key.expires_at IS NULL OR key.expires_at > now());
 
 -- name: GetGatewayKeyPrincipalByID :one
 SELECT key.*, member.status AS user_status, member.role AS user_role
 FROM gateway_keys key JOIN users member ON member.id = key.user_id
-WHERE key.id = sqlc.arg(id) AND key.revoked_at IS NULL
+WHERE key.id = sqlc.arg(id) AND key.deleted_at IS NULL
   AND (key.expires_at IS NULL OR key.expires_at > now());
 
 -- name: ListGatewayKeysByUser :many
-SELECT id, user_id, name, prefix, expires_at, revoked_at, last_used_at, created_at
-FROM gateway_keys WHERE user_id = sqlc.arg(user_id) ORDER BY created_at DESC, id;
+SELECT id, user_id, name, prefix, expires_at, deleted_at, last_used_at, created_at
+FROM gateway_keys WHERE user_id = sqlc.arg(user_id) AND deleted_at IS NULL ORDER BY created_at DESC, id;
 
--- name: GetGatewayKeyForRevocation :one
-SELECT id, user_id, revoked_at FROM gateway_keys WHERE id = sqlc.arg(id) FOR UPDATE;
+-- name: GetGatewayKeyForDeletion :one
+SELECT id, user_id, deleted_at FROM gateway_keys WHERE id = sqlc.arg(id) FOR UPDATE;
 
 -- name: GetGatewayKeyForReplacement :one
-SELECT id, user_id, name, prefix, expires_at, revoked_at, last_used_at, created_at
+SELECT id, user_id, name, prefix, expires_at, deleted_at, last_used_at, created_at
 FROM gateway_keys
-WHERE id = sqlc.arg(id) AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+WHERE id = sqlc.arg(id) AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > now())
 FOR UPDATE;
 
 -- name: ListGatewayKeyModelBindingsByKey :many
-SELECT gkm.model_id, model.public_name
+SELECT gkm.model_id, model.public_name, gkm.resource_pool_id, pool.name AS resource_pool_name
 FROM gateway_key_models gkm JOIN models model ON model.id = gkm.model_id
+JOIN resource_pools pool ON pool.id = gkm.resource_pool_id
 WHERE gkm.gateway_key_id = sqlc.arg(gateway_key_id)
 ORDER BY model.public_name, gkm.model_id;
 
--- name: GetGatewayKeyRevocationState :one
-SELECT user_id, revoked_at FROM gateway_keys WHERE id = sqlc.arg(id);
+-- name: GetGatewayKeyDeletionState :one
+SELECT user_id, deleted_at FROM gateway_keys WHERE id = sqlc.arg(id);
 
--- name: MarkGatewayKeyRevoked :execrows
-UPDATE gateway_keys SET revoked_at = now() WHERE id = sqlc.arg(id) AND revoked_at IS NULL;
+-- name: MarkGatewayKeyDeleted :execrows
+UPDATE gateway_keys SET deleted_at = now() WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
 
 -- name: TouchGatewayKey :exec
 UPDATE gateway_keys SET last_used_at = now() WHERE id = sqlc.arg(id);

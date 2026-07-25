@@ -1,6 +1,7 @@
 package controlapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -53,9 +54,8 @@ func (a *API) listResourcePools(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) createResourcePool(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		ProviderID uuid.UUID   `json:"providerId"`
-		Name       string      `json:"name"`
-		ModelIDs   []uuid.UUID `json:"modelIds"`
+		ProviderID uuid.UUID `json:"providerId"`
+		Name       string    `json:"name"`
 	}
 	if err := decodeJSON(w, r, &input); err != nil {
 		writeDecodeError(w, r, err)
@@ -65,7 +65,7 @@ func (a *API) createResourcePool(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := a.registry.CreateResourcePool(r.Context(), principalFromContext(r.Context()), registry.NewResourcePool{ProviderID: input.ProviderID, Name: input.Name, ModelIDs: input.ModelIDs}, mutation)
+	item, err := a.registry.CreateResourcePool(r.Context(), principalFromContext(r.Context()), registry.NewResourcePool{ProviderID: input.ProviderID, Name: input.Name}, mutation)
 	if err != nil {
 		a.writeRegistryError(w, r, err)
 		return
@@ -124,13 +124,12 @@ func (a *API) setResourcePoolStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type credentialInput struct {
-	Name              string                            `json:"name"`
-	Secret            string                            `json:"secret"`
-	RPMLimit          *int32                            `json:"rpmLimit"`
-	TPMLimit          *int64                            `json:"tpmLimit"`
-	ConcurrencyLimit  *int32                            `json:"concurrencyLimit"`
-	ModelBindings     []registry.CredentialModelBinding `json:"modelBindings"`
-	ExpectedUpdatedAt time.Time                         `json:"expectedUpdatedAt"`
+	Name              string    `json:"name"`
+	Secret            string    `json:"secret"`
+	RPMLimit          *int32    `json:"rpmLimit"`
+	TPMLimit          *int64    `json:"tpmLimit"`
+	ConcurrencyLimit  *int32    `json:"concurrencyLimit"`
+	ExpectedUpdatedAt time.Time `json:"expectedUpdatedAt"`
 }
 
 func (a *API) listCredentials(w http.ResponseWriter, r *http.Request) {
@@ -150,10 +149,9 @@ func (a *API) importCredentials(w http.ResponseWriter, r *http.Request) {
 			Name   string `json:"name"`
 			Secret string `json:"secret"`
 		} `json:"items"`
-		ModelBindings    []registry.CredentialModelBinding `json:"modelBindings"`
-		RPMLimit         *int32                            `json:"rpmLimit"`
-		TPMLimit         *int64                            `json:"tpmLimit"`
-		ConcurrencyLimit *int32                            `json:"concurrencyLimit"`
+		RPMLimit         *int32 `json:"rpmLimit"`
+		TPMLimit         *int64 `json:"tpmLimit"`
+		ConcurrencyLimit *int32 `json:"concurrencyLimit"`
 	}
 	if err := decodeJSON(w, r, &input); err != nil {
 		writeDecodeError(w, r, err)
@@ -167,7 +165,7 @@ func (a *API) importCredentials(w http.ResponseWriter, r *http.Request) {
 	for _, item := range input.Items {
 		batch = append(batch, registry.CredentialBatchItem{Name: item.Name, Secret: item.Secret})
 	}
-	items, err := a.registry.ImportCredentials(r.Context(), principalFromContext(r.Context()), input.ResourcePoolID, batch, input.ModelBindings, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, mutation)
+	items, err := a.registry.ImportCredentials(r.Context(), principalFromContext(r.Context()), input.ResourcePoolID, batch, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, mutation)
 	for index := range input.Items {
 		input.Items[index].Secret = ""
 	}
@@ -193,7 +191,7 @@ func (a *API) updateCredential(w http.ResponseWriter, r *http.Request) {
 		input.Secret = ""
 		return
 	}
-	item, err := a.registry.UpdateCredential(r.Context(), principalFromContext(r.Context()), registry.CredentialChange{ID: id, Name: input.Name, RPMLimit: input.RPMLimit, TPMLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit, ModelBindings: input.ModelBindings, ExpectedUpdatedAt: input.ExpectedUpdatedAt}, input.Secret, mutation)
+	item, err := a.registry.UpdateCredential(r.Context(), principalFromContext(r.Context()), registry.CredentialChange{ID: id, Name: input.Name, RPMLimit: input.RPMLimit, TPMLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit, ExpectedUpdatedAt: input.ExpectedUpdatedAt}, input.Secret, mutation)
 	input.Secret = ""
 	if err != nil {
 		a.writeRegistryError(w, r, err)
@@ -250,6 +248,33 @@ func (a *API) retireCredential(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) probeCredential(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "credentialID")
+	if !ok {
+		return
+	}
+	var input struct {
+		ExpectedUpdatedAt time.Time `json:"expectedUpdatedAt"`
+	}
+	if err := decodeJSON(w, r, &input); err != nil {
+		writeDecodeError(w, r, err)
+		return
+	}
+	mutation, ok := registryMutationRequest(w, r)
+	if !ok {
+		return
+	}
+	execution, credential, err := a.registry.RefreshCredentialModels(r.Context(), principalFromContext(r.Context()), id, input.ExpectedUpdatedAt, mutation)
+	if err != nil && !errors.Is(err, registry.ErrModelDiscovery) {
+		a.writeRegistryError(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, struct {
+		Execution  registry.ModelDiscoveryExecution `json:"execution"`
+		Credential registry.Credential              `json:"credential"`
+	}{execution, credential})
+}
+
+func (a *API) deepTestCredential(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathUUID(w, r, "credentialID")
 	if !ok {
 		return

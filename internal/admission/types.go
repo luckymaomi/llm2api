@@ -11,10 +11,9 @@ type TicketID string
 type UserID string
 
 type Config struct {
-	MaxQueued        int
-	MaxActive        int
-	MaxActivePerUser int
-	MaxQueueWait     time.Duration
+	MaxQueued    int
+	MaxActive    int
+	MaxQueueWait time.Duration
 }
 
 func (c Config) validate() error {
@@ -23,9 +22,6 @@ func (c Config) validate() error {
 	}
 	if c.MaxActive <= 0 {
 		return newError(ErrorInvalidConfiguration, "max active must be positive", "")
-	}
-	if c.MaxActivePerUser <= 0 || c.MaxActivePerUser > c.MaxActive {
-		return newError(ErrorInvalidConfiguration, "max active per user must be within the global active limit", "")
 	}
 	if c.MaxQueueWait <= 0 {
 		return newError(ErrorInvalidConfiguration, "max queue wait must be positive", "")

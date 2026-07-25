@@ -33,14 +33,14 @@ groups:
         annotations:
           summary: An upstream side effect is uncertain
           runbook_url: https://github.com/luckymaomi/llmgateway/blob/main/deploy/observability/runbook.md#uncertain-outcomes
-      - alert: LLMGatewayQuotaPersistenceFailure
-        expr: increase(llmgateway_quota_operations_total{outcome="failed"}[5m]) > 0
+      - alert: LLMGatewayUsagePersistenceFailure
+        expr: increase(llmgateway_usage_operations_total{outcome="failed"}[5m]) > 0
         for: 0m
         labels:
           severity: critical
         annotations:
-          summary: A quota reservation or settlement operation failed
-          runbook_url: https://github.com/luckymaomi/llmgateway/blob/main/deploy/observability/runbook.md#quota-failures
+          summary: A request usage persistence operation failed
+          runbook_url: https://github.com/luckymaomi/llmgateway/blob/main/deploy/observability/runbook.md#usage-persistence-failures
       - alert: LLMGatewayBackgroundFailureRatio
         expr: sum(rate(llmgateway_background_responses_total{outcome=~"failed|uncertain|recovered_failed|recovered_uncertain"}[15m])) / clamp_min(sum(rate(llmgateway_background_responses_total{outcome=~"completed|failed|canceled|uncertain|recovered_.+"}[15m])), 0.001) > 0.1
         for: 15m

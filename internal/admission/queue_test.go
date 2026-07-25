@@ -51,7 +51,7 @@ func admittedIDs(dispatch Dispatch) []TicketID {
 }
 
 func TestQueueRotatesUsersWhileKeepingEachUserFIFO(t *testing.T) {
-	queue, _ := newTestQueue(t, Config{MaxQueued: 8, MaxActive: 4, MaxActivePerUser: 2, MaxQueueWait: time.Minute})
+	queue, _ := newTestQueue(t, Config{MaxQueued: 8, MaxActive: 4, MaxQueueWait: time.Minute})
 	enqueue(t, queue, "a1", "alice")
 	enqueue(t, queue, "a2", "alice")
 	enqueue(t, queue, "b1", "bob")
@@ -70,7 +70,7 @@ func TestQueueRotatesUsersWhileKeepingEachUserFIFO(t *testing.T) {
 }
 
 func TestQueueBoundsOneUsersActiveShare(t *testing.T) {
-	queue, _ := newTestQueue(t, Config{MaxQueued: 8, MaxActive: 2, MaxActivePerUser: 1, MaxQueueWait: time.Minute})
+	queue, _ := newTestQueue(t, Config{MaxQueued: 8, MaxActive: 2, MaxQueueWait: time.Minute})
 	enqueue(t, queue, "a1", "alice")
 	enqueue(t, queue, "a2", "alice")
 	enqueue(t, queue, "b1", "bob")
@@ -92,7 +92,7 @@ func TestQueueBoundsOneUsersActiveShare(t *testing.T) {
 }
 
 func TestQueueReportsCancellationAndTimeout(t *testing.T) {
-	queue, clock := newTestQueue(t, Config{MaxQueued: 3, MaxActive: 1, MaxActivePerUser: 1, MaxQueueWait: time.Minute})
+	queue, clock := newTestQueue(t, Config{MaxQueued: 3, MaxActive: 1, MaxQueueWait: time.Minute})
 	enqueue(t, queue, "active", "alice")
 	enqueue(t, queue, "cancel", "bob")
 	_, err := queue.Enqueue(Request{ID: "expire", UserID: "carol", QueueTimeout: 10 * time.Second})
@@ -124,7 +124,7 @@ func TestQueueReportsCancellationAndTimeout(t *testing.T) {
 }
 
 func TestQueueCancellationReleasesAnActivePermit(t *testing.T) {
-	queue, _ := newTestQueue(t, Config{MaxQueued: 2, MaxActive: 1, MaxActivePerUser: 1, MaxQueueWait: time.Minute})
+	queue, _ := newTestQueue(t, Config{MaxQueued: 2, MaxActive: 1, MaxQueueWait: time.Minute})
 	enqueue(t, queue, "first", "alice")
 	enqueue(t, queue, "second", "bob")
 	queue.Dispatch()

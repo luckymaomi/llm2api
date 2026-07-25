@@ -5,137 +5,30 @@ import (
 	"time"
 )
 
-var routingTestTime = time.Date(2026, time.July, 21, 8, 0, 0, 0, time.UTC)
-
 type fixedRandom int
 
 func (r fixedRandom) Intn(limit int) int { return int(r) % limit }
 
-func testCandidate(id CandidateID) Candidate {
-	return Candidate{
-		ID: id, ModelID: "chat", ResourcePoolID: ResourcePoolID("pool-default"),
-		ModelPublished: true, CredentialAuthorized: true, CredentialActive: true,
-		Capabilities: []Capability{"chat", "stream", "tools"}, AdminPriority: 100, Weight: 1,
-	}
-}
-
-func testRequirements() Requirements {
-	return Requirements{ModelID: "chat", ResourcePoolID: ResourcePoolID("pool-default"), Capabilities: []Capability{"chat", "tools"}, At: routingTestTime}
-}
-
-func TestRouterFiltersHardEligibilityBeforePriorityAndWeight(t *testing.T) {
-	router, err := NewRouter(fixedRandom(0))
+func TestSelectUsesOnlyEligibleCandidatesWithinExactRoute(t *testing.T) {
+	router, err := NewRouter(fixedRandom(1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocked := testCandidate("blocked")
-	blocked.AdminPriority = 1
-	blocked.CredentialActive = false
-	blocked.CooldownUntil = routingTestTime.Add(time.Minute)
-	blocked.Capabilities = []Capability{"chat"}
-	qualified := testCandidate("qualified")
-	qualified.AdminPriority = 500
-
-	decision, err := router.Select(testRequirements(), []Candidate{blocked, qualified})
+	now := time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC)
+	decision, err := router.Select(Requirements{
+		ModelID: "model-a", ResourcePoolID: "pool-a", Capabilities: []Capability{"chat"}, At: now,
+	}, []Candidate{
+		{ID: "first", ModelID: "model-a", ResourcePoolID: "pool-a", ModelPublished: true, CredentialAuthorized: true, CredentialActive: true, Capabilities: []Capability{"chat"}},
+		{ID: "second", ModelID: "model-a", ResourcePoolID: "pool-a", ModelPublished: true, CredentialAuthorized: true, CredentialActive: true, Capabilities: []Capability{"chat"}},
+		{ID: "other-pool", ModelID: "model-a", ResourcePoolID: "pool-b", ModelPublished: true, CredentialAuthorized: true, CredentialActive: true, Capabilities: []Capability{"chat"}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.SelectedCandidateID != qualified.ID || decision.Mode != SelectionPriorityWeighted {
-		t.Fatalf("decision = %#v", decision)
+	if decision.Mode != SelectionEqualRotate || decision.SelectedCandidateID != "second" {
+		t.Fatalf("selected %q in mode %q", decision.SelectedCandidateID, decision.Mode)
 	}
-	evaluation := evaluationFor(t, decision, blocked.ID)
-	for _, reason := range []ExclusionReason{ExcludeCredentialInactive, ExcludeCredentialCooling, ExcludeMissingCapability} {
-		if !hasReason(evaluation.Exclusions, reason) {
-			t.Fatalf("exclusions = %#v, want %q", evaluation.Exclusions, reason)
-		}
+	if len(decision.Eligible) != 2 {
+		t.Fatalf("eligible = %v", decision.Eligible)
 	}
-}
-
-func TestRouterUsesOnlyTheBestPriorityAndHonorsWeight(t *testing.T) {
-	router, err := NewRouter(fixedRandom(3))
-	if err != nil {
-		t.Fatal(err)
-	}
-	first := testCandidate("first")
-	first.AdminPriority, first.Weight = 10, 1
-	second := testCandidate("second")
-	second.AdminPriority, second.Weight = 10, 4
-	reserve := testCandidate("reserve")
-	reserve.AdminPriority, reserve.Weight = 20, 1000
-
-	decision, err := router.Select(testRequirements(), []Candidate{reserve, second, first})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decision.SelectedCandidateID != second.ID {
-		t.Fatalf("selected = %q, want weighted candidate %q", decision.SelectedCandidateID, second.ID)
-	}
-	if len(decision.Ranked) != 3 || decision.Ranked[0].CandidateID != first.ID || decision.Ranked[1].CandidateID != second.ID || decision.Ranked[2].CandidateID != reserve.ID {
-		t.Fatalf("ranked = %#v", decision.Ranked)
-	}
-}
-
-func TestRouterExcludesPreviousAttemptAndResourcePool(t *testing.T) {
-	router, err := NewRouter(fixedRandom(0))
-	if err != nil {
-		t.Fatal(err)
-	}
-	previous := testCandidate("previous")
-	priority := testCandidate("priority")
-	priority.ResourcePoolID = ResourcePoolID("pool-priority")
-	requirements := testRequirements()
-	requirements.ExcludedCandidates = []CandidateID{previous.ID}
-
-	decision, err := router.Select(requirements, []Candidate{previous, priority})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decision.SelectedCandidateID != "" || decision.Mode != SelectionNone {
-		t.Fatalf("decision = %#v", decision)
-	}
-	if !hasReason(evaluationFor(t, decision, previous.ID).Exclusions, ExcludeAttempt) || !hasReason(evaluationFor(t, decision, priority.ID).Exclusions, ExcludeResourcePoolMismatch) {
-		t.Fatalf("evaluations = %#v", decision.Evaluations)
-	}
-}
-
-func TestRouterReportsEarliestCandidateAvailableOnlyForPureCooldown(t *testing.T) {
-	router, err := NewRouter(fixedRandom(0))
-	if err != nil {
-		t.Fatal(err)
-	}
-	later := testCandidate("later")
-	later.CooldownUntil = routingTestTime.Add(2 * time.Minute)
-	sooner := testCandidate("sooner")
-	sooner.CooldownUntil = routingTestTime.Add(time.Minute)
-	permanent := testCandidate("permanent")
-	permanent.CredentialActive = false
-	permanent.CooldownUntil = routingTestTime.Add(30 * time.Second)
-
-	decision, err := router.Select(testRequirements(), []Candidate{later, permanent, sooner})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decision.SelectedCandidateID != "" || !decision.NextAvailableAt.Equal(sooner.CooldownUntil) {
-		t.Fatalf("decision = %#v", decision)
-	}
-}
-
-func evaluationFor(t *testing.T, decision Decision, candidateID CandidateID) Evaluation {
-	t.Helper()
-	for _, evaluation := range decision.Evaluations {
-		if evaluation.CandidateID == candidateID {
-			return evaluation
-		}
-	}
-	t.Fatalf("evaluation for %q was not recorded", candidateID)
-	return Evaluation{}
-}
-
-func hasReason(exclusions []Exclusion, reason ExclusionReason) bool {
-	for _, exclusion := range exclusions {
-		if exclusion.Reason == reason {
-			return true
-		}
-	}
-	return false
 }

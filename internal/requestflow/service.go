@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,10 +34,14 @@ type Service struct {
 	clock       Clock
 	config      Config
 	observer    Observer
-
-	circuitMu sync.Mutex
-	circuits  map[uuid.UUID]*resilience.Circuit
 }
+
+// healthPermit records that PostgreSQL admitted this credential's shared health
+// state. Completion is persisted with the attempt; it must not create a local
+// process-only circuit state.
+type healthPermit struct{}
+
+func (*healthPermit) Complete(resilience.PermitResult) {}
 
 func New(repository Repository, accounting Accounting, secrets SecretResolver, admitter Admitter, coordinator Coordinator, factory AdapterFactory, router *routing.Router, retry *resilience.RetryPolicy, clock Clock, config Config) (*Service, error) {
 	if repository == nil || accounting == nil || secrets == nil || admitter == nil || coordinator == nil || factory == nil || router == nil || retry == nil || clock == nil {
@@ -50,13 +53,13 @@ func New(repository Repository, accounting Accounting, secrets SecretResolver, a
 	if config.ExecutionHeartbeatInterval <= 0 {
 		return nil, errors.New("execution heartbeat interval must be positive")
 	}
-	if config.Circuit.FailureThreshold < 1 || config.Circuit.SuccessThreshold < 1 || config.Circuit.OpenDuration <= 0 || config.Circuit.HalfOpenMaxInFlight < 1 {
+	if config.Circuit.OpenDuration <= 0 {
 		return nil, errors.New("request workflow circuit configuration is invalid")
 	}
 	return &Service{
 		repository: repository, accounting: accounting, secrets: secrets, admitter: admitter, coordinator: coordinator,
 		factory: factory, router: router, retry: retry, clock: clock, config: config,
-		observer: noopObserver{}, circuits: make(map[uuid.UUID]*resilience.Circuit),
+		observer: noopObserver{},
 	}, nil
 }
 
@@ -96,7 +99,7 @@ func (s *Service) prepare(ctx context.Context, command ChatCommand) (workflowRun
 		return workflowRun{}, validationError
 	}
 	estimatedTokens := EstimateTokens(command.Request)
-	if estimatedTokens > model.Capabilities.ContextTokens {
+	if model.Capabilities.ContextTokens > 0 && estimatedTokens > model.Capabilities.ContextTokens {
 		return workflowRun{}, &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "context_length_exceeded", Message: "request exceeds the configured model context", Parameter: "messages", HTTPStatus: http.StatusBadRequest}
 	}
 	upstreamRequest := command.Request
@@ -110,7 +113,6 @@ func (s *Service) prepare(ctx context.Context, command ChatCommand) (workflowRun
 	if err != nil {
 		return workflowRun{}, admissionError(err)
 	}
-	run.capacityWaitDeadline = admissionPermit.CapacityWaitDeadline()
 	releaseAdmission := func() {
 		if admissionPermit != nil {
 			admissionPermit.Release()
@@ -120,7 +122,7 @@ func (s *Service) prepare(ctx context.Context, command ChatCommand) (workflowRun
 	accepted, err := s.accounting.AcceptRequest(ctx, AcceptCommand{
 		RequestID: requestID, UserID: command.Principal.UserID, GatewayKeyID: command.Principal.KeyID, ModelID: model.ID,
 		IdempotencyKey: command.IdempotencyKey,
-		RequestDigest:  command.RequestDigest, Stream: command.Request.Stream, ReservedTokens: estimatedTokens,
+		RequestDigest:  command.RequestDigest, Stream: command.Request.Stream,
 	})
 	if err != nil {
 		releaseAdmission()
@@ -130,74 +132,55 @@ func (s *Service) prepare(ctx context.Context, command ChatCommand) (workflowRun
 		releaseAdmission()
 		return workflowRun{}, &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "request_already_accepted", Message: "idempotent request already exists", HTTPStatus: http.StatusConflict}
 	}
-	if accepted.RequestID != requestID || accepted.ReservationID == uuid.Nil || accepted.SubscriptionID == uuid.Nil || accepted.ResourcePoolID == uuid.Nil || accepted.SubscriptionConcurrency < 1 {
+	if accepted.RequestID != requestID || accepted.ResourcePoolID == uuid.Nil {
 		releaseAdmission()
 		if accepted.RequestID != uuid.Nil {
-			_ = s.accounting.ReleaseAccepted(context.WithoutCancel(ctx), accepted.RequestID, "invalid_acceptance", "accepted request is missing its coordination capacity")
+			_ = s.accounting.FailAccepted(context.WithoutCancel(ctx), accepted.RequestID, "invalid_acceptance", "accepted request is missing its coordination capacity")
 		}
 		return workflowRun{}, &canonical.Error{Kind: canonical.ErrorInternalInvariant, Code: "invalid_acceptance", Message: "accepted request is missing required execution capacity"}
 	}
 	candidates, err := s.repository.ListResourcePoolCandidates(ctx, accepted.ResourcePoolID, model.ID)
 	if err != nil {
 		releaseAdmission()
-		_ = s.accounting.ReleaseAccepted(context.WithoutCancel(ctx), accepted.RequestID, "candidate_lookup_failed", "upstream candidates could not be read")
+		_ = s.accounting.FailAccepted(context.WithoutCancel(ctx), accepted.RequestID, "candidate_lookup_failed", "upstream candidates could not be read")
 		return workflowRun{}, &canonical.Error{Kind: canonical.ErrorStorageUnavailable, Code: "candidate_lookup_failed", Message: "upstream candidates could not be read", Cause: err}
 	}
 	run.accepted, run.candidates = accepted, candidates
 	if len(candidates) == 0 {
 		releaseAdmission()
-		_ = s.accounting.ReleaseAccepted(context.WithoutCancel(ctx), accepted.RequestID, "resource_pool_unavailable", "no eligible upstream credential is available")
+		_ = s.accounting.FailAccepted(context.WithoutCancel(ctx), accepted.RequestID, "resource_pool_unavailable", "no eligible upstream credential is available")
 		return workflowRun{}, &canonical.Error{Kind: canonical.ErrorProviderTemporary, Code: poolUnavailableCode(), Message: "no eligible upstream credential is available"}
-	}
-	candidate, selectionError := s.selectCandidate(run, nil)
-	if selectionError != nil {
-		releaseAdmission()
-		_ = s.accounting.ReleaseAccepted(context.WithoutCancel(ctx), accepted.RequestID, "resource_pool_unavailable", "no eligible upstream credential is available")
-		return workflowRun{}, selectionError
 	}
 	if command.AcceptedSink != nil {
 		if err := command.AcceptedSink(context.WithoutCancel(ctx), accepted.RequestID); err != nil {
 			releaseAdmission()
-			_ = s.accounting.ReleaseAccepted(context.WithoutCancel(ctx), accepted.RequestID, "acceptance_persistence_failed", "accepted request could not be linked to its caller")
+			_ = s.accounting.FailAccepted(context.WithoutCancel(ctx), accepted.RequestID, "acceptance_persistence_failed", "accepted request could not be linked to its caller")
 			return workflowRun{}, storageError("acceptance_persistence_failed", err)
 		}
 	}
 	claim, err := s.repository.ClaimExecution(ctx, accepted.RequestID, uuid.New())
 	if err != nil {
 		releaseAdmission()
-		_ = s.accounting.ReleaseAccepted(context.WithoutCancel(ctx), accepted.RequestID, "execution_claim_failed", "request execution could not be claimed")
+		_ = s.accounting.FailAccepted(context.WithoutCancel(ctx), accepted.RequestID, "execution_claim_failed", "request execution could not be claimed")
 		return workflowRun{}, storageError("execution_claim_failed", err)
 	}
 	run.claim = claim
 	run.context, run.stopHeartbeat = s.executionContext(ctx, claim)
-	lease, _, err := s.coordinator.Acquire(run.context, s.leaseRequest(claim, run, candidate))
-	if err != nil {
-		run.stopExecution()
-		releaseAdmission()
-		capacityError := admissionError(err)
-		_ = s.accounting.Release(context.WithoutCancel(ctx), claim, capacityError.Code, capacityError.Message)
-		return workflowRun{}, capacityError
-	}
 	run.admissionPermit = admissionPermit
-	run.initialLease = lease
-	run.initialCandidate = candidate
 	return run, nil
 }
 
 type workflowRun struct {
-	command              ChatCommand
-	model                Model
-	request              canonical.ChatRequest
-	accepted             Accepted
-	claim                execution.Claim
-	context              context.Context
-	stopHeartbeat        context.CancelFunc
-	admissionPermit      AdmissionPermit
-	candidates           []Candidate
-	estimatedTokens      int64
-	capacityWaitDeadline time.Time
-	initialLease         Lease
-	initialCandidate     Candidate
+	command         ChatCommand
+	model           Model
+	request         canonical.ChatRequest
+	accepted        Accepted
+	claim           execution.Claim
+	context         context.Context
+	stopHeartbeat   context.CancelFunc
+	admissionPermit AdmissionPermit
+	candidates      []Candidate
+	estimatedTokens int64
 }
 
 func (run *workflowRun) releaseAdmission() {
@@ -232,14 +215,14 @@ func validateCapabilities(model Model, request canonical.ChatRequest) *canonical
 	if request.ResponseFormat != nil && request.ResponseFormat.Type != canonical.ResponseFormatText && !model.Capabilities.StructuredOutput {
 		return unsupported("response_format")
 	}
-	if request.MaxOutputTokens != nil && *request.MaxOutputTokens > model.Capabilities.OutputTokens {
+	if request.MaxOutputTokens != nil && model.Capabilities.OutputTokens > 0 && *request.MaxOutputTokens > model.Capabilities.OutputTokens {
 		return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "max_output_tokens_exceeded", Message: "requested output exceeds the model limit", Parameter: "max_completion_tokens", HTTPStatus: http.StatusBadRequest}
 	}
 	return nil
 }
 
-func (s *Service) candidateDecision(run workflowRun, excluded []routing.CandidateID) (Candidate, *resilience.Permit, *canonical.Error) {
-	selectionExcluded := append([]routing.CandidateID(nil), excluded...)
+func (s *Service) candidateDecision(ctx context.Context, run workflowRun, excluded *[]routing.CandidateID) (Candidate, *healthPermit, *canonical.Error) {
+	selectionExcluded := append([]routing.CandidateID(nil), (*excluded)...)
 	var earliestRetryAt *time.Time
 	circuitUnavailable := false
 	for {
@@ -251,50 +234,51 @@ func (s *Service) candidateDecision(run workflowRun, excluded []routing.Candidat
 			earliestRetryAt = earlierRetryAt(earliestRetryAt, retryAfterAt(selectionError.RetryAfter, s.clock.Now().UTC()))
 			return Candidate{}, nil, circuitUnavailableError(earliestRetryAt)
 		}
-		permit, circuitError := s.acquireCircuit(candidate.ID)
-		if circuitError == nil {
-			return candidate, permit, nil
+		healthGeneration, healthErr := s.repository.AcquireCredentialHealthPermit(ctx, candidate.ID)
+		if healthErr != nil {
+			circuitUnavailable = true
+			candidateID := routing.CandidateID(candidate.ID.String())
+			selectionExcluded = append(selectionExcluded, candidateID)
+			*excluded = append(*excluded, candidateID)
+			continue
 		}
-		if circuitError.Code != "upstream_circuit_open" {
-			return Candidate{}, nil, circuitError
-		}
-		circuitUnavailable = true
-		earliestRetryAt = earlierRetryAt(earliestRetryAt, retryAfterAt(circuitError.RetryAfter, s.clock.Now().UTC()))
-		selectionExcluded = append(selectionExcluded, routing.CandidateID(candidate.ID.String()))
+		candidate.HealthGeneration = healthGeneration
+		return candidate, &healthPermit{}, nil
 	}
 }
 
-func (s *Service) attemptDecision(ctx context.Context, run *workflowRun, excluded []routing.CandidateID, attemptNumber int) (Candidate, *resilience.Permit, Lease, *canonical.Error) {
-	if attemptNumber != 1 {
-		candidate, permit, selectionError := s.candidateDecision(*run, excluded)
-		return candidate, permit, nil, selectionError
+func (s *Service) attemptDecision(ctx context.Context, run *workflowRun, excluded *[]routing.CandidateID, _ int) (Candidate, *healthPermit, Lease, *canonical.Error) {
+	var earliestCapacityRetryAt *time.Time
+	capacityUnavailable := false
+	for {
+		candidate, permit, selectionError := s.candidateDecision(ctx, *run, excluded)
+		if selectionError != nil {
+			if capacityUnavailable {
+				return Candidate{}, nil, nil, admissionError(&CapacityError{RetryAt: valueOrNow(earliestCapacityRetryAt, s.clock.Now().UTC())})
+			}
+			return Candidate{}, nil, nil, selectionError
+		}
+		lease, _, err := s.coordinator.Acquire(ctx, s.leaseRequest(run.claim, *run, candidate))
+		if err == nil {
+			return candidate, permit, lease, nil
+		}
+		permit.Complete(resilience.PermitReleased)
+		var capacityError *CapacityError
+		if !errors.As(err, &capacityError) {
+			return Candidate{}, nil, nil, admissionError(err)
+		}
+		capacityUnavailable = true
+		retryAt := capacityError.RetryAt.UTC()
+		earliestCapacityRetryAt = earlierRetryAt(earliestCapacityRetryAt, &retryAt)
+		*excluded = append(*excluded, routing.CandidateID(candidate.ID.String()))
 	}
+}
 
-	candidate := run.initialCandidate
-	lease := run.initialLease
-	run.initialLease = nil
-	permit, circuitError := s.acquireCircuit(candidate.ID)
-	if circuitError == nil {
-		return candidate, permit, lease, nil
+func valueOrNow(value *time.Time, now time.Time) time.Time {
+	if value == nil || value.IsZero() {
+		return now
 	}
-	if lease != nil {
-		_ = lease.Release(context.WithoutCancel(ctx))
-	}
-	if circuitError.Code != "upstream_circuit_open" {
-		return Candidate{}, nil, nil, circuitError
-	}
-
-	selectionExcluded := append([]routing.CandidateID(nil), excluded...)
-	selectionExcluded = append(selectionExcluded, routing.CandidateID(candidate.ID.String()))
-	nextCandidate, nextPermit, selectionError := s.candidateDecision(*run, selectionExcluded)
-	if selectionError == nil {
-		return nextCandidate, nextPermit, nil, nil
-	}
-	retryAt := earlierRetryAt(
-		retryAfterAt(circuitError.RetryAfter, s.clock.Now().UTC()),
-		retryAfterAt(selectionError.RetryAfter, s.clock.Now().UTC()),
-	)
-	return Candidate{}, nil, nil, circuitUnavailableError(retryAt)
+	return value.UTC()
 }
 
 func circuitUnavailableError(retryAt *time.Time) *canonical.Error {
@@ -330,7 +314,6 @@ func (s *Service) selectCandidate(run workflowRun, excluded []routing.CandidateI
 			ID: id, ModelID: routing.ModelID(run.model.ID.String()), ResourcePoolID: routing.ResourcePoolID(run.accepted.ResourcePoolID.String()),
 			ModelPublished: true, CredentialAuthorized: true, CredentialActive: true,
 			Capabilities: required, CooldownUntil: timeOrZero(candidate.CooldownUntil),
-			AdminPriority: candidate.Priority, Weight: candidate.Weight,
 		})
 	}
 	decision, err := s.router.Select(routing.Requirements{
@@ -352,33 +335,12 @@ func (s *Service) selectCandidate(run workflowRun, excluded []routing.CandidateI
 	return candidate, nil
 }
 
-func (s *Service) acquireCircuit(candidateID uuid.UUID) (*resilience.Permit, *canonical.Error) {
-	circuit, err := s.circuit(candidateID)
-	if err != nil {
-		return nil, &canonical.Error{Kind: canonical.ErrorInternalInvariant, Code: "circuit_failed", Message: "upstream circuit could not be initialized", Cause: err}
-	}
-	acquired := circuit.Acquire()
-	if !acquired.Allowed {
-		providerError := &canonical.Error{Kind: canonical.ErrorProviderTemporary, Code: "upstream_circuit_open", Message: "upstream credential is cooling down"}
-		if !acquired.RetryAt.IsZero() {
-			retryAt := acquired.RetryAt.UTC()
-			providerError.RetryAfter = &canonical.RetryAfter{At: &retryAt}
-		}
-		return nil, providerError
-	}
-	return acquired.Permit, nil
-}
-
 func (s *Service) leaseRequest(claim execution.Claim, run workflowRun, candidate Candidate) LeaseRequest {
-	return LeaseRequest{RequestID: claim.RequestID, ExecutionID: claim.ExecutionID, UserID: run.command.Principal.UserID, GatewayKeyID: run.command.Principal.KeyID,
+	return LeaseRequest{RequestID: claim.RequestID, ExecutionID: claim.ExecutionID,
 		ModelID: run.model.ID, ProviderID: run.model.ProviderID, CredentialID: candidate.ID,
-		SubscriptionID: run.accepted.SubscriptionID, ResourcePoolID: run.accepted.ResourcePoolID,
+		ResourcePoolID:  run.accepted.ResourcePoolID,
 		EstimatedTokens: run.estimatedTokens,
-		RPMLimit:        candidate.RPMLimit, TPMLimit: candidate.TPMLimit, Concurrency: candidate.ConcurrencyLimit,
-		SubscriptionConcurrency: run.accepted.SubscriptionConcurrency,
-		SubscriptionRPMLimit:    run.accepted.SubscriptionRPMLimit,
-		SubscriptionTPMLimit:    run.accepted.SubscriptionTPMLimit,
-		CapacityWaitDeadline:    run.capacityWaitDeadline}
+		RPMLimit:        candidate.RPMLimit, TPMLimit: candidate.TPMLimit, Concurrency: candidate.ConcurrencyLimit}
 }
 
 func admissionError(err error) *canonical.Error {
@@ -397,20 +359,6 @@ func admissionError(err error) *canonical.Error {
 		return &canonical.Error{Kind: canonical.ErrorStorageUnavailable, Code: "admission_unavailable", Message: "request coordination is temporarily unavailable", HTTPStatus: http.StatusServiceUnavailable, Cause: err}
 	}
 	return &canonical.Error{Kind: canonical.ErrorInternalInvariant, Code: "admission_failed", Message: "request admission failed", Cause: err}
-}
-
-func (s *Service) circuit(candidateID uuid.UUID) (*resilience.Circuit, error) {
-	s.circuitMu.Lock()
-	defer s.circuitMu.Unlock()
-	if circuit := s.circuits[candidateID]; circuit != nil {
-		return circuit, nil
-	}
-	circuit, err := resilience.NewCircuit(s.config.Circuit, s.clock)
-	if err != nil {
-		return nil, err
-	}
-	s.circuits[candidateID] = circuit
-	return circuit, nil
 }
 
 func requiredCapabilities(request canonical.ChatRequest) []routing.Capability {
@@ -449,12 +397,8 @@ func workflowError(err error) *canonical.Error {
 		return &canonical.Error{Kind: canonical.ErrorPermission, Code: "model_not_authorized", Message: "model is not authorized for this key", Parameter: "model", HTTPStatus: http.StatusForbidden}
 	case errors.Is(err, ErrIdempotencyConflict):
 		return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "idempotency_conflict", Message: "idempotency key was reused with a different request", HTTPStatus: http.StatusConflict}
-	case errors.Is(err, ErrQuotaExhausted):
-		return &canonical.Error{Kind: canonical.ErrorQuota, Code: "quota_exhausted", Message: "no active subscription has enough remaining tokens", HTTPStatus: http.StatusPaymentRequired}
-	case errors.Is(err, ErrCostConfigurationMissing):
-		return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "cost_configuration_missing", Message: "the model has no effective cost configuration", Parameter: "model", HTTPStatus: http.StatusConflict}
 	case errors.Is(err, ErrInvalidAccounting):
-		return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "invalid_accounting_request", Message: "request cannot be reserved", HTTPStatus: http.StatusBadRequest}
+		return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "invalid_request_accounting", Message: "request usage could not be recorded", HTTPStatus: http.StatusBadRequest}
 	default:
 		return &canonical.Error{Kind: canonical.ErrorStorageUnavailable, Code: "request_state_unavailable", Message: "request state could not be persisted", Cause: err}
 	}

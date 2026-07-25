@@ -1,7 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { FlaskConical, RefreshCw } from 'lucide-react'
 import { useRef, useState } from 'react'
 
-import { catalogApi, type Credential, type CredentialProbeResult } from '@/api'
+import {
+  catalogApi,
+  type Credential,
+  type CredentialProbeResult,
+  type ModelDiscoveryResult,
+} from '@/api'
 import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DialogFrame } from '@/components/ui/dialog'
@@ -11,6 +17,8 @@ import { formatNumber } from '@/lib/format'
 
 import { probeErrorLabel } from './credential-probe-copy'
 
+type ProbeMode = 'models' | 'generation'
+
 export function CredentialProbeDialog({
   credential,
   onOpenChange,
@@ -19,49 +27,67 @@ export function CredentialProbeDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const queryClient = useQueryClient()
+  const [mode, setMode] = useState<ProbeMode>('models')
+  const [currentCredential, setCurrentCredential] = useState(credential)
   const [modelId, setModelId] = useState(credential.modelBindings[0]?.modelId ?? '')
-  const [result, setResult] = useState<CredentialProbeResult>()
-  const [stopped, setStopped] = useState(false)
+  const [discoveryResult, setDiscoveryResult] = useState<ModelDiscoveryResult>()
+  const [generationResult, setGenerationResult] = useState<CredentialProbeResult>()
   const controller = useRef<AbortController | undefined>(undefined)
-  const probe = useMutation({
+
+  const discovery = useMutation({
     mutationFn: () => {
       const nextController = new AbortController()
       controller.current = nextController
-      return catalogApi.probeCredential(credential.id, modelId, nextController.signal)
+      return catalogApi.probeCredential(
+        currentCredential.id,
+        currentCredential.updatedAt,
+        crypto.randomUUID(),
+        nextController.signal,
+      )
     },
-    onSuccess(value) {
-      setResult(value)
-      return queryClient.invalidateQueries({ queryKey: ['credentials'] })
+    async onSuccess(value) {
+      setCurrentCredential(value.credential)
+      setDiscoveryResult(value)
+      setModelId(value.credential.modelBindings[0]?.modelId ?? '')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['credentials'] }),
+        queryClient.invalidateQueries({ queryKey: ['resource-pools'] }),
+      ])
     },
     onSettled() {
       controller.current = undefined
     },
   })
 
-  const startProbe = () => {
-    setStopped(false)
-    setResult(undefined)
-    probe.reset()
-    probe.mutate()
-  }
+  const generation = useMutation({
+    mutationFn: () => {
+      const nextController = new AbortController()
+      controller.current = nextController
+      return catalogApi.deepTestCredential(currentCredential.id, modelId, nextController.signal)
+    },
+    async onSuccess(value) {
+      setCurrentCredential(value.credential)
+      setGenerationResult(value)
+      await queryClient.invalidateQueries({ queryKey: ['credentials'] })
+    },
+    onSettled() {
+      controller.current = undefined
+    },
+  })
 
-  const stopWaiting = () => {
-    setStopped(true)
-    controller.current?.abort()
-  }
+  const pending = discovery.isPending || generation.isPending
+  const stopWaiting = () => controller.current?.abort()
 
   return (
     <DialogFrame
       open
-      onOpenChange={(open) => {
-        if (!probe.isPending || open) onOpenChange(open)
-      }}
-      title="测试上游 API Key"
+      onOpenChange={(open) => (!pending || open) && onOpenChange(open)}
+      title="检查上游 API Key"
       description={`${credential.name} · ${credential.resourcePoolName}`}
-      dismissible={!probe.isPending}
-      width="sm"
+      dismissible={!pending}
+      width="md"
       footer={
-        probe.isPending ? (
+        pending ? (
           <Button type="button" variant="secondary" onClick={stopWaiting}>
             停止等待
           </Button>
@@ -70,63 +96,191 @@ export function CredentialProbeDialog({
             <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
               关闭
             </Button>
-            <Button type="button" disabled={!modelId} onClick={startProbe}>
-              {result ? '重新测试' : '开始测试'}
-            </Button>
+            {mode === 'models' ? (
+              <Button
+                type="button"
+                icon={<RefreshCw size={16} />}
+                onClick={() => {
+                  setDiscoveryResult(undefined)
+                  discovery.reset()
+                  discovery.mutate()
+                }}
+              >
+                {discoveryResult ? '重新探测' : '探测模型'}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                icon={<FlaskConical size={16} />}
+                disabled={!modelId}
+                onClick={() => {
+                  setGenerationResult(undefined)
+                  generation.reset()
+                  generation.mutate()
+                }}
+              >
+                {generationResult ? '重新测试' : '开始深度测试'}
+              </Button>
+            )}
           </>
         )
       }
     >
-      <div className="form-stack">
-        <Field label="选择测试模型" htmlFor="credential-probe-model">
-          <NativeSelect
-            id="credential-probe-model"
-            autoFocus
-            value={modelId}
-            disabled={probe.isPending}
-            onChange={(event) => {
-              setModelId(event.target.value)
-              setResult(undefined)
-            }}
+      <div className="probe-dialog">
+        <div className="probe-mode-switch" role="tablist" aria-label="检查方式">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'models'}
+            disabled={pending}
+            onClick={() => setMode('models')}
           >
-            {credential.modelBindings.map((binding) => (
-              <option key={binding.modelId} value={binding.modelId}>
-                {binding.modelName}
-              </option>
-            ))}
-          </NativeSelect>
-        </Field>
-        <p className="probe-note">会向上游发送一条最小消息并等待完整响应，可能消耗少量 Token。</p>
-        {probe.isPending ? (
-          <div className="probe-pending" aria-live="polite">
-            <div>
-              <strong>正在连接上游</strong>
-              <span>请等待模型返回，超时前不会提前判定失败</span>
-            </div>
-            <StatusBadge status="running" />
+            模型探测
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'generation'}
+            disabled={pending}
+            onClick={() => setMode('generation')}
+          >
+            深度测试
+          </button>
+        </div>
+
+        <dl className="probe-key-facts">
+          <div>
+            <dt>上游平台</dt>
+            <dd>{currentCredential.providerName}</dd>
           </div>
-        ) : null}
-        {result ? <ProbeResult result={result} /> : null}
-        {stopped ? (
-          <div className="probe-result" aria-live="polite">
-            <div className="probe-result__header">
-              <strong>已停止等待</strong>
-              <StatusBadge status="uncertain" />
-            </div>
-            <p>请求可能已经到达上游并消耗 Token，系统不会自动重试。</p>
+          <div>
+            <dt>资源池</dt>
+            <dd>{currentCredential.resourcePoolName}</dd>
           </div>
-        ) : null}
-        {!stopped ? <FormProblem error={probe.error} /> : null}
+          <div>
+            <dt>已发现模型</dt>
+            <dd>{formatNumber(currentCredential.modelBindings.length)}</dd>
+          </div>
+        </dl>
+
+        <div className="probe-workspace">
+          {mode === 'models' ? (
+            <ModelDiscoveryPanel pending={discovery.isPending} result={discoveryResult} />
+          ) : (
+            <GenerationPanel
+              credential={currentCredential}
+              modelId={modelId}
+              pending={generation.isPending}
+              result={generationResult}
+              onModelChange={(value) => {
+                setModelId(value)
+                setGenerationResult(undefined)
+              }}
+            />
+          )}
+        </div>
+
+        <FormProblem error={mode === 'models' ? discovery.error : generation.error} />
       </div>
     </DialogFrame>
   )
 }
 
-function ProbeResult({ result }: { result: CredentialProbeResult }) {
+function ModelDiscoveryPanel({
+  pending,
+  result,
+}: {
+  pending: boolean
+  result: ModelDiscoveryResult | undefined
+}) {
+  if (pending) return <ProbePending label="正在读取上游模型列表" />
+  if (!result) {
+    return <p className="probe-empty">尚未开始本次模型探测</p>
+  }
   return (
     <section className="probe-result" data-status={result.status} aria-live="polite">
       <div className="probe-result__header">
-        <strong>{probeResultTitle(result.status)}</strong>
+        <strong>{result.status === 'succeeded' ? '模型探测成功' : '模型探测失败'}</strong>
+        <StatusBadge status={result.status} />
+      </div>
+      <dl className="probe-result__facts">
+        <div>
+          <dt>模型数量</dt>
+          <dd>{formatNumber(result.models.length)}</dd>
+        </div>
+        <div>
+          <dt>耗时</dt>
+          <dd>{formatNumber(result.latencyMillis)} ms</dd>
+        </div>
+      </dl>
+      {result.errorKind ? (
+        <div className="probe-result__error">
+          <strong>{probeErrorLabel(result.errorKind)}</strong>
+          <span>{result.retryable ? '可以重新探测' : '请检查 Key 或上游设置'}</span>
+        </div>
+      ) : (
+        <div className="probe-model-list" aria-label="探测到的模型">
+          {result.models.map((model) => (
+            <code key={model}>{model}</code>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function GenerationPanel({
+  credential,
+  modelId,
+  pending,
+  result,
+  onModelChange,
+}: {
+  credential: Credential
+  modelId: string
+  pending: boolean
+  result: CredentialProbeResult | undefined
+  onModelChange: (value: string) => void
+}) {
+  return (
+    <div className="probe-generation">
+      <Field label="模型" htmlFor="credential-deep-test-model">
+        <NativeSelect
+          id="credential-deep-test-model"
+          value={modelId}
+          disabled={pending || credential.modelBindings.length === 0}
+          onChange={(event) => onModelChange(event.target.value)}
+        >
+          {credential.modelBindings.length === 0 ? <option value="">暂无可测试模型</option> : null}
+          {credential.modelBindings.map((binding) => (
+            <option key={binding.modelId} value={binding.modelId}>
+              {binding.modelName}
+            </option>
+          ))}
+        </NativeSelect>
+      </Field>
+      <p className="probe-note">深度测试会发送最小生成请求，可能消耗少量 Token。</p>
+      {pending ? <ProbePending label="正在等待模型响应" /> : null}
+      {result ? <GenerationResult result={result} /> : null}
+      {!pending && !result ? <p className="probe-empty">尚未开始本次深度测试</p> : null}
+    </div>
+  )
+}
+
+function ProbePending({ label }: { label: string }) {
+  return (
+    <div className="probe-pending" aria-live="polite">
+      <strong>{label}</strong>
+      <StatusBadge status="running" />
+    </div>
+  )
+}
+
+function GenerationResult({ result }: { result: CredentialProbeResult }) {
+  return (
+    <section className="probe-result" data-status={result.status} aria-live="polite">
+      <div className="probe-result__header">
+        <strong>{result.status === 'succeeded' ? '深度测试成功' : '深度测试失败'}</strong>
         <StatusBadge status={result.status} />
       </div>
       <dl className="probe-result__facts">
@@ -150,23 +304,15 @@ function ProbeResult({ result }: { result: CredentialProbeResult }) {
       {result.errorKind ? (
         <div className="probe-result__error">
           <strong>{probeErrorLabel(result.errorKind)}</strong>
-          <span>{result.retryable ? '可以直接重新测试' : '请先检查 Key、模型或网络设置'}</span>
+          <span>{result.retryable ? '可以重新测试' : '请检查 Key、模型或网络设置'}</span>
         </div>
-      ) : (
-        <p className="probe-result__message">已收到并解析上游模型响应。</p>
-      )}
+      ) : null}
       <div className="probe-result__request">
         <span>Request ID</span>
         <code>{result.requestId}</code>
       </div>
     </section>
   )
-}
-
-function probeResultTitle(status: CredentialProbeResult['status']): string {
-  if (status === 'succeeded') return '连接成功'
-  if (status === 'uncertain') return '结果待确认'
-  return '连接失败'
 }
 
 function formatTokenCount(value: number | undefined): string {

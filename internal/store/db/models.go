@@ -58,11 +58,54 @@ func (ns NullAttemptStatus) Value() (driver.Value, error) {
 	return string(ns.AttemptStatus), nil
 }
 
+type CredentialHealthStatus string
+
+const (
+	CredentialHealthStatusHealthy        CredentialHealthStatus = "healthy"
+	CredentialHealthStatusCooling        CredentialHealthStatus = "cooling"
+	CredentialHealthStatusProbing        CredentialHealthStatus = "probing"
+	CredentialHealthStatusRepairRequired CredentialHealthStatus = "repair_required"
+)
+
+func (e *CredentialHealthStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CredentialHealthStatus(s)
+	case string:
+		*e = CredentialHealthStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CredentialHealthStatus: %T", src)
+	}
+	return nil
+}
+
+type NullCredentialHealthStatus struct {
+	CredentialHealthStatus CredentialHealthStatus `json:"credential_health_status"`
+	Valid                  bool                   `json:"valid"` // Valid is true if CredentialHealthStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCredentialHealthStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.CredentialHealthStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CredentialHealthStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCredentialHealthStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CredentialHealthStatus), nil
+}
+
 type CredentialStatus string
 
 const (
 	CredentialStatusActive   CredentialStatus = "active"
-	CredentialStatusCooling  CredentialStatus = "cooling"
 	CredentialStatusDisabled CredentialStatus = "disabled"
 	CredentialStatusRetired  CredentialStatus = "retired"
 )
@@ -100,95 +143,6 @@ func (ns NullCredentialStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.CredentialStatus), nil
-}
-
-type LedgerEventKind string
-
-const (
-	LedgerEventKindGrant        LedgerEventKind = "grant"
-	LedgerEventKindReservation  LedgerEventKind = "reservation"
-	LedgerEventKindSettlement   LedgerEventKind = "settlement"
-	LedgerEventKindRelease      LedgerEventKind = "release"
-	LedgerEventKindCompensation LedgerEventKind = "compensation"
-	LedgerEventKindAdjustment   LedgerEventKind = "adjustment"
-	LedgerEventKindExpiration   LedgerEventKind = "expiration"
-)
-
-func (e *LedgerEventKind) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = LedgerEventKind(s)
-	case string:
-		*e = LedgerEventKind(s)
-	default:
-		return fmt.Errorf("unsupported scan type for LedgerEventKind: %T", src)
-	}
-	return nil
-}
-
-type NullLedgerEventKind struct {
-	LedgerEventKind LedgerEventKind `json:"ledger_event_kind"`
-	Valid           bool            `json:"valid"` // Valid is true if LedgerEventKind is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullLedgerEventKind) Scan(value interface{}) error {
-	if value == nil {
-		ns.LedgerEventKind, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.LedgerEventKind.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullLedgerEventKind) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.LedgerEventKind), nil
-}
-
-type PlanKind string
-
-const (
-	PlanKindToken  PlanKind = "token"
-	PlanKindCoding PlanKind = "coding"
-)
-
-func (e *PlanKind) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = PlanKind(s)
-	case string:
-		*e = PlanKind(s)
-	default:
-		return fmt.Errorf("unsupported scan type for PlanKind: %T", src)
-	}
-	return nil
-}
-
-type NullPlanKind struct {
-	PlanKind PlanKind `json:"plan_kind"`
-	Valid    bool     `json:"valid"` // Valid is true if PlanKind is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullPlanKind) Scan(value interface{}) error {
-	if value == nil {
-		ns.PlanKind, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.PlanKind.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullPlanKind) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.PlanKind), nil
 }
 
 type RequestStatus string
@@ -236,50 +190,6 @@ func (ns NullRequestStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RequestStatus), nil
-}
-
-type ReservationState string
-
-const (
-	ReservationStateReserved    ReservationState = "reserved"
-	ReservationStateSettled     ReservationState = "settled"
-	ReservationStateReleased    ReservationState = "released"
-	ReservationStateCompensated ReservationState = "compensated"
-)
-
-func (e *ReservationState) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = ReservationState(s)
-	case string:
-		*e = ReservationState(s)
-	default:
-		return fmt.Errorf("unsupported scan type for ReservationState: %T", src)
-	}
-	return nil
-}
-
-type NullReservationState struct {
-	ReservationState ReservationState `json:"reservation_state"`
-	Valid            bool             `json:"valid"` // Valid is true if ReservationState is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullReservationState) Scan(value interface{}) error {
-	if value == nil {
-		ns.ReservationState, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.ReservationState.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullReservationState) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.ReservationState), nil
 }
 
 type ResourcePoolStatus string
@@ -601,8 +511,6 @@ type AuditEvent struct {
 type CredentialModel struct {
 	CredentialID uuid.UUID `json:"credential_id"`
 	ModelID      uuid.UUID `json:"model_id"`
-	Priority     int32     `json:"priority"`
-	Weight       int32     `json:"weight"`
 }
 
 type CredentialMutation struct {
@@ -624,15 +532,16 @@ type GatewayKey struct {
 	Prefix       string             `json:"prefix"`
 	SecretDigest []byte             `json:"secret_digest"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
 	LastUsedAt   pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type GatewayKeyModel struct {
-	GatewayKeyID uuid.UUID          `json:"gateway_key_id"`
-	ModelID      uuid.UUID          `json:"model_id"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	GatewayKeyID   uuid.UUID          `json:"gateway_key_id"`
+	ModelID        uuid.UUID          `json:"model_id"`
+	ResourcePoolID uuid.UUID          `json:"resource_pool_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type GatewayKeyMutation struct {
@@ -644,38 +553,6 @@ type GatewayKeyMutation struct {
 	GatewayKeyID       *uuid.UUID         `json:"gateway_key_id"`
 	Result             []byte             `json:"result"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-}
-
-type LedgerEvent struct {
-	ID             uuid.UUID          `json:"id"`
-	UserID         uuid.UUID          `json:"user_id"`
-	SubscriptionID uuid.UUID          `json:"subscription_id"`
-	RequestID      *uuid.UUID         `json:"request_id"`
-	ReservationID  *uuid.UUID         `json:"reservation_id"`
-	Kind           LedgerEventKind    `json:"kind"`
-	TokenDelta     int64              `json:"token_delta"`
-	ReservedTokens int64              `json:"reserved_tokens"`
-	InputTokens    int64              `json:"input_tokens"`
-	OutputTokens   int64              `json:"output_tokens"`
-	UsageSource    UsageSource        `json:"usage_source"`
-	SourceEventID  *uuid.UUID         `json:"source_event_id"`
-	Note           *string            `json:"note"`
-	CreatedBy      *uuid.UUID         `json:"created_by"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
-type LedgerReservation struct {
-	ID              uuid.UUID          `json:"id"`
-	SubscriptionID  uuid.UUID          `json:"subscription_id"`
-	RequestID       uuid.UUID          `json:"request_id"`
-	State           ReservationState   `json:"state"`
-	ReservedTokens  int64              `json:"reserved_tokens"`
-	ChargedTokens   int64              `json:"charged_tokens"`
-	UsageSource     UsageSource        `json:"usage_source"`
-	ReserveEventID  uuid.UUID          `json:"reserve_event_id"`
-	TerminalEventID *uuid.UUID         `json:"terminal_event_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MemberMutation struct {
@@ -702,27 +579,6 @@ type Model struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
-type ModelPriceMutation struct {
-	ID                 uuid.UUID          `json:"id"`
-	ActorUserID        uuid.UUID          `json:"actor_user_id"`
-	IdempotencyKey     uuid.UUID          `json:"idempotency_key"`
-	RequestFingerprint []byte             `json:"request_fingerprint"`
-	RequestID          string             `json:"request_id"`
-	PriceVersionID     *uuid.UUID         `json:"price_version_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-}
-
-type ModelPriceVersion struct {
-	ID                        uuid.UUID          `json:"id"`
-	ModelID                   uuid.UUID          `json:"model_id"`
-	Currency                  string             `json:"currency"`
-	InputRateNanosPerMillion  int64              `json:"input_rate_nanos_per_million"`
-	OutputRateNanosPerMillion int64              `json:"output_rate_nanos_per_million"`
-	EffectiveAt               pgtype.Timestamptz `json:"effective_at"`
-	CreatedBy                 uuid.UUID          `json:"created_by"`
-	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
-}
-
 type Provider struct {
 	ID         uuid.UUID          `json:"id"`
 	CatalogID  string             `json:"catalog_id"`
@@ -737,58 +593,53 @@ type Provider struct {
 }
 
 type ProviderCredential struct {
-	ID                  uuid.UUID          `json:"id"`
-	ResourcePoolID      uuid.UUID          `json:"resource_pool_id"`
-	Name                string             `json:"name"`
-	EncryptedSecret     []byte             `json:"encrypted_secret"`
-	Status              CredentialStatus   `json:"status"`
-	RpmLimit            *int32             `json:"rpm_limit"`
-	TpmLimit            *int64             `json:"tpm_limit"`
-	ConcurrencyLimit    *int32             `json:"concurrency_limit"`
-	CooldownUntil       pgtype.Timestamptz `json:"cooldown_until"`
-	ConsecutiveFailures int32              `json:"consecutive_failures"`
-	LastSuccessAt       pgtype.Timestamptz `json:"last_success_at"`
-	LastErrorKind       *string            `json:"last_error_kind"`
-	LastProbeAt         pgtype.Timestamptz `json:"last_probe_at"`
-	LastProbeLatencyMs  *int64             `json:"last_probe_latency_ms"`
-	LastProbeKind       *string            `json:"last_probe_kind"`
-	LastProbeStatus     *string            `json:"last_probe_status"`
-	LastProbeErrorKind  *string            `json:"last_probe_error_kind"`
-	RetiredAt           pgtype.Timestamptz `json:"retired_at"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                  uuid.UUID              `json:"id"`
+	ResourcePoolID      uuid.UUID              `json:"resource_pool_id"`
+	Name                string                 `json:"name"`
+	EncryptedSecret     []byte                 `json:"encrypted_secret"`
+	Status              CredentialStatus       `json:"status"`
+	HealthStatus        CredentialHealthStatus `json:"health_status"`
+	HealthGeneration    int64                  `json:"health_generation"`
+	RpmLimit            *int32                 `json:"rpm_limit"`
+	TpmLimit            *int64                 `json:"tpm_limit"`
+	ConcurrencyLimit    *int32                 `json:"concurrency_limit"`
+	CooldownUntil       pgtype.Timestamptz     `json:"cooldown_until"`
+	ConsecutiveFailures int32                  `json:"consecutive_failures"`
+	LastSuccessAt       pgtype.Timestamptz     `json:"last_success_at"`
+	LastErrorKind       *string                `json:"last_error_kind"`
+	LastProbeAt         pgtype.Timestamptz     `json:"last_probe_at"`
+	LastProbeLatencyMs  *int64                 `json:"last_probe_latency_ms"`
+	LastProbeKind       *string                `json:"last_probe_kind"`
+	LastProbeStatus     *string                `json:"last_probe_status"`
+	LastProbeErrorKind  *string                `json:"last_probe_error_kind"`
+	RetiredAt           pgtype.Timestamptz     `json:"retired_at"`
+	CreatedAt           pgtype.Timestamptz     `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz     `json:"updated_at"`
 }
 
 type Request struct {
-	ID                        uuid.UUID          `json:"id"`
-	IdempotencyKey            *string            `json:"idempotency_key"`
-	RequestDigest             []byte             `json:"request_digest"`
-	UserID                    uuid.UUID          `json:"user_id"`
-	GatewayKeyID              uuid.UUID          `json:"gateway_key_id"`
-	ModelID                   uuid.UUID          `json:"model_id"`
-	SubscriptionID            uuid.UUID          `json:"subscription_id"`
-	ResourcePoolID            uuid.UUID          `json:"resource_pool_id"`
-	PriceVersionID            uuid.UUID          `json:"price_version_id"`
-	CostCurrency              string             `json:"cost_currency"`
-	InputRateNanosPerMillion  int64              `json:"input_rate_nanos_per_million"`
-	OutputRateNanosPerMillion int64              `json:"output_rate_nanos_per_million"`
-	InputCostNanos            *int64             `json:"input_cost_nanos"`
-	OutputCostNanos           *int64             `json:"output_cost_nanos"`
-	TotalCostNanos            *int64             `json:"total_cost_nanos"`
-	Status                    RequestStatus      `json:"status"`
-	Stream                    bool               `json:"stream"`
-	ExecutionID               *uuid.UUID         `json:"execution_id"`
-	ExecutionGeneration       int64              `json:"execution_generation"`
-	ExecutionClaimedAt        pgtype.Timestamptz `json:"execution_claimed_at"`
-	ExecutionHeartbeatAt      pgtype.Timestamptz `json:"execution_heartbeat_at"`
-	InputTokens               *int64             `json:"input_tokens"`
-	OutputTokens              *int64             `json:"output_tokens"`
-	UsageSource               UsageSource        `json:"usage_source"`
-	ErrorKind                 *string            `json:"error_kind"`
-	ErrorDetail               *string            `json:"error_detail"`
-	AcceptedAt                pgtype.Timestamptz `json:"accepted_at"`
-	CompletedAt               pgtype.Timestamptz `json:"completed_at"`
-	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+	ID                   uuid.UUID          `json:"id"`
+	IdempotencyKey       *string            `json:"idempotency_key"`
+	RequestDigest        []byte             `json:"request_digest"`
+	UserID               uuid.UUID          `json:"user_id"`
+	GatewayKeyID         uuid.UUID          `json:"gateway_key_id"`
+	ModelID              uuid.UUID          `json:"model_id"`
+	SubscriptionID       *uuid.UUID         `json:"subscription_id"`
+	ResourcePoolID       uuid.UUID          `json:"resource_pool_id"`
+	Status               RequestStatus      `json:"status"`
+	Stream               bool               `json:"stream"`
+	ExecutionID          *uuid.UUID         `json:"execution_id"`
+	ExecutionGeneration  int64              `json:"execution_generation"`
+	ExecutionClaimedAt   pgtype.Timestamptz `json:"execution_claimed_at"`
+	ExecutionHeartbeatAt pgtype.Timestamptz `json:"execution_heartbeat_at"`
+	InputTokens          *int64             `json:"input_tokens"`
+	OutputTokens         *int64             `json:"output_tokens"`
+	UsageSource          UsageSource        `json:"usage_source"`
+	ErrorKind            *string            `json:"error_kind"`
+	ErrorDetail          *string            `json:"error_detail"`
+	AcceptedAt           pgtype.Timestamptz `json:"accepted_at"`
+	CompletedAt          pgtype.Timestamptz `json:"completed_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RequestAttempt struct {
@@ -869,7 +720,6 @@ type ServicePlan struct {
 	Slug             string             `json:"slug"`
 	Name             string             `json:"name"`
 	Description      string             `json:"description"`
-	Kind             PlanKind           `json:"kind"`
 	Status           ServicePlanStatus  `json:"status"`
 	CurrentVersionID *uuid.UUID         `json:"current_version_id"`
 	CreatedBy        uuid.UUID          `json:"created_by"`
@@ -890,16 +740,11 @@ type ServicePlanMutation struct {
 }
 
 type ServicePlanVersion struct {
-	ID               uuid.UUID          `json:"id"`
-	ServicePlanID    uuid.UUID          `json:"service_plan_id"`
-	Version          int32              `json:"version"`
-	TokenQuota       int64              `json:"token_quota"`
-	ValidityDays     int32              `json:"validity_days"`
-	ConcurrencyLimit int32              `json:"concurrency_limit"`
-	RpmLimit         *int32             `json:"rpm_limit"`
-	TpmLimit         *int64             `json:"tpm_limit"`
-	CreatedBy        uuid.UUID          `json:"created_by"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ID            uuid.UUID          `json:"id"`
+	ServicePlanID uuid.UUID          `json:"service_plan_id"`
+	Version       int32              `json:"version"`
+	CreatedBy     uuid.UUID          `json:"created_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type ServicePlanVersionRoute struct {
@@ -935,7 +780,6 @@ type Subscription struct {
 	UserID               uuid.UUID          `json:"user_id"`
 	ServicePlanVersionID uuid.UUID          `json:"service_plan_version_id"`
 	Status               SubscriptionStatus `json:"status"`
-	GrantedTokens        int64              `json:"granted_tokens"`
 	StartsAt             pgtype.Timestamptz `json:"starts_at"`
 	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
 	Notes                string             `json:"notes"`

@@ -116,9 +116,7 @@ function AdministratorView({
 
 function MemberView({ overview }: { overview: Extract<OperationsOverview, { scope: 'member' }> }) {
   const available =
-    overview.access.activeSubscriptionCount > 0 &&
-    overview.access.activeApiKeyCount > 0 &&
-    overview.access.remainingTokens > 0
+    overview.access.activeSubscriptionCount > 0 && overview.access.activeApiKeyCount > 0
   return (
     <Page>
       <PageHeader
@@ -158,11 +156,6 @@ function MemberView({ overview }: { overview: Extract<OperationsOverview, { scop
               ? `到期 ${formatDateTime(overview.access.nearestSubscriptionExpiry)}`
               : undefined
           }
-        />
-        <SummaryMetric
-          icon={<Zap size={16} />}
-          label="剩余 Token"
-          value={formatTokens(overview.access.remainingTokens)}
         />
         <SummaryMetric
           icon={<KeyRound size={16} />}

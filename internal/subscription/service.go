@@ -29,7 +29,7 @@ func (s *Service) PublishPlan(ctx context.Context, actor identity.Principal, dra
 		return ServicePlan{}, ErrForbidden
 	}
 	draft.Name, draft.Description = strings.TrimSpace(draft.Name), strings.TrimSpace(draft.Description)
-	if request.IdempotencyKey == uuid.Nil || utf8.RuneCountInString(draft.Name) < 1 || utf8.RuneCountInString(draft.Name) > 100 || utf8.RuneCountInString(draft.Description) > 500 || draft.Kind != PlanToken && draft.Kind != PlanCoding || draft.TokenQuota < 1 || draft.ValidityDays < 1 || draft.ValidityDays > 3650 || draft.ConcurrencyLimit < 1 || !validOptionalLimits(draft.RPMLimit, draft.TPMLimit) || !validRoutes(draft.Routes) {
+	if request.IdempotencyKey == uuid.Nil || utf8.RuneCountInString(draft.Name) < 1 || utf8.RuneCountInString(draft.Name) > 100 || utf8.RuneCountInString(draft.Description) > 500 || !validRoutes(draft.Routes) {
 		return ServicePlan{}, ErrInvalidInput
 	}
 	action := "service_plan.create"
@@ -73,8 +73,9 @@ func (s *Service) CreateSubscription(ctx context.Context, actor identity.Princip
 	if !administrator(actor) {
 		return Subscription{}, ErrForbidden
 	}
-	input.StartsAt, input.ExpiresAt, input.Notes = input.StartsAt.UTC(), input.ExpiresAt.UTC(), strings.TrimSpace(input.Notes)
-	if input.UserID == uuid.Nil || input.ServicePlanID == uuid.Nil || input.GrantedTokens < 1 || input.StartsAt.IsZero() || !input.ExpiresAt.After(input.StartsAt) || utf8.RuneCountInString(input.Notes) > 500 {
+	input.StartsAt, input.Notes = input.StartsAt.UTC(), strings.TrimSpace(input.Notes)
+	input.ExpiresAt = normalizeExpiry(input.ExpiresAt)
+	if input.UserID == uuid.Nil || input.ServicePlanID == uuid.Nil || input.StartsAt.IsZero() || input.ExpiresAt != nil && !input.ExpiresAt.After(input.StartsAt) || utf8.RuneCountInString(input.Notes) > 500 {
 		return Subscription{}, ErrInvalidInput
 	}
 	mutation, err := makeMutation(request, "subscription.create", input)
@@ -88,14 +89,15 @@ func (s *Service) UpdateSubscription(ctx context.Context, actor identity.Princip
 	if !administrator(actor) {
 		return Subscription{}, ErrForbidden
 	}
-	change.StartsAt, change.ExpiresAt, change.ExpectedUpdatedAt, change.Notes = change.StartsAt.UTC(), change.ExpiresAt.UTC(), change.ExpectedUpdatedAt.UTC(), strings.TrimSpace(change.Notes)
-	if change.ID == uuid.Nil || change.GrantedTokens < 1 || change.ExpectedUpdatedAt.IsZero() || !change.ExpiresAt.After(change.StartsAt) || utf8.RuneCountInString(change.Notes) > 500 {
+	change.StartsAt, change.ExpectedUpdatedAt, change.Notes = change.StartsAt.UTC(), change.ExpectedUpdatedAt.UTC(), strings.TrimSpace(change.Notes)
+	change.ExpiresAt = normalizeExpiry(change.ExpiresAt)
+	if change.ID == uuid.Nil || change.StartsAt.IsZero() || change.ExpectedUpdatedAt.IsZero() || change.ExpiresAt != nil && !change.ExpiresAt.After(change.StartsAt) || utf8.RuneCountInString(change.Notes) > 500 {
 		return Subscription{}, ErrInvalidInput
 	}
 	status := StatusActive
 	if change.StartsAt.After(s.now()) {
 		status = StatusScheduled
-	} else if !change.ExpiresAt.After(s.now()) {
+	} else if change.ExpiresAt != nil && !change.ExpiresAt.After(s.now()) {
 		status = StatusExpired
 	}
 	mutation, err := makeMutation(request, "subscription.update", change)
@@ -158,8 +160,12 @@ func administrator(actor identity.Principal) bool {
 	return actor.Status == identity.StatusActive && actor.Role == identity.RoleAdministrator
 }
 
-func validOptionalLimits(rpm *int32, tpm *int64) bool {
-	return (rpm == nil || *rpm > 0) && (tpm == nil || *tpm > 0)
+func normalizeExpiry(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := value.UTC()
+	return &normalized
 }
 
 func validRoutes(routes []PlanRoute) bool {

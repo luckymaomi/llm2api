@@ -30,13 +30,6 @@ type Mutation struct {
 	RequestID          string
 }
 
-type PlanKind string
-
-const (
-	PlanToken  PlanKind = "token"
-	PlanCoding PlanKind = "coding"
-)
-
 type PlanStatus string
 
 const (
@@ -55,15 +48,10 @@ type PlanRoute struct {
 }
 
 type PlanVersion struct {
-	ID               uuid.UUID   `json:"id"`
-	Version          int32       `json:"version"`
-	TokenQuota       int64       `json:"token_quota"`
-	ValidityDays     int32       `json:"validity_days"`
-	ConcurrencyLimit int32       `json:"concurrency_limit"`
-	RPMLimit         *int32      `json:"rpm_limit,omitempty"`
-	TPMLimit         *int64      `json:"tpm_limit,omitempty"`
-	Routes           []PlanRoute `json:"routes"`
-	CreatedAt        time.Time   `json:"created_at"`
+	ID        uuid.UUID   `json:"id"`
+	Version   int32       `json:"version"`
+	Routes    []PlanRoute `json:"routes"`
+	CreatedAt time.Time   `json:"created_at"`
 }
 
 type ServicePlan struct {
@@ -71,7 +59,6 @@ type ServicePlan struct {
 	Slug                    string       `json:"slug"`
 	Name                    string       `json:"name"`
 	Description             string       `json:"description"`
-	Kind                    PlanKind     `json:"kind"`
 	Status                  PlanStatus   `json:"status"`
 	CurrentVersion          *PlanVersion `json:"current_version,omitempty"`
 	ActiveSubscriptionCount int64        `json:"active_subscription_count"`
@@ -80,17 +67,11 @@ type ServicePlan struct {
 }
 
 type PlanDraft struct {
-	ID               uuid.UUID
-	Slug             string
-	Name             string
-	Description      string
-	Kind             PlanKind
-	TokenQuota       int64
-	ValidityDays     int32
-	ConcurrencyLimit int32
-	RPMLimit         *int32
-	TPMLimit         *int64
-	Routes           []PlanRoute
+	ID          uuid.UUID
+	Slug        string
+	Name        string
+	Description string
+	Routes      []PlanRoute
 }
 
 type SubscriptionStatus string
@@ -111,17 +92,11 @@ type Subscription struct {
 	ServicePlanID        uuid.UUID          `json:"service_plan_id"`
 	ServicePlanVersionID uuid.UUID          `json:"service_plan_version_id"`
 	ServicePlanName      string             `json:"service_plan_name"`
-	PlanKind             PlanKind           `json:"plan_kind"`
 	PlanVersion          int32              `json:"plan_version"`
 	Status               SubscriptionStatus `json:"status"`
-	GrantedTokens        int64              `json:"granted_tokens"`
-	BalanceTokens        int64              `json:"balance_tokens"`
 	StartsAt             time.Time          `json:"starts_at"`
-	ExpiresAt            time.Time          `json:"expires_at"`
+	ExpiresAt            *time.Time         `json:"expires_at,omitempty"`
 	Notes                string             `json:"notes"`
-	ConcurrencyLimit     int32              `json:"concurrency_limit"`
-	RPMLimit             *int32             `json:"rpm_limit,omitempty"`
-	TPMLimit             *int64             `json:"tpm_limit,omitempty"`
 	Routes               []PlanRoute        `json:"routes"`
 	SuspendedAt          *time.Time         `json:"suspended_at,omitempty"`
 	CanceledAt           *time.Time         `json:"canceled_at,omitempty"`
@@ -132,17 +107,15 @@ type Subscription struct {
 type NewSubscription struct {
 	UserID        uuid.UUID
 	ServicePlanID uuid.UUID
-	GrantedTokens int64
 	StartsAt      time.Time
-	ExpiresAt     time.Time
+	ExpiresAt     *time.Time
 	Notes         string
 }
 
 type SubscriptionChange struct {
 	ID                uuid.UUID
-	GrantedTokens     int64
 	StartsAt          time.Time
-	ExpiresAt         time.Time
+	ExpiresAt         *time.Time
 	Notes             string
 	ExpectedUpdatedAt time.Time
 }

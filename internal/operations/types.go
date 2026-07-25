@@ -47,14 +47,12 @@ type AdministratorResources struct {
 	ActiveServicePlanCount         int64
 	ActiveSubscriptionCount        int64
 	HasActiveUpstream              bool
-	HasModelPrice                  bool
 	HasCompletedRequest            bool
 }
 
 type MemberAccess struct {
 	ActiveGatewayKeyCount     int64
 	ActiveSubscriptionCount   int64
-	RemainingTokens           int64
 	NearestSubscriptionExpiry *time.Time
 }
 

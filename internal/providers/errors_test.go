@@ -23,6 +23,7 @@ func TestProviderErrorFixturesProduceStableKinds(t *testing.T) {
 		body       string
 		wantKind   canonical.ErrorKind
 		wantCode   string
+		wantReplay bool
 	}{
 		{
 			name: "Zhipu platform overload", adapter: NewZhipu(), statusCode: http.StatusTooManyRequests,
@@ -32,12 +33,12 @@ func TestProviderErrorFixturesProduceStableKinds(t *testing.T) {
 		{
 			name: "Zhipu account rate limit", adapter: NewZhipu(), statusCode: http.StatusTooManyRequests,
 			body:     `{"error":{"code":1302,"message":"Rate limit reached"}}`,
-			wantKind: canonical.ErrorRateLimit, wantCode: "1302",
+			wantKind: canonical.ErrorRateLimit, wantCode: "1302", wantReplay: true,
 		},
 		{
 			name: "Agnes authentication", adapter: NewAgnes(), statusCode: http.StatusUnauthorized,
 			body:     `{"error":{"message":"Authentication failed","type":"authentication_error","code":"invalid_api_key"}}`,
-			wantKind: canonical.ErrorAuthentication, wantCode: "invalid_api_key",
+			wantKind: canonical.ErrorAuthentication, wantCode: "invalid_api_key", wantReplay: true,
 		},
 		{
 			name: "Compatible invalid parameters", adapter: compatible, statusCode: http.StatusUnprocessableEntity,
@@ -53,6 +54,9 @@ func TestProviderErrorFixturesProduceStableKinds(t *testing.T) {
 			classified := test.adapter.ClassifyError(test.statusCode, headers, []byte(test.body))
 			if classified.Kind != test.wantKind || classified.Code != test.wantCode {
 				t.Fatalf("classified error = %#v", classified)
+			}
+			if classified.ReplaySafe != test.wantReplay {
+				t.Fatalf("replay-safe = %t, want %t", classified.ReplaySafe, test.wantReplay)
 			}
 			if classified.RetryAfter == nil || classified.RetryAfter.DelaySeconds == nil || *classified.RetryAfter.DelaySeconds != 17 {
 				t.Fatalf("retry-after = %#v", classified.RetryAfter)
@@ -79,7 +83,7 @@ func TestGeminiUsesStructuredQuotaAndRetryFacts(t *testing.T) {
 			{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}
 		]}
 	}`))
-	if daily.Kind != canonical.ErrorQuota {
+	if daily.Kind != canonical.ErrorQuota || !daily.ReplaySafe {
 		t.Fatalf("daily quota error = %#v", daily)
 	}
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, FlaskConical, Pencil, Play, Plus, Power } from 'lucide-react'
+import { Archive, Pencil, Play, Plus, Power, RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { catalogApi, type Credential, type CredentialStatus } from '@/api'
@@ -27,6 +27,10 @@ export function CredentialsPage() {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<Credential | null>(null)
   const [probing, setProbing] = useState<Credential | null>(null)
+  const [probeAllResult, setProbeAllResult] = useState<{
+    succeeded: number
+    failed: number
+  } | null>(null)
   const [statusTarget, setStatusTarget] = useState<{
     credential: Credential
     status: CredentialStatus
@@ -56,6 +60,35 @@ export function CredentialsPage() {
       setRetiring(null)
       await queryClient.invalidateQueries({ queryKey: ['credentials'] })
       await queryClient.invalidateQueries({ queryKey: ['resource-pools'] })
+    },
+  })
+  const probeAllMutation = useMutation({
+    mutationFn: async () => {
+      const candidates = (query.data ?? []).filter(
+        (credential) => credential.status === 'active',
+      )
+      const outcomes = await Promise.allSettled(
+        candidates.map((credential) =>
+          catalogApi.probeCredential(
+            credential.id,
+            credential.updatedAt,
+            crypto.randomUUID(),
+          ),
+        ),
+      )
+      return outcomes.reduce(
+        (result, outcome) => ({
+          ...result,
+          ...(outcome.status === 'fulfilled' && outcome.value.status === 'succeeded'
+            ? { succeeded: result.succeeded + 1 }
+            : { failed: result.failed + 1 }),
+        }),
+        { succeeded: 0, failed: 0 },
+      )
+    },
+    async onSuccess(result) {
+      setProbeAllResult(result)
+      await queryClient.invalidateQueries({ queryKey: ['credentials'] })
     },
   })
   const columns = useMemo<ColumnDef<Credential, unknown>[]>(
@@ -117,8 +150,8 @@ export function CredentialsPage() {
           row.original.status !== 'retired' ? (
             <div className="row-actions row-actions--center">
               <TableAction
-                label="测试"
-                icon={<FlaskConical size={16} />}
+                label="探测"
+                icon={<RefreshCw size={16} />}
                 onClick={() => setProbing(row.original)}
               />
               <TableAction
@@ -169,17 +202,47 @@ export function CredentialsPage() {
       <PageHeader
         title="上游 API Key"
         actions={
-          <Button
-            icon={<Plus size={16} />}
-            data-onboarding="create-provider-key"
-            onClick={() => setAdding(true)}
-          >
-            添加上游 API Key
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              icon={<RefreshCw size={16} />}
+              disabled={
+                probeAllMutation.isPending ||
+                !(query.data ?? []).some((item) => item.status === 'active')
+              }
+              onClick={() => {
+                setProbeAllResult(null)
+                probeAllMutation.mutate()
+              }}
+            >
+              {probeAllMutation.isPending ? '探测全部 Key 中' : '探测全部 Key'}
+            </Button>
+            <Button
+              icon={<Plus size={16} />}
+              data-onboarding="create-provider-key"
+              onClick={() => setAdding(true)}
+            >
+              添加上游 API Key
+            </Button>
+          </>
         }
       />
       <PageSection>
-        <FormProblem error={statusMutation.error ?? retireMutation.error} />
+        <FormProblem
+          error={statusMutation.error ?? retireMutation.error ?? probeAllMutation.error}
+        />
+        {probeAllResult ? (
+          <p
+            className={
+              probeAllResult.failed === 0
+                ? 'batch-probe-result'
+                : 'batch-probe-result batch-probe-result--warning'
+            }
+            role="status"
+          >
+            已完成模型探测：成功 {probeAllResult.succeeded} 把，失败 {probeAllResult.failed} 把。
+          </p>
+        ) : null}
         <DataTable
           ariaLabel="上游 API Key 列表"
           data={query.data ?? []}

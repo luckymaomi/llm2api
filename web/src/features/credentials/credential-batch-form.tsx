@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 
 import { catalogApi, type CredentialBatchResult } from '@/api'
 import { Button } from '@/components/ui/button'
@@ -23,26 +23,11 @@ export function CredentialBatchForm({
     queryFn: ({ signal }) => catalogApi.resourcePools(false, signal),
     enabled: open,
   })
-  const pool = useMemo(
-    () => pools.data?.find((item) => item.id === resourcePoolId),
-    [pools.data, resourcePoolId],
-  )
   const mutation = useMutation({
     mutationFn: () => {
-      if (!pool) throw new Error('请选择资源池')
+      if (!pools.data?.some((item) => item.id === resourcePoolId)) throw new Error('请选择资源池')
       const items = parseLines(lines)
-      return catalogApi.importCredentials(
-        {
-          resourcePoolId,
-          items,
-          modelBindings: pool.models.map((model) => ({
-            modelId: model.id,
-            priority: 0,
-            weight: 1,
-          })),
-        },
-        crypto.randomUUID(),
-      )
+      return catalogApi.importCredentials({ resourcePoolId, items }, crypto.randomUUID())
     },
     async onSuccess(value) {
       setLines('')
@@ -162,6 +147,7 @@ const batchStatus = { created: '已创建', skipped: '已跳过', rejected: '已
 function batchErrorLabel(kind: string): string {
   if (kind === 'invalid_input') return '名称或 Key 不符合要求'
   if (kind === 'conflict') return 'Key 已存在或数据发生冲突'
+  if (kind === 'model_discovery_failed') return '无法读取这把 Key 的模型列表'
   if (kind === 'persistence_failed') return '保存失败，请重试'
   return '未能添加'
 }

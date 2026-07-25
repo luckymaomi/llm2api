@@ -94,7 +94,7 @@ export function GatewayKeyTestDialog({
               onChange={(event) => setMessage(event.target.value)}
             />
           </Field>
-          <span>请求会计入这把 API 密钥所属成员的额度和用量。</span>
+          <span>请求会记录到这把 API 密钥所属账号的使用记录。</span>
           {test.facts.phase !== 'idle' ? <GatewayKeyTestResult facts={test.facts} /> : null}
         </div>
       )}

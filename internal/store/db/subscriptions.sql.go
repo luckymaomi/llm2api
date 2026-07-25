@@ -155,7 +155,7 @@ WHERE ($1::uuid IS NULL OR subscription.user_id = $1)
   AND ($3::text = '' OR
        CASE
          WHEN subscription.status IN ('suspended', 'canceled') THEN subscription.status::text
-         WHEN subscription.expires_at <= now() THEN 'expired'
+         WHEN subscription.expires_at IS NOT NULL AND subscription.expires_at <= now() THEN 'expired'
          WHEN subscription.starts_at > now() THEN 'scheduled'
          ELSE 'active'
        END = $3::text)
@@ -175,16 +175,15 @@ func (q *Queries) CountSubscriptions(ctx context.Context, arg CountSubscriptions
 }
 
 const createServicePlan = `-- name: CreateServicePlan :one
-INSERT INTO service_plans (slug, name, description, kind, created_by)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, slug, name, description, kind, status, current_version_id, created_by, created_at, updated_at
+INSERT INTO service_plans (slug, name, description, created_by)
+VALUES ($1, $2, $3, $4)
+RETURNING id, slug, name, description, status, current_version_id, created_by, created_at, updated_at
 `
 
 type CreateServicePlanParams struct {
 	Slug        string    `json:"slug"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
-	Kind        PlanKind  `json:"kind"`
 	CreatedBy   uuid.UUID `json:"created_by"`
 }
 
@@ -193,7 +192,6 @@ func (q *Queries) CreateServicePlan(ctx context.Context, arg CreateServicePlanPa
 		arg.Slug,
 		arg.Name,
 		arg.Description,
-		arg.Kind,
 		arg.CreatedBy,
 	)
 	var i ServicePlan
@@ -202,7 +200,6 @@ func (q *Queries) CreateServicePlan(ctx context.Context, arg CreateServicePlanPa
 		&i.Slug,
 		&i.Name,
 		&i.Description,
-		&i.Kind,
 		&i.Status,
 		&i.CurrentVersionID,
 		&i.CreatedBy,
@@ -213,46 +210,23 @@ func (q *Queries) CreateServicePlan(ctx context.Context, arg CreateServicePlanPa
 }
 
 const createServicePlanVersion = `-- name: CreateServicePlanVersion :one
-INSERT INTO service_plan_versions (
-  service_plan_id, version, token_quota, validity_days, concurrency_limit, rpm_limit, tpm_limit, created_by
-) VALUES (
-  $1, $2, $3, $4,
-  $5, $6, $7, $8
-) RETURNING id, service_plan_id, version, token_quota, validity_days, concurrency_limit, rpm_limit, tpm_limit, created_by, created_at
+INSERT INTO service_plan_versions (service_plan_id, version, created_by)
+VALUES ($1, $2, $3) RETURNING id, service_plan_id, version, created_by, created_at
 `
 
 type CreateServicePlanVersionParams struct {
-	ServicePlanID    uuid.UUID `json:"service_plan_id"`
-	Version          int32     `json:"version"`
-	TokenQuota       int64     `json:"token_quota"`
-	ValidityDays     int32     `json:"validity_days"`
-	ConcurrencyLimit int32     `json:"concurrency_limit"`
-	RpmLimit         *int32    `json:"rpm_limit"`
-	TpmLimit         *int64    `json:"tpm_limit"`
-	CreatedBy        uuid.UUID `json:"created_by"`
+	ServicePlanID uuid.UUID `json:"service_plan_id"`
+	Version       int32     `json:"version"`
+	CreatedBy     uuid.UUID `json:"created_by"`
 }
 
 func (q *Queries) CreateServicePlanVersion(ctx context.Context, arg CreateServicePlanVersionParams) (ServicePlanVersion, error) {
-	row := q.db.QueryRow(ctx, createServicePlanVersion,
-		arg.ServicePlanID,
-		arg.Version,
-		arg.TokenQuota,
-		arg.ValidityDays,
-		arg.ConcurrencyLimit,
-		arg.RpmLimit,
-		arg.TpmLimit,
-		arg.CreatedBy,
-	)
+	row := q.db.QueryRow(ctx, createServicePlanVersion, arg.ServicePlanID, arg.Version, arg.CreatedBy)
 	var i ServicePlanVersion
 	err := row.Scan(
 		&i.ID,
 		&i.ServicePlanID,
 		&i.Version,
-		&i.TokenQuota,
-		&i.ValidityDays,
-		&i.ConcurrencyLimit,
-		&i.RpmLimit,
-		&i.TpmLimit,
 		&i.CreatedBy,
 		&i.CreatedAt,
 	)
@@ -276,19 +250,15 @@ func (q *Queries) CreateServicePlanVersionRoute(ctx context.Context, arg CreateS
 }
 
 const createSubscription = `-- name: CreateSubscription :one
-INSERT INTO subscriptions (
-  user_id, service_plan_version_id, status, granted_tokens, starts_at, expires_at, notes, assigned_by
-) VALUES (
-  $1, $2, $3, $4,
-  $5, $6, $7, $8
-) RETURNING id, user_id, service_plan_version_id, status, granted_tokens, starts_at, expires_at, notes, assigned_by, suspended_at, canceled_at, created_at, updated_at
+INSERT INTO subscriptions (user_id, service_plan_version_id, status, starts_at, expires_at, notes, assigned_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, user_id, service_plan_version_id, status, starts_at, expires_at, notes, assigned_by, suspended_at, canceled_at, created_at, updated_at
 `
 
 type CreateSubscriptionParams struct {
 	UserID               uuid.UUID          `json:"user_id"`
 	ServicePlanVersionID uuid.UUID          `json:"service_plan_version_id"`
 	Status               SubscriptionStatus `json:"status"`
-	GrantedTokens        int64              `json:"granted_tokens"`
 	StartsAt             pgtype.Timestamptz `json:"starts_at"`
 	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
 	Notes                string             `json:"notes"`
@@ -300,7 +270,6 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 		arg.UserID,
 		arg.ServicePlanVersionID,
 		arg.Status,
-		arg.GrantedTokens,
 		arg.StartsAt,
 		arg.ExpiresAt,
 		arg.Notes,
@@ -312,7 +281,6 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 		&i.UserID,
 		&i.ServicePlanVersionID,
 		&i.Status,
-		&i.GrantedTokens,
 		&i.StartsAt,
 		&i.ExpiresAt,
 		&i.Notes,
@@ -326,17 +294,16 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 }
 
 const getApplicableSubscriptionRoutesForUpdate = `-- name: GetApplicableSubscriptionRoutesForUpdate :many
-SELECT subscription.id, subscription.user_id, subscription.service_plan_version_id, subscription.status, subscription.granted_tokens, subscription.starts_at, subscription.expires_at, subscription.notes, subscription.assigned_by, subscription.suspended_at, subscription.canceled_at, subscription.created_at, subscription.updated_at, version.concurrency_limit, version.rpm_limit, version.tpm_limit,
-       route.resource_pool_id
+SELECT subscription.id, subscription.user_id, subscription.service_plan_version_id, subscription.status, subscription.starts_at, subscription.expires_at, subscription.notes, subscription.assigned_by, subscription.suspended_at, subscription.canceled_at, subscription.created_at, subscription.updated_at, route.resource_pool_id
 FROM subscriptions subscription
 JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
 JOIN service_plan_version_routes route ON route.service_plan_version_id = version.id
 JOIN resource_pools pool ON pool.id = route.resource_pool_id
 WHERE subscription.user_id = $1 AND route.model_id = $2
   AND subscription.status IN ('scheduled', 'active')
-  AND subscription.starts_at <= now() AND subscription.expires_at > now()
+  AND subscription.starts_at <= now() AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
   AND pool.status = 'active'
-ORDER BY subscription.expires_at, subscription.created_at, subscription.id
+ORDER BY subscription.expires_at NULLS LAST, subscription.created_at, subscription.id
 FOR UPDATE OF subscription
 `
 
@@ -350,7 +317,6 @@ type GetApplicableSubscriptionRoutesForUpdateRow struct {
 	UserID               uuid.UUID          `json:"user_id"`
 	ServicePlanVersionID uuid.UUID          `json:"service_plan_version_id"`
 	Status               SubscriptionStatus `json:"status"`
-	GrantedTokens        int64              `json:"granted_tokens"`
 	StartsAt             pgtype.Timestamptz `json:"starts_at"`
 	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
 	Notes                string             `json:"notes"`
@@ -359,9 +325,6 @@ type GetApplicableSubscriptionRoutesForUpdateRow struct {
 	CanceledAt           pgtype.Timestamptz `json:"canceled_at"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	ConcurrencyLimit     int32              `json:"concurrency_limit"`
-	RpmLimit             *int32             `json:"rpm_limit"`
-	TpmLimit             *int64             `json:"tpm_limit"`
 	ResourcePoolID       uuid.UUID          `json:"resource_pool_id"`
 }
 
@@ -379,7 +342,6 @@ func (q *Queries) GetApplicableSubscriptionRoutesForUpdate(ctx context.Context, 
 			&i.UserID,
 			&i.ServicePlanVersionID,
 			&i.Status,
-			&i.GrantedTokens,
 			&i.StartsAt,
 			&i.ExpiresAt,
 			&i.Notes,
@@ -388,9 +350,6 @@ func (q *Queries) GetApplicableSubscriptionRoutesForUpdate(ctx context.Context, 
 			&i.CanceledAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.ConcurrencyLimit,
-			&i.RpmLimit,
-			&i.TpmLimit,
 			&i.ResourcePoolID,
 		); err != nil {
 			return nil, err
@@ -404,7 +363,7 @@ func (q *Queries) GetApplicableSubscriptionRoutesForUpdate(ctx context.Context, 
 }
 
 const getCurrentServicePlanVersion = `-- name: GetCurrentServicePlanVersion :one
-SELECT version.id, version.service_plan_id, version.version, version.token_quota, version.validity_days, version.concurrency_limit, version.rpm_limit, version.tpm_limit, version.created_by, version.created_at FROM service_plans plan
+SELECT version.id, version.service_plan_id, version.version, version.created_by, version.created_at FROM service_plans plan
 JOIN service_plan_versions version ON version.id = plan.current_version_id
 WHERE plan.id = $1 AND plan.status = 'active'
 `
@@ -416,11 +375,6 @@ func (q *Queries) GetCurrentServicePlanVersion(ctx context.Context, servicePlanI
 		&i.ID,
 		&i.ServicePlanID,
 		&i.Version,
-		&i.TokenQuota,
-		&i.ValidityDays,
-		&i.ConcurrencyLimit,
-		&i.RpmLimit,
-		&i.TpmLimit,
 		&i.CreatedBy,
 		&i.CreatedAt,
 	)
@@ -428,8 +382,7 @@ func (q *Queries) GetCurrentServicePlanVersion(ctx context.Context, servicePlanI
 }
 
 const getServicePlan = `-- name: GetServicePlan :one
-SELECT plan.id, plan.slug, plan.name, plan.description, plan.kind, plan.status, plan.current_version_id, plan.created_by, plan.created_at, plan.updated_at, version.version, version.token_quota, version.validity_days,
-       version.concurrency_limit, version.rpm_limit, version.tpm_limit,
+SELECT plan.id, plan.slug, plan.name, plan.description, plan.status, plan.current_version_id, plan.created_by, plan.created_at, plan.updated_at, version.version,
        version.created_by AS version_created_by, version.created_at AS version_created_at,
        (SELECT count(*) FROM service_plan_version_routes route WHERE route.service_plan_version_id = version.id) AS route_count
 FROM service_plans plan
@@ -442,18 +395,12 @@ type GetServicePlanRow struct {
 	Slug             string             `json:"slug"`
 	Name             string             `json:"name"`
 	Description      string             `json:"description"`
-	Kind             PlanKind           `json:"kind"`
 	Status           ServicePlanStatus  `json:"status"`
 	CurrentVersionID *uuid.UUID         `json:"current_version_id"`
 	CreatedBy        uuid.UUID          `json:"created_by"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	Version          *int32             `json:"version"`
-	TokenQuota       *int64             `json:"token_quota"`
-	ValidityDays     *int32             `json:"validity_days"`
-	ConcurrencyLimit *int32             `json:"concurrency_limit"`
-	RpmLimit         *int32             `json:"rpm_limit"`
-	TpmLimit         *int64             `json:"tpm_limit"`
 	VersionCreatedBy *uuid.UUID         `json:"version_created_by"`
 	VersionCreatedAt pgtype.Timestamptz `json:"version_created_at"`
 	RouteCount       int64              `json:"route_count"`
@@ -467,18 +414,12 @@ func (q *Queries) GetServicePlan(ctx context.Context, id uuid.UUID) (GetServiceP
 		&i.Slug,
 		&i.Name,
 		&i.Description,
-		&i.Kind,
 		&i.Status,
 		&i.CurrentVersionID,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
-		&i.TokenQuota,
-		&i.ValidityDays,
-		&i.ConcurrencyLimit,
-		&i.RpmLimit,
-		&i.TpmLimit,
 		&i.VersionCreatedBy,
 		&i.VersionCreatedAt,
 		&i.RouteCount,
@@ -487,7 +428,7 @@ func (q *Queries) GetServicePlan(ctx context.Context, id uuid.UUID) (GetServiceP
 }
 
 const getServicePlanForUpdate = `-- name: GetServicePlanForUpdate :one
-SELECT id, slug, name, description, kind, status, current_version_id, created_by, created_at, updated_at FROM service_plans WHERE id = $1 FOR UPDATE
+SELECT id, slug, name, description, status, current_version_id, created_by, created_at, updated_at FROM service_plans WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetServicePlanForUpdate(ctx context.Context, id uuid.UUID) (ServicePlan, error) {
@@ -498,7 +439,6 @@ func (q *Queries) GetServicePlanForUpdate(ctx context.Context, id uuid.UUID) (Se
 		&i.Slug,
 		&i.Name,
 		&i.Description,
-		&i.Kind,
 		&i.Status,
 		&i.CurrentVersionID,
 		&i.CreatedBy,
@@ -537,10 +477,9 @@ func (q *Queries) GetServicePlanMutation(ctx context.Context, arg GetServicePlan
 }
 
 const getSubscription = `-- name: GetSubscription :one
-SELECT subscription.id, subscription.user_id, subscription.service_plan_version_id, subscription.status, subscription.granted_tokens, subscription.starts_at, subscription.expires_at, subscription.notes, subscription.assigned_by, subscription.suspended_at, subscription.canceled_at, subscription.created_at, subscription.updated_at, plan.id AS service_plan_id, plan.name AS service_plan_name, plan.kind AS plan_kind,
-       version.version AS plan_version, version.concurrency_limit, version.rpm_limit, version.tpm_limit,
-       member.email AS member_email, member.display_name AS member_name,
-       coalesce((SELECT sum(event.token_delta) FROM ledger_events event WHERE event.subscription_id = subscription.id), 0)::bigint AS balance_tokens
+SELECT subscription.id, subscription.user_id, subscription.service_plan_version_id, subscription.status, subscription.starts_at, subscription.expires_at, subscription.notes, subscription.assigned_by, subscription.suspended_at, subscription.canceled_at, subscription.created_at, subscription.updated_at, plan.id AS service_plan_id, plan.name AS service_plan_name,
+       version.version AS plan_version,
+       member.email AS member_email, member.display_name AS member_name
 FROM subscriptions subscription
 JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
 JOIN service_plans plan ON plan.id = version.service_plan_id
@@ -553,7 +492,6 @@ type GetSubscriptionRow struct {
 	UserID               uuid.UUID          `json:"user_id"`
 	ServicePlanVersionID uuid.UUID          `json:"service_plan_version_id"`
 	Status               SubscriptionStatus `json:"status"`
-	GrantedTokens        int64              `json:"granted_tokens"`
 	StartsAt             pgtype.Timestamptz `json:"starts_at"`
 	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
 	Notes                string             `json:"notes"`
@@ -564,14 +502,9 @@ type GetSubscriptionRow struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	ServicePlanID        uuid.UUID          `json:"service_plan_id"`
 	ServicePlanName      string             `json:"service_plan_name"`
-	PlanKind             PlanKind           `json:"plan_kind"`
 	PlanVersion          int32              `json:"plan_version"`
-	ConcurrencyLimit     int32              `json:"concurrency_limit"`
-	RpmLimit             *int32             `json:"rpm_limit"`
-	TpmLimit             *int64             `json:"tpm_limit"`
 	MemberEmail          string             `json:"member_email"`
 	MemberName           string             `json:"member_name"`
-	BalanceTokens        int64              `json:"balance_tokens"`
 }
 
 func (q *Queries) GetSubscription(ctx context.Context, id uuid.UUID) (GetSubscriptionRow, error) {
@@ -582,7 +515,6 @@ func (q *Queries) GetSubscription(ctx context.Context, id uuid.UUID) (GetSubscri
 		&i.UserID,
 		&i.ServicePlanVersionID,
 		&i.Status,
-		&i.GrantedTokens,
 		&i.StartsAt,
 		&i.ExpiresAt,
 		&i.Notes,
@@ -593,20 +525,15 @@ func (q *Queries) GetSubscription(ctx context.Context, id uuid.UUID) (GetSubscri
 		&i.UpdatedAt,
 		&i.ServicePlanID,
 		&i.ServicePlanName,
-		&i.PlanKind,
 		&i.PlanVersion,
-		&i.ConcurrencyLimit,
-		&i.RpmLimit,
-		&i.TpmLimit,
 		&i.MemberEmail,
 		&i.MemberName,
-		&i.BalanceTokens,
 	)
 	return i, err
 }
 
 const getSubscriptionForUpdate = `-- name: GetSubscriptionForUpdate :one
-SELECT id, user_id, service_plan_version_id, status, granted_tokens, starts_at, expires_at, notes, assigned_by, suspended_at, canceled_at, created_at, updated_at FROM subscriptions WHERE id = $1 FOR UPDATE
+SELECT id, user_id, service_plan_version_id, status, starts_at, expires_at, notes, assigned_by, suspended_at, canceled_at, created_at, updated_at FROM subscriptions WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetSubscriptionForUpdate(ctx context.Context, id uuid.UUID) (Subscription, error) {
@@ -617,7 +544,6 @@ func (q *Queries) GetSubscriptionForUpdate(ctx context.Context, id uuid.UUID) (S
 		&i.UserID,
 		&i.ServicePlanVersionID,
 		&i.Status,
-		&i.GrantedTokens,
 		&i.StartsAt,
 		&i.ExpiresAt,
 		&i.Notes,
@@ -709,14 +635,13 @@ func (q *Queries) ListServicePlanVersionRoutes(ctx context.Context, servicePlanV
 }
 
 const listServicePlans = `-- name: ListServicePlans :many
-SELECT plan.id, plan.slug, plan.name, plan.description, plan.kind, plan.status, plan.current_version_id, plan.created_by, plan.created_at, plan.updated_at, version.version, version.token_quota, version.validity_days,
-       version.concurrency_limit, version.rpm_limit, version.tpm_limit,
+SELECT plan.id, plan.slug, plan.name, plan.description, plan.status, plan.current_version_id, plan.created_by, plan.created_at, plan.updated_at, version.version,
        version.created_by AS version_created_by, version.created_at AS version_created_at,
        (SELECT count(*) FROM service_plan_version_routes route WHERE route.service_plan_version_id = version.id) AS route_count,
        (SELECT count(*) FROM subscriptions subscription
         WHERE subscription.service_plan_version_id = version.id
           AND subscription.status IN ('scheduled', 'active')
-          AND subscription.expires_at > now()) AS active_subscription_count
+          AND (subscription.expires_at IS NULL OR subscription.expires_at > now())) AS active_subscription_count
 FROM service_plans plan
 LEFT JOIN service_plan_versions version ON version.id = plan.current_version_id
 WHERE ($1::boolean OR plan.status <> 'archived')
@@ -728,18 +653,12 @@ type ListServicePlansRow struct {
 	Slug                    string             `json:"slug"`
 	Name                    string             `json:"name"`
 	Description             string             `json:"description"`
-	Kind                    PlanKind           `json:"kind"`
 	Status                  ServicePlanStatus  `json:"status"`
 	CurrentVersionID        *uuid.UUID         `json:"current_version_id"`
 	CreatedBy               uuid.UUID          `json:"created_by"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 	Version                 *int32             `json:"version"`
-	TokenQuota              *int64             `json:"token_quota"`
-	ValidityDays            *int32             `json:"validity_days"`
-	ConcurrencyLimit        *int32             `json:"concurrency_limit"`
-	RpmLimit                *int32             `json:"rpm_limit"`
-	TpmLimit                *int64             `json:"tpm_limit"`
 	VersionCreatedBy        *uuid.UUID         `json:"version_created_by"`
 	VersionCreatedAt        pgtype.Timestamptz `json:"version_created_at"`
 	RouteCount              int64              `json:"route_count"`
@@ -760,18 +679,12 @@ func (q *Queries) ListServicePlans(ctx context.Context, includeArchived bool) ([
 			&i.Slug,
 			&i.Name,
 			&i.Description,
-			&i.Kind,
 			&i.Status,
 			&i.CurrentVersionID,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
-			&i.TokenQuota,
-			&i.ValidityDays,
-			&i.ConcurrencyLimit,
-			&i.RpmLimit,
-			&i.TpmLimit,
 			&i.VersionCreatedBy,
 			&i.VersionCreatedAt,
 			&i.RouteCount,
@@ -788,10 +701,9 @@ func (q *Queries) ListServicePlans(ctx context.Context, includeArchived bool) ([
 }
 
 const listSubscriptions = `-- name: ListSubscriptions :many
-SELECT subscription.id, subscription.user_id, subscription.service_plan_version_id, subscription.status, subscription.granted_tokens, subscription.starts_at, subscription.expires_at, subscription.notes, subscription.assigned_by, subscription.suspended_at, subscription.canceled_at, subscription.created_at, subscription.updated_at, plan.id AS service_plan_id, plan.name AS service_plan_name, plan.kind AS plan_kind,
-       version.version AS plan_version, version.concurrency_limit, version.rpm_limit, version.tpm_limit,
-       member.email AS member_email, member.display_name AS member_name,
-       coalesce((SELECT sum(event.token_delta) FROM ledger_events event WHERE event.subscription_id = subscription.id), 0)::bigint AS balance_tokens
+SELECT subscription.id, subscription.user_id, subscription.service_plan_version_id, subscription.status, subscription.starts_at, subscription.expires_at, subscription.notes, subscription.assigned_by, subscription.suspended_at, subscription.canceled_at, subscription.created_at, subscription.updated_at, plan.id AS service_plan_id, plan.name AS service_plan_name,
+       version.version AS plan_version,
+       member.email AS member_email, member.display_name AS member_name
 FROM subscriptions subscription
 JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
 JOIN service_plans plan ON plan.id = version.service_plan_id
@@ -801,7 +713,7 @@ WHERE ($1::uuid IS NULL OR subscription.user_id = $1)
   AND ($3::text = '' OR
        CASE
          WHEN subscription.status IN ('suspended', 'canceled') THEN subscription.status::text
-         WHEN subscription.expires_at <= now() THEN 'expired'
+         WHEN subscription.expires_at IS NOT NULL AND subscription.expires_at <= now() THEN 'expired'
          WHEN subscription.starts_at > now() THEN 'scheduled'
          ELSE 'active'
        END = $3::text)
@@ -822,7 +734,6 @@ type ListSubscriptionsRow struct {
 	UserID               uuid.UUID          `json:"user_id"`
 	ServicePlanVersionID uuid.UUID          `json:"service_plan_version_id"`
 	Status               SubscriptionStatus `json:"status"`
-	GrantedTokens        int64              `json:"granted_tokens"`
 	StartsAt             pgtype.Timestamptz `json:"starts_at"`
 	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
 	Notes                string             `json:"notes"`
@@ -833,14 +744,9 @@ type ListSubscriptionsRow struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	ServicePlanID        uuid.UUID          `json:"service_plan_id"`
 	ServicePlanName      string             `json:"service_plan_name"`
-	PlanKind             PlanKind           `json:"plan_kind"`
 	PlanVersion          int32              `json:"plan_version"`
-	ConcurrencyLimit     int32              `json:"concurrency_limit"`
-	RpmLimit             *int32             `json:"rpm_limit"`
-	TpmLimit             *int64             `json:"tpm_limit"`
 	MemberEmail          string             `json:"member_email"`
 	MemberName           string             `json:"member_name"`
-	BalanceTokens        int64              `json:"balance_tokens"`
 }
 
 func (q *Queries) ListSubscriptions(ctx context.Context, arg ListSubscriptionsParams) ([]ListSubscriptionsRow, error) {
@@ -863,7 +769,6 @@ func (q *Queries) ListSubscriptions(ctx context.Context, arg ListSubscriptionsPa
 			&i.UserID,
 			&i.ServicePlanVersionID,
 			&i.Status,
-			&i.GrantedTokens,
 			&i.StartsAt,
 			&i.ExpiresAt,
 			&i.Notes,
@@ -874,14 +779,9 @@ func (q *Queries) ListSubscriptions(ctx context.Context, arg ListSubscriptionsPa
 			&i.UpdatedAt,
 			&i.ServicePlanID,
 			&i.ServicePlanName,
-			&i.PlanKind,
 			&i.PlanVersion,
-			&i.ConcurrencyLimit,
-			&i.RpmLimit,
-			&i.TpmLimit,
 			&i.MemberEmail,
 			&i.MemberName,
-			&i.BalanceTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -907,15 +807,14 @@ func (q *Queries) NextServicePlanVersion(ctx context.Context, servicePlanID uuid
 
 const publishServicePlanVersion = `-- name: PublishServicePlanVersion :one
 UPDATE service_plans
-SET name = $1, description = $2, kind = $3,
-    status = 'active', current_version_id = $4, updated_at = now()
-WHERE id = $5 RETURNING id, slug, name, description, kind, status, current_version_id, created_by, created_at, updated_at
+SET name = $1, description = $2,
+    status = 'active', current_version_id = $3, updated_at = now()
+WHERE id = $4 RETURNING id, slug, name, description, status, current_version_id, created_by, created_at, updated_at
 `
 
 type PublishServicePlanVersionParams struct {
 	Name             string     `json:"name"`
 	Description      string     `json:"description"`
-	Kind             PlanKind   `json:"kind"`
 	CurrentVersionID *uuid.UUID `json:"current_version_id"`
 	ID               uuid.UUID  `json:"id"`
 }
@@ -924,7 +823,6 @@ func (q *Queries) PublishServicePlanVersion(ctx context.Context, arg PublishServ
 	row := q.db.QueryRow(ctx, publishServicePlanVersion,
 		arg.Name,
 		arg.Description,
-		arg.Kind,
 		arg.CurrentVersionID,
 		arg.ID,
 	)
@@ -934,7 +832,6 @@ func (q *Queries) PublishServicePlanVersion(ctx context.Context, arg PublishServ
 		&i.Slug,
 		&i.Name,
 		&i.Description,
-		&i.Kind,
 		&i.Status,
 		&i.CurrentVersionID,
 		&i.CreatedBy,
@@ -946,7 +843,7 @@ func (q *Queries) PublishServicePlanVersion(ctx context.Context, arg PublishServ
 
 const setServicePlanStatus = `-- name: SetServicePlanStatus :one
 UPDATE service_plans SET status = $1, updated_at = now()
-WHERE id = $2 AND status <> 'archived' RETURNING id, slug, name, description, kind, status, current_version_id, created_by, created_at, updated_at
+WHERE id = $2 AND status <> 'archived' RETURNING id, slug, name, description, status, current_version_id, created_by, created_at, updated_at
 `
 
 type SetServicePlanStatusParams struct {
@@ -962,7 +859,6 @@ func (q *Queries) SetServicePlanStatus(ctx context.Context, arg SetServicePlanSt
 		&i.Slug,
 		&i.Name,
 		&i.Description,
-		&i.Kind,
 		&i.Status,
 		&i.CurrentVersionID,
 		&i.CreatedBy,
@@ -979,7 +875,7 @@ SET status = $1,
     canceled_at = CASE WHEN $1::subscription_status = 'canceled' THEN now() ELSE NULL END,
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE id = $2 AND status <> 'canceled' AND updated_at = $3
-RETURNING id, user_id, service_plan_version_id, status, granted_tokens, starts_at, expires_at, notes, assigned_by, suspended_at, canceled_at, created_at, updated_at
+RETURNING id, user_id, service_plan_version_id, status, starts_at, expires_at, notes, assigned_by, suspended_at, canceled_at, created_at, updated_at
 `
 
 type UpdateSubscriptionStatusParams struct {
@@ -996,7 +892,6 @@ func (q *Queries) UpdateSubscriptionStatus(ctx context.Context, arg UpdateSubscr
 		&i.UserID,
 		&i.ServicePlanVersionID,
 		&i.Status,
-		&i.GrantedTokens,
 		&i.StartsAt,
 		&i.ExpiresAt,
 		&i.Notes,
@@ -1011,16 +906,15 @@ func (q *Queries) UpdateSubscriptionStatus(ctx context.Context, arg UpdateSubscr
 
 const updateSubscriptionTerm = `-- name: UpdateSubscriptionTerm :one
 UPDATE subscriptions
-SET granted_tokens = $1, starts_at = $2, expires_at = $3,
-    notes = $4,
-    status = $5, suspended_at = NULL, canceled_at = NULL,
+SET starts_at = $1, expires_at = $2,
+    notes = $3,
+    status = $4, suspended_at = NULL, canceled_at = NULL,
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
-WHERE id = $6 AND status <> 'canceled' AND updated_at = $7
-RETURNING id, user_id, service_plan_version_id, status, granted_tokens, starts_at, expires_at, notes, assigned_by, suspended_at, canceled_at, created_at, updated_at
+WHERE id = $5 AND status <> 'canceled' AND updated_at = $6
+RETURNING id, user_id, service_plan_version_id, status, starts_at, expires_at, notes, assigned_by, suspended_at, canceled_at, created_at, updated_at
 `
 
 type UpdateSubscriptionTermParams struct {
-	GrantedTokens     int64              `json:"granted_tokens"`
 	StartsAt          pgtype.Timestamptz `json:"starts_at"`
 	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
 	Notes             string             `json:"notes"`
@@ -1031,7 +925,6 @@ type UpdateSubscriptionTermParams struct {
 
 func (q *Queries) UpdateSubscriptionTerm(ctx context.Context, arg UpdateSubscriptionTermParams) (Subscription, error) {
 	row := q.db.QueryRow(ctx, updateSubscriptionTerm,
-		arg.GrantedTokens,
 		arg.StartsAt,
 		arg.ExpiresAt,
 		arg.Notes,
@@ -1045,7 +938,6 @@ func (q *Queries) UpdateSubscriptionTerm(ctx context.Context, arg UpdateSubscrip
 		&i.UserID,
 		&i.ServicePlanVersionID,
 		&i.Status,
-		&i.GrantedTokens,
 		&i.StartsAt,
 		&i.ExpiresAt,
 		&i.Notes,

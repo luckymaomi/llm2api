@@ -129,7 +129,6 @@ try {
   $env:LLMGATEWAY_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
   $env:LLMGATEWAY_REQUEST_MAX_QUEUED = "512"
   $env:LLMGATEWAY_REQUEST_MAX_ACTIVE = "256"
-  $env:LLMGATEWAY_REQUEST_MAX_ACTIVE_PER_USER = "16"
   $env:LLMGATEWAY_REQUEST_MAX_QUEUE_WAIT = "30s"
   $env:LLMGATEWAY_REQUEST_LEASE_TTL = "10s"
   $env:LLMGATEWAY_REQUEST_EXECUTION_HEARTBEAT_INTERVAL = "200ms"
@@ -163,24 +162,18 @@ try {
     -IdempotencyKey ([guid]::NewGuid().ToString()) -Body @{
       providerId = $provider.id; name = "Capacity Pool"; modelIds = @($model.id)
     }
-  $null = Invoke-CapacityControl -Method Post -Uri "$($gatewayURLs[0])/api/control/model-prices" -Session $adminSession -CSRF $csrf `
-    -IdempotencyKey ([guid]::NewGuid().ToString()) -Body @{
-      modelId = $model.id; currency = "USD"; inputPricePerMillionTokens = "0"; outputPricePerMillionTokens = "0"
-      effectiveAt = (Get-Date).ToUniversalTime().AddMinutes(-1).ToString("o")
-    }
   foreach ($credentialIndex in 1..6) {
     $credential = Invoke-CapacityControl -Method Post -Uri "$($gatewayURLs[0])/api/control/credentials/batch" -Session $adminSession -CSRF $csrf `
       -IdempotencyKey ([guid]::NewGuid().ToString()) -Body @{
         resourcePoolId = $resourcePool.data.id; items = @(@{ name = "Capacity fixture credential $credentialIndex"; secret = "core-upstream-secret" })
-        modelBindings = @(@{ model_id = $model.id; priority = 10; weight = 100 })
+        modelBindings = @(@{ model_id = $model.id })
         rpmLimit = 100000; tpmLimit = 100000000; concurrencyLimit = 128
       }
     if (@($credential.data).Count -ne 1 -or $credential.data[0].status -ne "created") { throw "Capacity credential $credentialIndex was not created." }
   }
   $plan = Invoke-CapacityControl -Method Post -Uri "$($gatewayURLs[0])/api/control/plans" -Session $adminSession -CSRF $csrf `
     -IdempotencyKey ([guid]::NewGuid().ToString()) -Body @{
-      name = "Capacity Plan"; description = ""; kind = "token"
-      tokenQuota = 100000000; validityDays = 1; concurrencyLimit = 16; rpmLimit = 600; tpmLimit = 1000000
+      name = "Capacity Plan"; description = ""
       routes = @(@{ modelId = $model.id; resourcePoolId = $resourcePool.data.id })
     }
   if ($plan.data.current_version.version -ne 1) { throw "Capacity plan version was not published." }
@@ -243,7 +236,7 @@ try {
   $databaseDeadline = (Get-Date).AddSeconds(10)
   do {
     $recoveryFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llmgateway -d llmgateway_capacity -Atc `
-      "SELECT count(*) FROM requests r JOIN ledger_reservations lr ON lr.request_id = r.id WHERE r.idempotency_key LIKE 'recovery-first-%' AND r.status = 'uncertain' AND lr.state = 'reserved'"
+      "SELECT count(*) FROM requests r WHERE r.idempotency_key LIKE 'recovery-first-%' AND r.status = 'uncertain'"
     if ($LASTEXITCODE -ne 0) { throw "Could not inspect crash recovery facts." }
     if ([int]$recoveryFacts -lt 128) { Start-Sleep -Milliseconds 100 }
   } while ([int]$recoveryFacts -lt 128 -and (Get-Date) -lt $databaseDeadline)

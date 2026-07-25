@@ -13,8 +13,8 @@ UPDATE service_plan_mutations SET service_plan_id = sqlc.arg(service_plan_id), r
 WHERE id = sqlc.arg(id) RETURNING *;
 
 -- name: CreateServicePlan :one
-INSERT INTO service_plans (slug, name, description, kind, created_by)
-VALUES (sqlc.arg(slug), sqlc.arg(name), sqlc.arg(description), sqlc.arg(kind), sqlc.arg(created_by))
+INSERT INTO service_plans (slug, name, description, created_by)
+VALUES (sqlc.arg(slug), sqlc.arg(name), sqlc.arg(description), sqlc.arg(created_by))
 RETURNING *;
 
 -- name: GetServicePlanForUpdate :one
@@ -25,12 +25,8 @@ SELECT (coalesce(max(version), 0) + 1)::integer AS version
 FROM service_plan_versions WHERE service_plan_id = sqlc.arg(service_plan_id);
 
 -- name: CreateServicePlanVersion :one
-INSERT INTO service_plan_versions (
-  service_plan_id, version, token_quota, validity_days, concurrency_limit, rpm_limit, tpm_limit, created_by
-) VALUES (
-  sqlc.arg(service_plan_id), sqlc.arg(version), sqlc.arg(token_quota), sqlc.arg(validity_days),
-  sqlc.arg(concurrency_limit), sqlc.narg(rpm_limit), sqlc.narg(tpm_limit), sqlc.arg(created_by)
-) RETURNING *;
+INSERT INTO service_plan_versions (service_plan_id, version, created_by)
+VALUES (sqlc.arg(service_plan_id), sqlc.arg(version), sqlc.arg(created_by)) RETURNING *;
 
 -- name: CreateServicePlanVersionRoute :exec
 INSERT INTO service_plan_version_routes (service_plan_version_id, model_id, resource_pool_id)
@@ -38,7 +34,7 @@ VALUES (sqlc.arg(service_plan_version_id), sqlc.arg(model_id), sqlc.arg(resource
 
 -- name: PublishServicePlanVersion :one
 UPDATE service_plans
-SET name = sqlc.arg(name), description = sqlc.arg(description), kind = sqlc.arg(kind),
+SET name = sqlc.arg(name), description = sqlc.arg(description),
     status = 'active', current_version_id = sqlc.arg(current_version_id), updated_at = now()
 WHERE id = sqlc.arg(id) RETURNING *;
 
@@ -47,8 +43,7 @@ UPDATE service_plans SET status = sqlc.arg(status), updated_at = now()
 WHERE id = sqlc.arg(id) AND status <> 'archived' RETURNING *;
 
 -- name: GetServicePlan :one
-SELECT plan.*, version.version, version.token_quota, version.validity_days,
-       version.concurrency_limit, version.rpm_limit, version.tpm_limit,
+SELECT plan.*, version.version,
        version.created_by AS version_created_by, version.created_at AS version_created_at,
        (SELECT count(*) FROM service_plan_version_routes route WHERE route.service_plan_version_id = version.id) AS route_count
 FROM service_plans plan
@@ -56,14 +51,13 @@ LEFT JOIN service_plan_versions version ON version.id = plan.current_version_id
 WHERE plan.id = sqlc.arg(id);
 
 -- name: ListServicePlans :many
-SELECT plan.*, version.version, version.token_quota, version.validity_days,
-       version.concurrency_limit, version.rpm_limit, version.tpm_limit,
+SELECT plan.*, version.version,
        version.created_by AS version_created_by, version.created_at AS version_created_at,
        (SELECT count(*) FROM service_plan_version_routes route WHERE route.service_plan_version_id = version.id) AS route_count,
        (SELECT count(*) FROM subscriptions subscription
         WHERE subscription.service_plan_version_id = version.id
           AND subscription.status IN ('scheduled', 'active')
-          AND subscription.expires_at > now()) AS active_subscription_count
+          AND (subscription.expires_at IS NULL OR subscription.expires_at > now())) AS active_subscription_count
 FROM service_plans plan
 LEFT JOIN service_plan_versions version ON version.id = plan.current_version_id
 WHERE (sqlc.arg(include_archived)::boolean OR plan.status <> 'archived')
@@ -100,12 +94,9 @@ UPDATE subscription_mutations SET subscription_id = sqlc.arg(subscription_id), r
 WHERE id = sqlc.arg(id) RETURNING *;
 
 -- name: CreateSubscription :one
-INSERT INTO subscriptions (
-  user_id, service_plan_version_id, status, granted_tokens, starts_at, expires_at, notes, assigned_by
-) VALUES (
-  sqlc.arg(user_id), sqlc.arg(service_plan_version_id), sqlc.arg(status), sqlc.arg(granted_tokens),
-  sqlc.arg(starts_at), sqlc.arg(expires_at), sqlc.arg(notes), sqlc.arg(assigned_by)
-) RETURNING *;
+INSERT INTO subscriptions (user_id, service_plan_version_id, status, starts_at, expires_at, notes, assigned_by)
+VALUES (sqlc.arg(user_id), sqlc.arg(service_plan_version_id), sqlc.arg(status), sqlc.arg(starts_at), sqlc.narg(expires_at), sqlc.arg(notes), sqlc.arg(assigned_by))
+RETURNING *;
 
 -- name: GetSubscriptionForUpdate :one
 SELECT * FROM subscriptions WHERE id = sqlc.arg(id) FOR UPDATE;
@@ -121,7 +112,7 @@ RETURNING *;
 
 -- name: UpdateSubscriptionTerm :one
 UPDATE subscriptions
-SET granted_tokens = sqlc.arg(granted_tokens), starts_at = sqlc.arg(starts_at), expires_at = sqlc.arg(expires_at),
+SET starts_at = sqlc.arg(starts_at), expires_at = sqlc.narg(expires_at),
     notes = sqlc.arg(notes),
     status = sqlc.arg(status), suspended_at = NULL, canceled_at = NULL,
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
@@ -129,10 +120,9 @@ WHERE id = sqlc.arg(id) AND status <> 'canceled' AND updated_at = sqlc.arg(expec
 RETURNING *;
 
 -- name: GetSubscription :one
-SELECT subscription.*, plan.id AS service_plan_id, plan.name AS service_plan_name, plan.kind AS plan_kind,
-       version.version AS plan_version, version.concurrency_limit, version.rpm_limit, version.tpm_limit,
-       member.email AS member_email, member.display_name AS member_name,
-       coalesce((SELECT sum(event.token_delta) FROM ledger_events event WHERE event.subscription_id = subscription.id), 0)::bigint AS balance_tokens
+SELECT subscription.*, plan.id AS service_plan_id, plan.name AS service_plan_name,
+       version.version AS plan_version,
+       member.email AS member_email, member.display_name AS member_name
 FROM subscriptions subscription
 JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
 JOIN service_plans plan ON plan.id = version.service_plan_id
@@ -140,10 +130,9 @@ JOIN users member ON member.id = subscription.user_id
 WHERE subscription.id = sqlc.arg(id);
 
 -- name: ListSubscriptions :many
-SELECT subscription.*, plan.id AS service_plan_id, plan.name AS service_plan_name, plan.kind AS plan_kind,
-       version.version AS plan_version, version.concurrency_limit, version.rpm_limit, version.tpm_limit,
-       member.email AS member_email, member.display_name AS member_name,
-       coalesce((SELECT sum(event.token_delta) FROM ledger_events event WHERE event.subscription_id = subscription.id), 0)::bigint AS balance_tokens
+SELECT subscription.*, plan.id AS service_plan_id, plan.name AS service_plan_name,
+       version.version AS plan_version,
+       member.email AS member_email, member.display_name AS member_name
 FROM subscriptions subscription
 JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
 JOIN service_plans plan ON plan.id = version.service_plan_id
@@ -153,7 +142,7 @@ WHERE (sqlc.narg(user_id)::uuid IS NULL OR subscription.user_id = sqlc.narg(user
   AND (sqlc.arg(status)::text = '' OR
        CASE
          WHEN subscription.status IN ('suspended', 'canceled') THEN subscription.status::text
-         WHEN subscription.expires_at <= now() THEN 'expired'
+         WHEN subscription.expires_at IS NOT NULL AND subscription.expires_at <= now() THEN 'expired'
          WHEN subscription.starts_at > now() THEN 'scheduled'
          ELSE 'active'
        END = sqlc.arg(status)::text)
@@ -171,21 +160,20 @@ WHERE (sqlc.narg(user_id)::uuid IS NULL OR subscription.user_id = sqlc.narg(user
   AND (sqlc.arg(status)::text = '' OR
        CASE
          WHEN subscription.status IN ('suspended', 'canceled') THEN subscription.status::text
-         WHEN subscription.expires_at <= now() THEN 'expired'
+         WHEN subscription.expires_at IS NOT NULL AND subscription.expires_at <= now() THEN 'expired'
          WHEN subscription.starts_at > now() THEN 'scheduled'
          ELSE 'active'
        END = sqlc.arg(status)::text);
 
 -- name: GetApplicableSubscriptionRoutesForUpdate :many
-SELECT subscription.*, version.concurrency_limit, version.rpm_limit, version.tpm_limit,
-       route.resource_pool_id
+SELECT subscription.*, route.resource_pool_id
 FROM subscriptions subscription
 JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
 JOIN service_plan_version_routes route ON route.service_plan_version_id = version.id
 JOIN resource_pools pool ON pool.id = route.resource_pool_id
 WHERE subscription.user_id = sqlc.arg(user_id) AND route.model_id = sqlc.arg(model_id)
   AND subscription.status IN ('scheduled', 'active')
-  AND subscription.starts_at <= now() AND subscription.expires_at > now()
+  AND subscription.starts_at <= now() AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
   AND pool.status = 'active'
-ORDER BY subscription.expires_at, subscription.created_at, subscription.id
+ORDER BY subscription.expires_at NULLS LAST, subscription.created_at, subscription.id
 FOR UPDATE OF subscription;

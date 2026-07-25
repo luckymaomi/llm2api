@@ -3,6 +3,7 @@ import type {
   Credential,
   CredentialBatchInput,
   CredentialBatchResult,
+  ModelDiscoveryResult,
   CredentialProbeResult,
   CredentialStatus,
   CredentialUpdateInput,
@@ -84,10 +85,7 @@ export const catalogApi = {
     apiClient
       .request<CredentialBatchResultWire[]>(`${base}/credentials/batch`, {
         method: 'POST',
-        body: {
-          ...input,
-          modelBindings: input.modelBindings.map(bindingBody),
-        },
+        body: input,
         headers: mutationHeaders(idempotencyKey),
       })
       .then((items) => items.map(mapBatchResult)),
@@ -112,9 +110,23 @@ export const catalogApi = {
         headers: mutationHeaders(idempotencyKey),
       })
       .then(mapCredential),
-  probeCredential: (id: string, modelId: string, signal?: AbortSignal) =>
+  probeCredential: (
+    id: string,
+    expectedUpdatedAt: string,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ) =>
     apiClient
-      .request<CredentialProbeWire>(`${base}/credentials/${encodeURIComponent(id)}/probe`, {
+      .request<ModelDiscoveryWire>(`${base}/credentials/${encodeURIComponent(id)}/probe`, {
+        method: 'POST',
+        body: { expectedUpdatedAt },
+        headers: mutationHeaders(idempotencyKey),
+        ...(signal ? { signal } : {}),
+      })
+      .then(mapDiscoveryResult),
+  deepTestCredential: (id: string, modelId: string, signal?: AbortSignal) =>
+    apiClient
+      .request<CredentialProbeWire>(`${base}/credentials/${encodeURIComponent(id)}/deep-test`, {
         method: 'POST',
         body: { modelId },
         ...(signal ? { signal } : {}),
@@ -213,8 +225,6 @@ interface CredentialWire {
   model_bindings: Array<{
     model_id: string
     model_name?: string
-    priority: number
-    weight: number
   }>
 }
 
@@ -240,6 +250,17 @@ interface CredentialProbeWire {
     input_tokens?: number
     output_tokens?: number
     request_id: string
+  }
+}
+
+interface ModelDiscoveryWire {
+  credential: CredentialWire
+  execution: {
+    status: ModelDiscoveryResult['status']
+    error_kind?: string
+    retryable: boolean
+    latency_ms: number
+    models: string[]
   }
 }
 
@@ -355,18 +376,12 @@ function mapCredential(credential: CredentialWire): Credential {
     modelBindings: credential.model_bindings.map((binding) => ({
       modelId: binding.model_id,
       modelName: binding.model_name ?? binding.model_id,
-      priority: binding.priority,
-      weight: binding.weight,
     })),
   }
 }
 
-function bindingBody(binding: Omit<Credential['modelBindings'][number], 'modelName'>) {
-  return { model_id: binding.modelId, priority: binding.priority, weight: binding.weight }
-}
-
 function credentialBody(input: CredentialUpdateInput) {
-  return { ...input, modelBindings: input.modelBindings.map(bindingBody) }
+  return input
 }
 
 function mapBatchResult(result: CredentialBatchResultWire): CredentialBatchResult {
@@ -394,5 +409,17 @@ function mapProbeResult(result: CredentialProbeWire): CredentialProbeResult {
     ...(execution.input_tokens !== undefined ? { inputTokens: execution.input_tokens } : {}),
     ...(execution.output_tokens !== undefined ? { outputTokens: execution.output_tokens } : {}),
     requestId: execution.request_id,
+  }
+}
+
+function mapDiscoveryResult(result: ModelDiscoveryWire): ModelDiscoveryResult {
+  const execution = result.execution
+  return {
+    credential: mapCredential(result.credential),
+    status: execution.status,
+    ...(execution.error_kind ? { errorKind: execution.error_kind } : {}),
+    retryable: execution.retryable,
+    latencyMillis: execution.latency_ms,
+    models: execution.models,
   }
 }

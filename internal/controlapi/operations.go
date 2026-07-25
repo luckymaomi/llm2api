@@ -59,14 +59,12 @@ type administratorResourcesView struct {
 	ActiveServicePlanCount         int64 `json:"activeServicePlanCount"`
 	ActiveSubscriptionCount        int64 `json:"activeSubscriptionCount"`
 	HasActiveUpstream              bool  `json:"hasActiveUpstream"`
-	HasModelPrice                  bool  `json:"hasModelPrice"`
 	HasCompletedRequest            bool  `json:"hasCompletedRequest"`
 }
 
 type memberAccessView struct {
 	ActiveGatewayKeyCount     int64      `json:"activeApiKeyCount"`
 	ActiveSubscriptionCount   int64      `json:"activeSubscriptionCount"`
-	RemainingTokens           int64      `json:"remainingTokens"`
 	NearestSubscriptionExpiry *time.Time `json:"nearestSubscriptionExpiry,omitempty"`
 }
 
@@ -134,7 +132,7 @@ func presentAdministratorResources(resources operations.AdministratorResources) 
 		SuccessfulCredentialProbeCount: resources.SuccessfulCredentialProbeCount,
 		ActiveMemberCount:              resources.ActiveMemberCount,
 		ActiveGatewayKeyCount:          resources.ActiveGatewayKeyCount, ActiveServicePlanCount: resources.ActiveServicePlanCount,
-		ActiveSubscriptionCount: resources.ActiveSubscriptionCount, HasActiveUpstream: resources.HasActiveUpstream, HasModelPrice: resources.HasModelPrice,
+		ActiveSubscriptionCount: resources.ActiveSubscriptionCount, HasActiveUpstream: resources.HasActiveUpstream,
 		HasCompletedRequest: resources.HasCompletedRequest,
 	}
 }
@@ -142,7 +140,7 @@ func presentAdministratorResources(resources operations.AdministratorResources) 
 func presentMemberAccess(access operations.MemberAccess) memberAccessView {
 	return memberAccessView{
 		ActiveGatewayKeyCount: access.ActiveGatewayKeyCount, ActiveSubscriptionCount: access.ActiveSubscriptionCount,
-		RemainingTokens: access.RemainingTokens, NearestSubscriptionExpiry: utcTimePointer(access.NearestSubscriptionExpiry),
+		NearestSubscriptionExpiry: utcTimePointer(access.NearestSubscriptionExpiry),
 	}
 }
 

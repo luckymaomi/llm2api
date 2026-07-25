@@ -47,6 +47,8 @@ func (a *API) writeRegistryError(w http.ResponseWriter, r *http.Request, err err
 		value.Status, value.Code, value.Message, value.Retryable = http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used for different registry input.", false
 	case errors.Is(err, registry.ErrOutcomeUnknown):
 		value.Status, value.Code, value.Message, value.Retryable = http.StatusServiceUnavailable, "operation_outcome_unknown", "The resource operation may have committed. Retry with the same Idempotency-Key.", true
+	case errors.Is(err, registry.ErrModelDiscovery):
+		value.Status, value.Code, value.Message, value.Retryable = http.StatusBadGateway, "model_discovery_failed", "Could not read a valid model list from the upstream API Key.", true
 	default:
 		a.logFailure("registry operation failed", r, err)
 	}

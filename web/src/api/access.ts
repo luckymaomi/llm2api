@@ -3,6 +3,7 @@ import type {
   CreatedGatewayKey,
   CreatedMember,
   GatewayKey,
+  GatewayKeyRoute,
   ListQuery,
   Page,
   SessionRevocation,
@@ -16,7 +17,7 @@ const mutationHeaders = (idempotencyKey: string) => ({ 'Idempotency-Key': idempo
 export interface GatewayKeyInput {
   ownerId: string
   name: string
-  authorizedModelIds: string[]
+  routes: Array<Pick<GatewayKeyRoute, 'modelId' | 'resourcePoolId'>>
   expiresAt?: string
 }
 
@@ -75,8 +76,7 @@ export const accessApi = {
       body: input,
       headers: mutationHeaders(idempotencyKey),
     }),
-  revokeKey: (id: string) =>
-    apiClient.request<GatewayKey>(`${item('keys', id)}/revoke`, { method: 'POST' }),
+  deleteKey: (id: string) => apiClient.request<void>(item('keys', id), { method: 'DELETE' }),
   replaceKey: (id: string, idempotencyKey: string) =>
     apiClient.request<CreatedGatewayKey>(`${item('keys', id)}/replacement`, {
       method: 'POST',

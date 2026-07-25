@@ -17,7 +17,7 @@ import (
 )
 
 func TestAccountRecoveryPersistsPasswordSessionAndAuditFacts(t *testing.T) {
-	pool := gatewayKeyRevocationTestPool(t)
+	pool := identityTestPool(t)
 	ctx := context.Background()
 	administratorID := insertRecoveryUser(t, pool, identity.RoleAdministrator, identity.StatusActive)
 	memberID := insertRecoveryUser(t, pool, identity.RoleMember, identity.StatusActive)
@@ -73,7 +73,7 @@ func TestAccountRecoveryPersistsPasswordSessionAndAuditFacts(t *testing.T) {
 }
 
 func TestOfflineAdministratorRecoveryRejectsMembersAndRevokesSessions(t *testing.T) {
-	pool := gatewayKeyRevocationTestPool(t)
+	pool := identityTestPool(t)
 	ctx := context.Background()
 	administratorID := insertRecoveryUser(t, pool, identity.RoleAdministrator, identity.StatusDisabled)
 	memberID := insertRecoveryUser(t, pool, identity.RoleMember, identity.StatusActive)
@@ -122,7 +122,7 @@ func TestOfflineAdministratorRecoveryRejectsMembersAndRevokesSessions(t *testing
 }
 
 func TestSessionRevocationPreservesAdministratorCurrentSession(t *testing.T) {
-	pool := gatewayKeyRevocationTestPool(t)
+	pool := identityTestPool(t)
 	ctx := context.Background()
 	administratorID := insertRecoveryUser(t, pool, identity.RoleAdministrator, identity.StatusActive)
 	sessionIDs := insertRecoverySessions(t, pool, administratorID, 3)

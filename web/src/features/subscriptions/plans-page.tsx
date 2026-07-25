@@ -10,7 +10,6 @@ import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { FormProblem } from '@/features/auth/form-problem'
-import { formatNumber } from '@/lib/format'
 
 import { PlanForm } from './plan-form'
 
@@ -49,21 +48,10 @@ export function PlansPage() {
         ),
       },
       {
-        accessorKey: 'kind',
-        header: '类型',
-        cell: ({ row }) => (row.original.kind === 'coding' ? '编程套餐' : '通用 Token 套餐'),
-      },
-      {
         id: 'version',
         header: '版本',
         cell: ({ row }) =>
           row.original.currentVersion ? `v${row.original.currentVersion.version}` : '—',
-        meta: { align: 'right' },
-      },
-      {
-        id: 'quota',
-        header: '总额度（Token）',
-        cell: ({ row }) => formatNumber(row.original.currentVersion?.tokenQuota ?? 0),
         meta: { align: 'right' },
       },
       {

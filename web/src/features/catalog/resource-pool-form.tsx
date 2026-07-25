@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 
 import { catalogApi, type ResourcePool } from '@/api'
 import { Button } from '@/components/ui/button'
@@ -19,21 +19,11 @@ export function ResourcePoolForm({
   const queryClient = useQueryClient()
   const [providerId, setProviderId] = useState(pool?.providerId ?? '')
   const [name, setName] = useState(pool?.name ?? '')
-  const [modelIds, setModelIds] = useState<string[]>(pool?.models.map((model) => model.id) ?? [])
   const providers = useQuery({
     queryKey: ['providers', 'resource-pool-form'],
     queryFn: ({ signal }) => catalogApi.providers(signal),
     enabled: open && pool === null,
   })
-  const models = useQuery({
-    queryKey: ['models', 'resource-pool-form'],
-    queryFn: ({ signal }) => catalogApi.models(signal),
-    enabled: open && pool === null,
-  })
-  const selectableModels = useMemo(
-    () => (models.data ?? []).filter((model) => model.providerId === providerId),
-    [models.data, providerId],
-  )
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -43,10 +33,7 @@ export function ResourcePoolForm({
             { name: name.trim(), expectedUpdatedAt: pool.updatedAt },
             crypto.randomUUID(),
           )
-        : catalogApi.createResourcePool(
-            { providerId, name: name.trim(), modelIds },
-            crypto.randomUUID(),
-          ),
+        : catalogApi.createResourcePool({ providerId, name: name.trim() }, crypto.randomUUID()),
     async onSuccess() {
       await queryClient.invalidateQueries({ queryKey: ['resource-pools'] })
       onOpenChange(false)
@@ -55,7 +42,7 @@ export function ResourcePoolForm({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!name.trim() || (!pool && (!providerId || modelIds.length === 0))) return
+    if (!name.trim() || (!pool && !providerId)) return
     mutation.mutate()
   }
 
@@ -91,10 +78,7 @@ export function ResourcePoolForm({
             required
             value={providerId}
             disabled={locked || pool !== null}
-            onChange={(event) => {
-              setProviderId(event.target.value)
-              setModelIds([])
-            }}
+            onChange={(event) => setProviderId(event.target.value)}
           >
             <option value="">选择平台</option>
             {(providers.data ?? []).map((provider) => (
@@ -113,7 +97,7 @@ export function ResourcePoolForm({
             onChange={(event) => setName(event.target.value)}
           />
         </Field>
-        {pool ? (
+        {pool && pool.models.length > 0 ? (
           <Field label="模型" htmlFor="pool-model-summary">
             <Input
               id="pool-model-summary"
@@ -121,45 +105,8 @@ export function ResourcePoolForm({
               readOnly
             />
           </Field>
-        ) : (
-          <fieldset className="choice-field field--full">
-            <legend>提供的模型</legend>
-            <p className="choice-field__hint">勾选这个资源池实际能够提供的模型</p>
-            <div className="choice-grid">
-              {selectableModels.map((model) => (
-                <label key={model.id}>
-                  <input
-                    type="checkbox"
-                    checked={modelIds.includes(model.id)}
-                    disabled={locked}
-                    onChange={(event) =>
-                      setModelIds((current) =>
-                        event.target.checked
-                          ? [...current, model.id]
-                          : current.filter((id) => id !== model.id),
-                      )
-                    }
-                  />
-                  <span>
-                    {model.displayName}
-                    <small className="table-subline">{model.publicName}</small>
-                  </span>
-                </label>
-              ))}
-            </div>
-            {providerId === '' ? (
-              <p className="choice-field__empty">选择上游平台后显示可用模型</p>
-            ) : providers.isLoading || models.isLoading ? (
-              <p className="choice-field__empty">正在读取可用模型</p>
-            ) : selectableModels.length === 0 ? (
-              <p className="choice-field__empty">该上游平台当前没有可用模型</p>
-            ) : null}
-            {providerId && selectableModels.length > 0 && modelIds.length === 0 ? (
-              <span className="field__error">至少选择一个模型</span>
-            ) : null}
-          </fieldset>
-        )}
-        <FormProblem error={mutation.error ?? providers.error ?? models.error} />
+        ) : null}
+        <FormProblem error={mutation.error ?? providers.error} />
       </form>
     </DialogFrame>
   )

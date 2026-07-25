@@ -11,13 +11,13 @@ import (
 	"github.com/luckymaomi/llmgateway/internal/config"
 	"github.com/luckymaomi/llmgateway/internal/coordination"
 	"github.com/luckymaomi/llmgateway/internal/observability"
-	"github.com/luckymaomi/llmgateway/internal/quota"
 	"github.com/luckymaomi/llmgateway/internal/registry"
 	"github.com/luckymaomi/llmgateway/internal/requestflow"
 	"github.com/luckymaomi/llmgateway/internal/resilience"
 	"github.com/luckymaomi/llmgateway/internal/routing"
 	"github.com/luckymaomi/llmgateway/internal/security"
 	"github.com/luckymaomi/llmgateway/internal/store"
+	"github.com/luckymaomi/llmgateway/internal/usage"
 )
 
 type systemClock struct{}
@@ -29,7 +29,7 @@ type runtimeRandom struct{}
 func (runtimeRandom) Intn(limit int) int       { return rand.IntN(limit) }
 func (runtimeRandom) Int63n(limit int64) int64 { return rand.Int64N(limit) }
 
-func newRequestWorkflow(cfg config.Config, connections *store.Connections, registryService *registry.Service, quotaService *quota.Service, runtimeMetrics *observability.RuntimeMetrics) (*requestflow.Service, error) {
+func newRequestWorkflow(cfg config.Config, connections *store.Connections, registryService *registry.Service, usageService *usage.Service, runtimeMetrics *observability.RuntimeMetrics) (*requestflow.Service, error) {
 	rootCAs, err := providerRootCAs(cfg.Security.ProviderCABundleFile)
 	if err != nil {
 		return nil, fmt.Errorf("load provider CA bundle: %w", err)
@@ -48,13 +48,13 @@ func newRequestWorkflow(cfg config.Config, connections *store.Connections, regis
 	}
 	gate, err := admission.NewGate(admission.Config{
 		MaxQueued: cfg.RequestFlow.MaxQueued, MaxActive: cfg.RequestFlow.MaxActive,
-		MaxActivePerUser: cfg.RequestFlow.MaxActivePerUser, MaxQueueWait: cfg.RequestFlow.MaxQueueWait,
+		MaxQueueWait: cfg.RequestFlow.MaxQueueWait,
 	}, systemClock{})
 	if err != nil {
 		return nil, fmt.Errorf("initialize request admission gate: %w", err)
 	}
 	admitter, err := requestflow.NewAdmissionAdapter(gate, admissionCoordinator, requestflow.AdmissionCoordinationConfig{
-		MaxActive: int64(cfg.RequestFlow.MaxActive), MaxActivePerUser: int64(cfg.RequestFlow.MaxActivePerUser),
+		MaxActive:    int64(cfg.RequestFlow.MaxActive),
 		MaxQueueWait: cfg.RequestFlow.MaxQueueWait, RetryInterval: cfg.RequestFlow.AdmissionRetryInterval,
 		LeaseTTL: cfg.RequestFlow.LeaseTTL,
 	})
@@ -62,15 +62,14 @@ func newRequestWorkflow(cfg config.Config, connections *store.Connections, regis
 		return nil, fmt.Errorf("initialize request admission adapter: %w", err)
 	}
 	coordinationAdapter, err := requestflow.NewCoordinationAdapter(coordinator, requestflow.CoordinationConfig{
-		Global: capacity(cfg.RequestFlow.Global), ResourcePool: capacity(cfg.RequestFlow.ResourcePool), User: capacity(cfg.RequestFlow.User),
-		GatewayKey: capacity(cfg.RequestFlow.GatewayKey), Model: capacity(cfg.RequestFlow.Model),
+		Global: capacity(cfg.RequestFlow.Global), ResourcePool: capacity(cfg.RequestFlow.ResourcePool), Model: capacity(cfg.RequestFlow.Model),
 		Provider: capacity(cfg.RequestFlow.Provider), DefaultCredential: capacity(cfg.RequestFlow.Credential),
-		LeaseTTL: cfg.RequestFlow.LeaseTTL, RetryInterval: cfg.RequestFlow.AdmissionRetryInterval,
+		LeaseTTL: cfg.RequestFlow.LeaseTTL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize request coordination adapter: %w", err)
 	}
-	accounting, err := requestflow.NewQuotaAdapter(quotaService)
+	accounting, err := requestflow.NewUsageAdapter(usageService)
 	if err != nil {
 		return nil, fmt.Errorf("initialize request accounting: %w", err)
 	}

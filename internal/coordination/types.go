@@ -7,9 +7,6 @@ type Scope string
 const (
 	ScopeGlobal       Scope = "global"
 	ScopeResourcePool Scope = "resource_pool"
-	ScopeUser         Scope = "user"
-	ScopeSubscription Scope = "subscription"
-	ScopeGatewayKey   Scope = "gateway_key"
 	ScopeModel        Scope = "model"
 	ScopeProvider     Scope = "provider"
 	ScopeCredential   Scope = "credential"

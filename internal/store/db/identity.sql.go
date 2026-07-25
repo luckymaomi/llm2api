@@ -12,17 +12,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const bindGatewayKeyModel = `-- name: BindGatewayKeyModel :exec
-INSERT INTO gateway_key_models (gateway_key_id, model_id) VALUES ($1, $2)
+const bindGatewayKeyRoute = `-- name: BindGatewayKeyRoute :exec
+INSERT INTO gateway_key_models (gateway_key_id, model_id, resource_pool_id)
+VALUES ($1, $2, $3)
 `
 
-type BindGatewayKeyModelParams struct {
-	GatewayKeyID uuid.UUID `json:"gateway_key_id"`
-	ModelID      uuid.UUID `json:"model_id"`
+type BindGatewayKeyRouteParams struct {
+	GatewayKeyID   uuid.UUID `json:"gateway_key_id"`
+	ModelID        uuid.UUID `json:"model_id"`
+	ResourcePoolID uuid.UUID `json:"resource_pool_id"`
 }
 
-func (q *Queries) BindGatewayKeyModel(ctx context.Context, arg BindGatewayKeyModelParams) error {
-	_, err := q.db.Exec(ctx, bindGatewayKeyModel, arg.GatewayKeyID, arg.ModelID)
+func (q *Queries) BindGatewayKeyRoute(ctx context.Context, arg BindGatewayKeyRouteParams) error {
+	_, err := q.db.Exec(ctx, bindGatewayKeyRoute, arg.GatewayKeyID, arg.ModelID, arg.ResourcePoolID)
 	return err
 }
 
@@ -184,7 +186,7 @@ func (q *Queries) CountUsers(ctx context.Context, arg CountUsersParams) (int64, 
 const createGatewayKey = `-- name: CreateGatewayKey :one
 INSERT INTO gateway_keys (user_id, name, prefix, secret_digest, expires_at)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, name, prefix, secret_digest, expires_at, revoked_at, last_used_at, created_at
+RETURNING id, user_id, name, prefix, secret_digest, expires_at, deleted_at, last_used_at, created_at
 `
 
 type CreateGatewayKeyParams struct {
@@ -211,7 +213,7 @@ func (q *Queries) CreateGatewayKey(ctx context.Context, arg CreateGatewayKeyPara
 		&i.Prefix,
 		&i.SecretDigest,
 		&i.ExpiresAt,
-		&i.RevokedAt,
+		&i.DeletedAt,
 		&i.LastUsedAt,
 		&i.CreatedAt,
 	)
@@ -302,10 +304,22 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const deleteGatewayKeysForUser = `-- name: DeleteGatewayKeysForUser :execrows
+UPDATE gateway_keys SET deleted_at = now() WHERE user_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) DeleteGatewayKeysForUser(ctx context.Context, userID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteGatewayKeysForUser, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getGatewayKeyByDigest = `-- name: GetGatewayKeyByDigest :one
-SELECT key.id, key.user_id, key.name, key.prefix, key.secret_digest, key.expires_at, key.revoked_at, key.last_used_at, key.created_at, member.status AS user_status, member.role AS user_role
+SELECT key.id, key.user_id, key.name, key.prefix, key.secret_digest, key.expires_at, key.deleted_at, key.last_used_at, key.created_at, member.status AS user_status, member.role AS user_role
 FROM gateway_keys key JOIN users member ON member.id = key.user_id
-WHERE key.secret_digest = $1 AND key.revoked_at IS NULL
+WHERE key.secret_digest = $1 AND key.deleted_at IS NULL
   AND (key.expires_at IS NULL OR key.expires_at > now())
 `
 
@@ -316,7 +330,7 @@ type GetGatewayKeyByDigestRow struct {
 	Prefix       string             `json:"prefix"`
 	SecretDigest []byte             `json:"secret_digest"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
 	LastUsedAt   pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UserStatus   UserStatus         `json:"user_status"`
@@ -333,7 +347,7 @@ func (q *Queries) GetGatewayKeyByDigest(ctx context.Context, secretDigest []byte
 		&i.Prefix,
 		&i.SecretDigest,
 		&i.ExpiresAt,
-		&i.RevokedAt,
+		&i.DeletedAt,
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UserStatus,
@@ -342,10 +356,43 @@ func (q *Queries) GetGatewayKeyByDigest(ctx context.Context, secretDigest []byte
 	return i, err
 }
 
+const getGatewayKeyDeletionState = `-- name: GetGatewayKeyDeletionState :one
+SELECT user_id, deleted_at FROM gateway_keys WHERE id = $1
+`
+
+type GetGatewayKeyDeletionStateRow struct {
+	UserID    uuid.UUID          `json:"user_id"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+func (q *Queries) GetGatewayKeyDeletionState(ctx context.Context, id uuid.UUID) (GetGatewayKeyDeletionStateRow, error) {
+	row := q.db.QueryRow(ctx, getGatewayKeyDeletionState, id)
+	var i GetGatewayKeyDeletionStateRow
+	err := row.Scan(&i.UserID, &i.DeletedAt)
+	return i, err
+}
+
+const getGatewayKeyForDeletion = `-- name: GetGatewayKeyForDeletion :one
+SELECT id, user_id, deleted_at FROM gateway_keys WHERE id = $1 FOR UPDATE
+`
+
+type GetGatewayKeyForDeletionRow struct {
+	ID        uuid.UUID          `json:"id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+func (q *Queries) GetGatewayKeyForDeletion(ctx context.Context, id uuid.UUID) (GetGatewayKeyForDeletionRow, error) {
+	row := q.db.QueryRow(ctx, getGatewayKeyForDeletion, id)
+	var i GetGatewayKeyForDeletionRow
+	err := row.Scan(&i.ID, &i.UserID, &i.DeletedAt)
+	return i, err
+}
+
 const getGatewayKeyForReplacement = `-- name: GetGatewayKeyForReplacement :one
-SELECT id, user_id, name, prefix, expires_at, revoked_at, last_used_at, created_at
+SELECT id, user_id, name, prefix, expires_at, deleted_at, last_used_at, created_at
 FROM gateway_keys
-WHERE id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+WHERE id = $1 AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > now())
 FOR UPDATE
 `
 
@@ -355,7 +402,7 @@ type GetGatewayKeyForReplacementRow struct {
 	Name       string             `json:"name"`
 	Prefix     string             `json:"prefix"`
 	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
-	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
 	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
@@ -369,27 +416,10 @@ func (q *Queries) GetGatewayKeyForReplacement(ctx context.Context, id uuid.UUID)
 		&i.Name,
 		&i.Prefix,
 		&i.ExpiresAt,
-		&i.RevokedAt,
+		&i.DeletedAt,
 		&i.LastUsedAt,
 		&i.CreatedAt,
 	)
-	return i, err
-}
-
-const getGatewayKeyForRevocation = `-- name: GetGatewayKeyForRevocation :one
-SELECT id, user_id, revoked_at FROM gateway_keys WHERE id = $1 FOR UPDATE
-`
-
-type GetGatewayKeyForRevocationRow struct {
-	ID        uuid.UUID          `json:"id"`
-	UserID    uuid.UUID          `json:"user_id"`
-	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
-}
-
-func (q *Queries) GetGatewayKeyForRevocation(ctx context.Context, id uuid.UUID) (GetGatewayKeyForRevocationRow, error) {
-	row := q.db.QueryRow(ctx, getGatewayKeyForRevocation, id)
-	var i GetGatewayKeyForRevocationRow
-	err := row.Scan(&i.ID, &i.UserID, &i.RevokedAt)
 	return i, err
 }
 
@@ -420,9 +450,9 @@ func (q *Queries) GetGatewayKeyMutation(ctx context.Context, arg GetGatewayKeyMu
 }
 
 const getGatewayKeyPrincipalByID = `-- name: GetGatewayKeyPrincipalByID :one
-SELECT key.id, key.user_id, key.name, key.prefix, key.secret_digest, key.expires_at, key.revoked_at, key.last_used_at, key.created_at, member.status AS user_status, member.role AS user_role
+SELECT key.id, key.user_id, key.name, key.prefix, key.secret_digest, key.expires_at, key.deleted_at, key.last_used_at, key.created_at, member.status AS user_status, member.role AS user_role
 FROM gateway_keys key JOIN users member ON member.id = key.user_id
-WHERE key.id = $1 AND key.revoked_at IS NULL
+WHERE key.id = $1 AND key.deleted_at IS NULL
   AND (key.expires_at IS NULL OR key.expires_at > now())
 `
 
@@ -433,7 +463,7 @@ type GetGatewayKeyPrincipalByIDRow struct {
 	Prefix       string             `json:"prefix"`
 	SecretDigest []byte             `json:"secret_digest"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
 	LastUsedAt   pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UserStatus   UserStatus         `json:"user_status"`
@@ -450,7 +480,7 @@ func (q *Queries) GetGatewayKeyPrincipalByID(ctx context.Context, id uuid.UUID) 
 		&i.Prefix,
 		&i.SecretDigest,
 		&i.ExpiresAt,
-		&i.RevokedAt,
+		&i.DeletedAt,
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UserStatus,
@@ -459,19 +489,25 @@ func (q *Queries) GetGatewayKeyPrincipalByID(ctx context.Context, id uuid.UUID) 
 	return i, err
 }
 
-const getGatewayKeyRevocationState = `-- name: GetGatewayKeyRevocationState :one
-SELECT user_id, revoked_at FROM gateway_keys WHERE id = $1
+const getGatewayKeyRoute = `-- name: GetGatewayKeyRoute :one
+SELECT model_id, resource_pool_id FROM gateway_key_models
+WHERE gateway_key_id = $1 AND model_id = $2
 `
 
-type GetGatewayKeyRevocationStateRow struct {
-	UserID    uuid.UUID          `json:"user_id"`
-	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+type GetGatewayKeyRouteParams struct {
+	GatewayKeyID uuid.UUID `json:"gateway_key_id"`
+	ModelID      uuid.UUID `json:"model_id"`
 }
 
-func (q *Queries) GetGatewayKeyRevocationState(ctx context.Context, id uuid.UUID) (GetGatewayKeyRevocationStateRow, error) {
-	row := q.db.QueryRow(ctx, getGatewayKeyRevocationState, id)
-	var i GetGatewayKeyRevocationStateRow
-	err := row.Scan(&i.UserID, &i.RevokedAt)
+type GetGatewayKeyRouteRow struct {
+	ModelID        uuid.UUID `json:"model_id"`
+	ResourcePoolID uuid.UUID `json:"resource_pool_id"`
+}
+
+func (q *Queries) GetGatewayKeyRoute(ctx context.Context, arg GetGatewayKeyRouteParams) (GetGatewayKeyRouteRow, error) {
+	row := q.db.QueryRow(ctx, getGatewayKeyRoute, arg.GatewayKeyID, arg.ModelID)
+	var i GetGatewayKeyRouteRow
+	err := row.Scan(&i.ModelID, &i.ResourcePoolID)
 	return i, err
 }
 
@@ -504,36 +540,52 @@ func (q *Queries) GetMemberMutation(ctx context.Context, arg GetMemberMutationPa
 	return i, err
 }
 
-const getModelForGatewayKeyBinding = `-- name: GetModelForGatewayKeyBinding :one
-SELECT model.id, model.public_name
+const getRouteForGatewayKeyBinding = `-- name: GetRouteForGatewayKeyBinding :one
+SELECT model.id AS model_id, model.public_name, pool.id AS resource_pool_id, pool.name AS resource_pool_name
 FROM models model
-WHERE model.id = $1
-  AND EXISTS (
-    SELECT 1
-    FROM subscriptions subscription
-    JOIN service_plan_versions version ON version.id = subscription.service_plan_version_id
-    JOIN service_plan_version_routes route ON route.service_plan_version_id = version.id AND route.model_id = model.id
-    WHERE subscription.user_id = $2
-      AND subscription.status = 'active'
-      AND subscription.starts_at <= now() AND subscription.expires_at > now()
+JOIN resource_pool_models pool_model ON pool_model.model_id = model.id
+JOIN resource_pools pool ON pool.id = pool_model.resource_pool_id
+JOIN users owner ON owner.id = $1
+WHERE model.id = $2 AND pool.id = $3
+  AND pool.status = 'active'
+  AND (
+    owner.role = 'administrator'
+    OR EXISTS (
+      SELECT 1
+      FROM subscriptions subscription
+      JOIN service_plan_version_routes route ON route.service_plan_version_id = subscription.service_plan_version_id
+      WHERE subscription.user_id = owner.id
+        AND route.model_id = model.id AND route.resource_pool_id = pool.id
+        AND subscription.status = 'active'
+        AND subscription.starts_at <= now()
+        AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+    )
   )
 FOR SHARE
 `
 
-type GetModelForGatewayKeyBindingParams struct {
-	ID     uuid.UUID `json:"id"`
-	UserID uuid.UUID `json:"user_id"`
+type GetRouteForGatewayKeyBindingParams struct {
+	UserID         uuid.UUID `json:"user_id"`
+	ModelID        uuid.UUID `json:"model_id"`
+	ResourcePoolID uuid.UUID `json:"resource_pool_id"`
 }
 
-type GetModelForGatewayKeyBindingRow struct {
-	ID         uuid.UUID `json:"id"`
-	PublicName string    `json:"public_name"`
+type GetRouteForGatewayKeyBindingRow struct {
+	ModelID          uuid.UUID `json:"model_id"`
+	PublicName       string    `json:"public_name"`
+	ResourcePoolID   uuid.UUID `json:"resource_pool_id"`
+	ResourcePoolName string    `json:"resource_pool_name"`
 }
 
-func (q *Queries) GetModelForGatewayKeyBinding(ctx context.Context, arg GetModelForGatewayKeyBindingParams) (GetModelForGatewayKeyBindingRow, error) {
-	row := q.db.QueryRow(ctx, getModelForGatewayKeyBinding, arg.ID, arg.UserID)
-	var i GetModelForGatewayKeyBindingRow
-	err := row.Scan(&i.ID, &i.PublicName)
+func (q *Queries) GetRouteForGatewayKeyBinding(ctx context.Context, arg GetRouteForGatewayKeyBindingParams) (GetRouteForGatewayKeyBindingRow, error) {
+	row := q.db.QueryRow(ctx, getRouteForGatewayKeyBinding, arg.UserID, arg.ModelID, arg.ResourcePoolID)
+	var i GetRouteForGatewayKeyBindingRow
+	err := row.Scan(
+		&i.ModelID,
+		&i.PublicName,
+		&i.ResourcePoolID,
+		&i.ResourcePoolName,
+	)
 	return i, err
 }
 
@@ -677,32 +729,19 @@ func (q *Queries) IsBootstrapped(ctx context.Context) (bool, error) {
 	return bootstrapped, err
 }
 
-const isGatewayKeyAuthorizedForModel = `-- name: IsGatewayKeyAuthorizedForModel :one
-SELECT EXISTS (SELECT 1 FROM gateway_key_models WHERE gateway_key_id = $1 AND model_id = $2)
-`
-
-type IsGatewayKeyAuthorizedForModelParams struct {
-	GatewayKeyID uuid.UUID `json:"gateway_key_id"`
-	ModelID      uuid.UUID `json:"model_id"`
-}
-
-func (q *Queries) IsGatewayKeyAuthorizedForModel(ctx context.Context, arg IsGatewayKeyAuthorizedForModelParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isGatewayKeyAuthorizedForModel, arg.GatewayKeyID, arg.ModelID)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const listGatewayKeyModelBindingsByKey = `-- name: ListGatewayKeyModelBindingsByKey :many
-SELECT gkm.model_id, model.public_name
+SELECT gkm.model_id, model.public_name, gkm.resource_pool_id, pool.name AS resource_pool_name
 FROM gateway_key_models gkm JOIN models model ON model.id = gkm.model_id
+JOIN resource_pools pool ON pool.id = gkm.resource_pool_id
 WHERE gkm.gateway_key_id = $1
 ORDER BY model.public_name, gkm.model_id
 `
 
 type ListGatewayKeyModelBindingsByKeyRow struct {
-	ModelID    uuid.UUID `json:"model_id"`
-	PublicName string    `json:"public_name"`
+	ModelID          uuid.UUID `json:"model_id"`
+	PublicName       string    `json:"public_name"`
+	ResourcePoolID   uuid.UUID `json:"resource_pool_id"`
+	ResourcePoolName string    `json:"resource_pool_name"`
 }
 
 func (q *Queries) ListGatewayKeyModelBindingsByKey(ctx context.Context, gatewayKeyID uuid.UUID) ([]ListGatewayKeyModelBindingsByKeyRow, error) {
@@ -714,7 +753,12 @@ func (q *Queries) ListGatewayKeyModelBindingsByKey(ctx context.Context, gatewayK
 	items := []ListGatewayKeyModelBindingsByKeyRow{}
 	for rows.Next() {
 		var i ListGatewayKeyModelBindingsByKeyRow
-		if err := rows.Scan(&i.ModelID, &i.PublicName); err != nil {
+		if err := rows.Scan(
+			&i.ModelID,
+			&i.PublicName,
+			&i.ResourcePoolID,
+			&i.ResourcePoolName,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -726,18 +770,21 @@ func (q *Queries) ListGatewayKeyModelBindingsByKey(ctx context.Context, gatewayK
 }
 
 const listGatewayKeyModelBindingsByUser = `-- name: ListGatewayKeyModelBindingsByUser :many
-SELECT gkm.gateway_key_id, gkm.model_id, model.public_name
+SELECT gkm.gateway_key_id, gkm.model_id, model.public_name, gkm.resource_pool_id, pool.name AS resource_pool_name
 FROM gateway_key_models gkm
 JOIN gateway_keys key ON key.id = gkm.gateway_key_id
 JOIN models model ON model.id = gkm.model_id
+JOIN resource_pools pool ON pool.id = gkm.resource_pool_id
 WHERE key.user_id = $1
 ORDER BY gkm.gateway_key_id, model.public_name, gkm.model_id
 `
 
 type ListGatewayKeyModelBindingsByUserRow struct {
-	GatewayKeyID uuid.UUID `json:"gateway_key_id"`
-	ModelID      uuid.UUID `json:"model_id"`
-	PublicName   string    `json:"public_name"`
+	GatewayKeyID     uuid.UUID `json:"gateway_key_id"`
+	ModelID          uuid.UUID `json:"model_id"`
+	PublicName       string    `json:"public_name"`
+	ResourcePoolID   uuid.UUID `json:"resource_pool_id"`
+	ResourcePoolName string    `json:"resource_pool_name"`
 }
 
 func (q *Queries) ListGatewayKeyModelBindingsByUser(ctx context.Context, userID uuid.UUID) ([]ListGatewayKeyModelBindingsByUserRow, error) {
@@ -749,7 +796,13 @@ func (q *Queries) ListGatewayKeyModelBindingsByUser(ctx context.Context, userID 
 	items := []ListGatewayKeyModelBindingsByUserRow{}
 	for rows.Next() {
 		var i ListGatewayKeyModelBindingsByUserRow
-		if err := rows.Scan(&i.GatewayKeyID, &i.ModelID, &i.PublicName); err != nil {
+		if err := rows.Scan(
+			&i.GatewayKeyID,
+			&i.ModelID,
+			&i.PublicName,
+			&i.ResourcePoolID,
+			&i.ResourcePoolName,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -761,8 +814,8 @@ func (q *Queries) ListGatewayKeyModelBindingsByUser(ctx context.Context, userID 
 }
 
 const listGatewayKeysByUser = `-- name: ListGatewayKeysByUser :many
-SELECT id, user_id, name, prefix, expires_at, revoked_at, last_used_at, created_at
-FROM gateway_keys WHERE user_id = $1 ORDER BY created_at DESC, id
+SELECT id, user_id, name, prefix, expires_at, deleted_at, last_used_at, created_at
+FROM gateway_keys WHERE user_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC, id
 `
 
 type ListGatewayKeysByUserRow struct {
@@ -771,7 +824,7 @@ type ListGatewayKeysByUserRow struct {
 	Name       string             `json:"name"`
 	Prefix     string             `json:"prefix"`
 	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
-	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
 	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
@@ -791,7 +844,7 @@ func (q *Queries) ListGatewayKeysByUser(ctx context.Context, userID uuid.UUID) (
 			&i.Name,
 			&i.Prefix,
 			&i.ExpiresAt,
-			&i.RevokedAt,
+			&i.DeletedAt,
 			&i.LastUsedAt,
 			&i.CreatedAt,
 		); err != nil {
@@ -898,12 +951,12 @@ func (q *Queries) MarkBootstrapped(ctx context.Context) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
-const markGatewayKeyRevoked = `-- name: MarkGatewayKeyRevoked :execrows
-UPDATE gateway_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL
+const markGatewayKeyDeleted = `-- name: MarkGatewayKeyDeleted :execrows
+UPDATE gateway_keys SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) MarkGatewayKeyRevoked(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, markGatewayKeyRevoked, id)
+func (q *Queries) MarkGatewayKeyDeleted(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markGatewayKeyDeleted, id)
 	if err != nil {
 		return 0, err
 	}
@@ -934,18 +987,6 @@ func (q *Queries) MarkUserDeleted(ctx context.Context, id uuid.UUID) (User, erro
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const revokeGatewayKeysForUser = `-- name: RevokeGatewayKeysForUser :execrows
-UPDATE gateway_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL
-`
-
-func (q *Queries) RevokeGatewayKeysForUser(ctx context.Context, userID uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, revokeGatewayKeysForUser, userID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const revokeSession = `-- name: RevokeSession :execrows

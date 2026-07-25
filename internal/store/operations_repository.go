@@ -29,7 +29,7 @@ func (r *OperationsRepository) AdministratorResources(ctx context.Context, obser
 		SuccessfulCredentialProbeCount: row.SuccessfulCredentialProbeCount,
 		ActiveMemberCount:              row.ActiveMemberCount, ActiveGatewayKeyCount: row.ActiveGatewayKeyCount,
 		ActiveServicePlanCount: row.ActiveServicePlanCount, ActiveSubscriptionCount: row.ActiveSubscriptionCount,
-		HasActiveUpstream: row.HasActiveUpstream, HasModelPrice: row.HasModelPrice,
+		HasActiveUpstream: row.HasActiveUpstream,
 		HasCompletedRequest: row.HasCompletedRequest,
 	}, nil
 }
@@ -41,7 +41,7 @@ func (r *OperationsRepository) MemberAccess(ctx context.Context, userID uuid.UUI
 	}
 	return operations.MemberAccess{
 		ActiveGatewayKeyCount: row.ActiveGatewayKeyCount, ActiveSubscriptionCount: row.ActiveSubscriptionCount,
-		RemainingTokens: row.RemainingTokens, NearestSubscriptionExpiry: timePointer(row.NearestSubscriptionExpiry),
+		NearestSubscriptionExpiry: timePointer(row.NearestSubscriptionExpiry),
 	}, nil
 }
 

@@ -26,16 +26,16 @@ func (s *Service) Stream(ctx context.Context, command ChatCommand, sink StreamSi
 	defer run.stopExecution()
 	ctx = run.context
 	if !run.request.Stream {
-		_ = s.accounting.Release(context.WithoutCancel(ctx), run.claim, "invalid_request", "non-stream request used stream workflow")
+		_ = s.accounting.Fail(context.WithoutCancel(ctx), run.claim, "invalid_request", "non-stream request used stream workflow")
 		return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "stream_not_enabled", Message: "stream must be true", Parameter: "stream", HTTPStatus: http.StatusBadRequest}
 	}
 
 	excluded := make([]routing.CandidateID, 0, len(run.candidates))
 	startedAt := s.clock.Now().UTC()
 	for attemptNumber := 1; ; attemptNumber++ {
-		candidate, circuitPermit, lease, selectionError := s.attemptDecision(ctx, &run, excluded, attemptNumber)
+		candidate, circuitPermit, lease, selectionError := s.attemptDecision(ctx, &run, &excluded, attemptNumber)
 		if selectionError != nil {
-			_ = s.accounting.Release(context.WithoutCancel(ctx), run.claim, selectionError.Code, selectionError.Message)
+			_ = s.accounting.Fail(context.WithoutCancel(ctx), run.claim, selectionError.Code, selectionError.Message)
 			return selectionError
 		}
 		committed, attemptError := s.streamAttempt(ctx, run, candidate, circuitPermit, attemptNumber, lease, sink)
@@ -46,6 +46,10 @@ func (s *Service) Stream(ctx context.Context, command ChatCommand, sink StreamSi
 		if committed || attemptError.Kind == canonical.ErrorUncertain || attemptError.Kind == canonical.ErrorStreamInterrupted {
 			return attemptError
 		}
+		if shouldTryNextCandidate(attemptError) && len(excluded)+1 < len(run.candidates) {
+			excluded = append(excluded, routing.CandidateID(candidate.ID.String()))
+			continue
+		}
 		decision, err := s.retry.Decide(resilience.RetryInput{
 			Attempt: attemptNumber, RequestStartedAt: startedAt, Failure: failureClass(attemptError.Kind),
 			SendBoundary: resilience.SendRejected, ClientBoundary: resilience.ClientUncommitted,
@@ -53,7 +57,7 @@ func (s *Service) Stream(ctx context.Context, command ChatCommand, sink StreamSi
 		})
 		if err != nil || decision.Action != resilience.RetrySchedule {
 			s.ensureClientRetryAfter(attemptError)
-			_ = s.accounting.Release(context.WithoutCancel(ctx), run.claim, attemptError.Code, attemptError.Message)
+			_ = s.accounting.Fail(context.WithoutCancel(ctx), run.claim, attemptError.Code, attemptError.Message)
 			return attemptError
 		}
 		excluded = append(excluded, routing.CandidateID(candidate.ID.String()))
@@ -61,13 +65,13 @@ func (s *Service) Stream(ctx context.Context, command ChatCommand, sink StreamSi
 			excluded = excluded[:0]
 		}
 		if err := waitUntil(ctx, decision.NextAttemptAt, s.clock.Now()); err != nil {
-			_ = s.accounting.Release(context.WithoutCancel(ctx), run.claim, "canceled", "request canceled during retry wait")
+			_ = s.accounting.Fail(context.WithoutCancel(ctx), run.claim, "canceled", "request canceled during retry wait")
 			return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "request_canceled", Message: "request was canceled", Cause: err}
 		}
 	}
 }
 
-func (s *Service) streamAttempt(ctx context.Context, run workflowRun, candidate Candidate, circuitPermit *resilience.Permit, sequence int, lease Lease, sink StreamSink) (bool, *canonical.Error) {
+func (s *Service) streamAttempt(ctx context.Context, run workflowRun, candidate Candidate, circuitPermit *healthPermit, sequence int, lease Lease, sink StreamSink) (bool, *canonical.Error) {
 	if lease == nil {
 		var err error
 		lease, _, err = s.coordinator.Acquire(ctx, s.leaseRequest(run.claim, run, candidate))
@@ -87,7 +91,7 @@ func (s *Service) streamAttempt(ctx context.Context, run workflowRun, candidate 
 	adapter, client, request, buildError := s.buildUpstream(attemptContext, run, candidate)
 	if buildError != nil {
 		circuitPermit.Complete(resilience.PermitReleased)
-		_ = s.failAttempt(context.WithoutCancel(ctx), run.claim, attemptID, buildError, nil)
+		_ = s.failAttempt(context.WithoutCancel(ctx), run.claim, attemptID, buildError, nil, candidate.HealthGeneration)
 		return false, buildError
 	}
 	sentAt := s.clock.Now().UTC()
@@ -98,25 +102,25 @@ func (s *Service) streamAttempt(ctx context.Context, run workflowRun, candidate 
 	response, err := client.Do(request)
 	if err != nil {
 		providerError := &canonical.Error{Kind: canonical.ErrorUncertain, Code: "upstream_outcome_uncertain", Message: "upstream request outcome is uncertain", Cause: err}
-		return s.finishBrokenStream(ctx, run, attemptID, circuitPermit, streamState{}, providerError)
+		return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, streamState{}, providerError)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		body, readError := readResponse(response, s.config.MaxResponseBytes)
 		if readError != nil {
 			providerError := &canonical.Error{Kind: canonical.ErrorProviderTemporary, Code: "provider_response_read_failed", Message: "provider response could not be read", Cause: readError}
-			return s.finishBrokenStream(ctx, run, attemptID, circuitPermit, streamState{}, providerError)
+			return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, streamState{}, providerError)
 		}
 		providerError := adapter.ClassifyError(response.StatusCode, response.Header, body)
 		if response.StatusCode >= http.StatusInternalServerError && !providerError.ReplaySafe {
-			return s.finishBrokenStream(ctx, run, attemptID, circuitPermit, streamState{}, providerError)
+			return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, streamState{}, providerError)
 		}
 		if tripsCircuit(providerError.Kind) {
 			circuitPermit.Complete(resilience.PermitFailed)
 		} else {
 			circuitPermit.Complete(resilience.PermitReleased)
 		}
-		_ = s.failAttempt(context.WithoutCancel(ctx), run.claim, attemptID, providerError, &response.StatusCode)
+		_ = s.failAttempt(context.WithoutCancel(ctx), run.claim, attemptID, providerError, &response.StatusCode, candidate.HealthGeneration)
 		return false, providerError
 	}
 
@@ -128,10 +132,10 @@ func (s *Service) streamAttempt(ctx context.Context, run workflowRun, candidate 
 		if read > 0 {
 			events, parseError := parser.Feed(buffer[:read])
 			if parseError != nil {
-				return s.finishBrokenStream(ctx, run, attemptID, circuitPermit, state, asCanonical(parseError, "malformed_provider_stream"))
+				return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, asCanonical(parseError, "malformed_provider_stream"))
 			}
 			if streamError := s.emitEvents(ctx, run.claim, attemptID, response.StatusCode, &state, events, sink); streamError != nil {
-				return s.finishBrokenStream(ctx, run, attemptID, circuitPermit, state, streamError)
+				return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, streamError)
 			}
 		}
 		if errors.Is(readError, io.EOF) {
@@ -139,33 +143,33 @@ func (s *Service) streamAttempt(ctx context.Context, run workflowRun, candidate 
 		}
 		if readError != nil {
 			providerError := &canonical.Error{Kind: canonical.ErrorStreamInterrupted, Code: "provider_stream_read_failed", Message: "provider stream was interrupted", Cause: readError}
-			return s.finishBrokenStream(ctx, run, attemptID, circuitPermit, state, providerError)
+			return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, providerError)
 		}
 	}
 	closingEvents, err := parser.Close()
 	if err != nil {
-		return s.finishBrokenStream(ctx, run, attemptID, circuitPermit, state, asCanonical(err, "malformed_provider_stream"))
+		return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, asCanonical(err, "malformed_provider_stream"))
 	}
 	if streamError := s.emitEvents(ctx, run.claim, attemptID, response.StatusCode, &state, closingEvents, sink); streamError != nil {
-		return s.finishBrokenStream(ctx, run, attemptID, circuitPermit, state, streamError)
+		return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, streamError)
 	}
 	if !state.done {
 		providerError := &canonical.Error{Kind: canonical.ErrorStreamInterrupted, Code: "provider_stream_incomplete", Message: "provider stream ended without completion"}
-		return s.finishBrokenStream(ctx, run, attemptID, circuitPermit, state, providerError)
+		return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, providerError)
 	}
 	completedAt := s.clock.Now().UTC()
 	status := response.StatusCode
 	usage := state.usage()
 	if err := s.repository.UpdateAttempt(ctx, run.claim, attemptID, AttemptUpdate{
 		Status: "completed", HTTPStatus: &status, FirstByteAt: state.firstByteAt,
-		CompletedAt: &completedAt, Usage: &usage, Credential: credentialSuccess(completedAt),
+		CompletedAt: &completedAt, Usage: &usage, Credential: credentialSuccess(completedAt, candidate.HealthGeneration),
 	}); err != nil {
 		circuitPermit.Complete(resilience.PermitReleased)
 		return state.committed, storageError("attempt_completion_failed", err)
 	}
-	if err := s.accounting.Settle(ctx, run.claim, usage); err != nil {
+	if err := s.accounting.Complete(ctx, run.claim, usage); err != nil {
 		circuitPermit.Complete(resilience.PermitReleased)
-		return state.committed, storageError("usage_settlement_failed", err)
+		return state.committed, storageError("usage_completion_failed", err)
 	}
 	circuitPermit.Complete(resilience.PermitSucceeded)
 	if err := sink(run.accepted.RequestID, state.doneEvent); err != nil {
@@ -223,7 +227,7 @@ func (s *Service) emitEvents(ctx context.Context, claim execution.Claim, attempt
 	return nil
 }
 
-func (s *Service) finishBrokenStream(ctx context.Context, run workflowRun, attemptID uuid.UUID, permit *resilience.Permit, state streamState, providerError *canonical.Error) (bool, *canonical.Error) {
+func (s *Service) finishBrokenStream(ctx context.Context, run workflowRun, candidate Candidate, attemptID uuid.UUID, permit *healthPermit, state streamState, providerError *canonical.Error) (bool, *canonical.Error) {
 	permit.Complete(resilience.PermitFailed)
 	status := "uncertain"
 	if state.committed {
@@ -244,7 +248,7 @@ func (s *Service) finishBrokenStream(ctx context.Context, run workflowRun, attem
 	usage := state.usage()
 	update := AttemptUpdate{
 		Status: status, ErrorKind: &kind, FirstByteAt: state.firstByteAt, CompletedAt: &completedAt,
-		Credential: s.credentialFailure(providerError, completedAt, ctx.Err() != nil || providerError.Code == "client_stream_interrupted"),
+		Credential: s.credentialFailure(providerError, completedAt, ctx.Err() != nil || providerError.Code == "client_stream_interrupted", candidate.HealthGeneration),
 	}
 	if usage.Source != canonical.UsageUnknown {
 		update.Usage = &usage

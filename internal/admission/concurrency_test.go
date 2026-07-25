@@ -10,7 +10,7 @@ import (
 func TestQueueAcceptsConcurrentUsersAndAdmitsEveryTicketOnce(t *testing.T) {
 	const total = 96
 	queue, _ := newTestQueue(t, Config{
-		MaxQueued: total, MaxActive: total, MaxActivePerUser: 1, MaxQueueWait: time.Minute,
+		MaxQueued: total, MaxActive: total, MaxQueueWait: time.Minute,
 	})
 	start := make(chan struct{})
 	errors := make(chan error, total)

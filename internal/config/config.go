@@ -99,7 +99,6 @@ type RequestFlow struct {
 	RecoveryBatchSize          int32
 	MaxQueued                  int
 	MaxActive                  int
-	MaxActivePerUser           int
 	MaxQueueWait               time.Duration
 	AdmissionRetryInterval     time.Duration
 	LeaseTTL                   time.Duration
@@ -113,8 +112,6 @@ type RequestFlow struct {
 	CircuitHalfOpenMaxInFlight int
 	Global                     Capacity
 	ResourcePool               Capacity
-	User                       Capacity
-	GatewayKey                 Capacity
 	Model                      Capacity
 	Provider                   Capacity
 	Credential                 Capacity
@@ -199,7 +196,6 @@ func Load() (Config, error) {
 			RecoveryBatchSize:          int32(intEnv("LLMGATEWAY_REQUEST_RECOVERY_BATCH_SIZE", 100)),
 			MaxQueued:                  intEnv("LLMGATEWAY_REQUEST_MAX_QUEUED", 1024),
 			MaxActive:                  intEnv("LLMGATEWAY_REQUEST_MAX_ACTIVE", 256),
-			MaxActivePerUser:           intEnv("LLMGATEWAY_REQUEST_MAX_ACTIVE_PER_USER", 16),
 			MaxQueueWait:               durationEnv("LLMGATEWAY_REQUEST_MAX_QUEUE_WAIT", 30*time.Second),
 			AdmissionRetryInterval:     durationEnv("LLMGATEWAY_REQUEST_ADMISSION_RETRY_INTERVAL", 100*time.Millisecond),
 			LeaseTTL:                   durationEnv("LLMGATEWAY_REQUEST_LEASE_TTL", 30*time.Second),
@@ -213,8 +209,6 @@ func Load() (Config, error) {
 			CircuitHalfOpenMaxInFlight: intEnv("LLMGATEWAY_REQUEST_CIRCUIT_HALF_OPEN_MAX_IN_FLIGHT", 1),
 			Global:                     capacityEnv("GLOBAL", Capacity{RequestsPerMinute: 12_000, TokensPerMinute: 6_000_000, Concurrency: 256}),
 			ResourcePool:               capacityEnv("RESOURCE_POOL", Capacity{RequestsPerMinute: 9_000, TokensPerMinute: 3_000_000, Concurrency: 128}),
-			User:                       capacityEnv("USER", Capacity{RequestsPerMinute: 600, TokensPerMinute: 600_000, Concurrency: 16}),
-			GatewayKey:                 capacityEnv("GATEWAY_KEY", Capacity{RequestsPerMinute: 300, TokensPerMinute: 300_000, Concurrency: 8}),
 			Model:                      capacityEnv("MODEL", Capacity{RequestsPerMinute: 9_000, TokensPerMinute: 3_000_000, Concurrency: 128}),
 			Provider:                   capacityEnv("PROVIDER", Capacity{RequestsPerMinute: 9_000, TokensPerMinute: 3_000_000, Concurrency: 128}),
 			Credential:                 capacityEnv("CREDENTIAL", Capacity{RequestsPerMinute: 60, TokensPerMinute: 100_000, Concurrency: 4}),
@@ -300,7 +294,7 @@ func (c Config) Validate() error {
 		c.RequestFlow.RecoveryInterval <= 0 || c.RequestFlow.RecoveryInterval > c.RequestFlow.ExecutionStaleAfter ||
 		c.RequestFlow.RecoveryBatchSize < 1 || c.RequestFlow.RecoveryBatchSize > 1000 ||
 		c.RequestFlow.MaxQueued < 1 || c.RequestFlow.MaxActive < 1 ||
-		c.RequestFlow.MaxActivePerUser < 1 || c.RequestFlow.MaxActivePerUser > c.RequestFlow.MaxActive || c.RequestFlow.MaxQueueWait <= 0 ||
+		c.RequestFlow.MaxQueueWait <= 0 ||
 		c.RequestFlow.AdmissionRetryInterval < 10*time.Millisecond || c.RequestFlow.AdmissionRetryInterval > time.Second ||
 		c.RequestFlow.LeaseTTL < 3*time.Second || c.RequestFlow.LeaseTTL > time.Hour ||
 		c.RequestFlow.RetryMaxAttempts < 1 || c.RequestFlow.RetryMaxAttempts > 1000 || c.RequestFlow.RetryMaxElapsed <= 0 ||
@@ -309,7 +303,7 @@ func (c Config) Validate() error {
 		c.RequestFlow.CircuitOpenDuration <= 0 || c.RequestFlow.CircuitHalfOpenMaxInFlight < 1 {
 		problems = append(problems, errors.New("request workflow timing and resilience settings are invalid"))
 	}
-	for _, capacity := range []Capacity{c.RequestFlow.Global, c.RequestFlow.ResourcePool, c.RequestFlow.User, c.RequestFlow.GatewayKey, c.RequestFlow.Model, c.RequestFlow.Provider, c.RequestFlow.Credential} {
+	for _, capacity := range []Capacity{c.RequestFlow.Global, c.RequestFlow.ResourcePool, c.RequestFlow.Model, c.RequestFlow.Provider, c.RequestFlow.Credential} {
 		if capacity.RequestsPerMinute < 1 || capacity.TokensPerMinute < 1 || capacity.Concurrency < 1 {
 			problems = append(problems, errors.New("request workflow capacities must be positive"))
 			break

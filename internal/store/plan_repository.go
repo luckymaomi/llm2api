@@ -33,7 +33,7 @@ func (r *SubscriptionRepository) PublishPlan(ctx context.Context, draft subscrip
 	return r.executePlanMutation(ctx, actorID, mutation, func(queries *db.Queries) (subscription.ServicePlan, error) {
 		planID := draft.ID
 		if planID == uuid.Nil {
-			created, err := queries.CreateServicePlan(ctx, db.CreateServicePlanParams{Slug: draft.Slug, Name: draft.Name, Description: draft.Description, Kind: db.PlanKind(draft.Kind), CreatedBy: actorID})
+			created, err := queries.CreateServicePlan(ctx, db.CreateServicePlanParams{Slug: draft.Slug, Name: draft.Name, Description: draft.Description, CreatedBy: actorID})
 			if err != nil {
 				return subscription.ServicePlan{}, translateSubscriptionError(err)
 			}
@@ -51,10 +51,7 @@ func (r *SubscriptionRepository) PublishPlan(ctx context.Context, draft subscrip
 		if err != nil {
 			return subscription.ServicePlan{}, translateSubscriptionError(err)
 		}
-		version, err := queries.CreateServicePlanVersion(ctx, db.CreateServicePlanVersionParams{
-			ServicePlanID: planID, Version: versionNumber, TokenQuota: draft.TokenQuota, ValidityDays: draft.ValidityDays,
-			ConcurrencyLimit: draft.ConcurrencyLimit, RpmLimit: draft.RPMLimit, TpmLimit: draft.TPMLimit, CreatedBy: actorID,
-		})
+		version, err := queries.CreateServicePlanVersion(ctx, db.CreateServicePlanVersionParams{ServicePlanID: planID, Version: versionNumber, CreatedBy: actorID})
 		if err != nil {
 			return subscription.ServicePlan{}, translateSubscriptionError(err)
 		}
@@ -63,7 +60,7 @@ func (r *SubscriptionRepository) PublishPlan(ctx context.Context, draft subscrip
 				return subscription.ServicePlan{}, translateSubscriptionError(err)
 			}
 		}
-		if _, err := queries.PublishServicePlanVersion(ctx, db.PublishServicePlanVersionParams{Name: draft.Name, Description: draft.Description, Kind: db.PlanKind(draft.Kind), CurrentVersionID: &version.ID, ID: planID}); err != nil {
+		if _, err := queries.PublishServicePlanVersion(ctx, db.PublishServicePlanVersionParams{Name: draft.Name, Description: draft.Description, CurrentVersionID: &version.ID, ID: planID}); err != nil {
 			return subscription.ServicePlan{}, translateSubscriptionError(err)
 		}
 		return servicePlanByID(ctx, queries, planID)
@@ -155,7 +152,7 @@ func (r *SubscriptionRepository) ListPlans(ctx context.Context, includeArchived 
 	}
 	items := make([]subscription.ServicePlan, 0, len(rows))
 	for _, row := range rows {
-		plan, err := servicePlanFromParts(ctx, r.queries, row.ID, row.Slug, row.Name, row.Description, row.Kind, row.Status, row.CurrentVersionID, row.Version, row.TokenQuota, row.ValidityDays, row.ConcurrencyLimit, row.RpmLimit, row.TpmLimit, row.VersionCreatedAt.Time, row.CreatedAt.Time, row.UpdatedAt.Time)
+		plan, err := servicePlanFromParts(ctx, r.queries, row.ID, row.Slug, row.Name, row.Description, row.Status, row.CurrentVersionID, row.Version, row.VersionCreatedAt.Time, row.CreatedAt.Time, row.UpdatedAt.Time)
 		if err != nil {
 			return nil, err
 		}
@@ -174,12 +171,12 @@ func servicePlanByID(ctx context.Context, queries *db.Queries, id uuid.UUID) (su
 	if err != nil {
 		return subscription.ServicePlan{}, translateSubscriptionError(err)
 	}
-	return servicePlanFromParts(ctx, queries, row.ID, row.Slug, row.Name, row.Description, row.Kind, row.Status, row.CurrentVersionID, row.Version, row.TokenQuota, row.ValidityDays, row.ConcurrencyLimit, row.RpmLimit, row.TpmLimit, row.VersionCreatedAt.Time, row.CreatedAt.Time, row.UpdatedAt.Time)
+	return servicePlanFromParts(ctx, queries, row.ID, row.Slug, row.Name, row.Description, row.Status, row.CurrentVersionID, row.Version, row.VersionCreatedAt.Time, row.CreatedAt.Time, row.UpdatedAt.Time)
 }
 
-func servicePlanFromParts(ctx context.Context, queries *db.Queries, id uuid.UUID, slug, name, description string, kind db.PlanKind, status db.ServicePlanStatus, versionID *uuid.UUID, version *int32, tokenQuota *int64, validityDays, concurrencyLimit *int32, rpmLimit *int32, tpmLimit *int64, versionCreatedAt, createdAt, updatedAt time.Time) (subscription.ServicePlan, error) {
-	plan := subscription.ServicePlan{ID: id, Slug: slug, Name: name, Description: description, Kind: subscription.PlanKind(kind), Status: subscription.PlanStatus(status), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
-	if versionID == nil || version == nil || tokenQuota == nil || validityDays == nil || concurrencyLimit == nil {
+func servicePlanFromParts(ctx context.Context, queries *db.Queries, id uuid.UUID, slug, name, description string, status db.ServicePlanStatus, versionID *uuid.UUID, version *int32, versionCreatedAt, createdAt, updatedAt time.Time) (subscription.ServicePlan, error) {
+	plan := subscription.ServicePlan{ID: id, Slug: slug, Name: name, Description: description, Status: subscription.PlanStatus(status), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
+	if versionID == nil || version == nil {
 		return plan, nil
 	}
 	routes, err := queries.ListServicePlanVersionRoutes(ctx, *versionID)
@@ -190,6 +187,6 @@ func servicePlanFromParts(ctx context.Context, queries *db.Queries, id uuid.UUID
 	for _, route := range routes {
 		planRoutes = append(planRoutes, subscription.PlanRoute{ModelID: route.ModelID, ModelName: route.ModelName, ResourcePoolID: route.ResourcePoolID, ResourcePoolName: route.ResourcePoolName, ResourcePoolSlug: route.ResourcePoolSlug, ProviderName: route.ProviderName})
 	}
-	plan.CurrentVersion = &subscription.PlanVersion{ID: *versionID, Version: *version, TokenQuota: *tokenQuota, ValidityDays: *validityDays, ConcurrencyLimit: *concurrencyLimit, RPMLimit: rpmLimit, TPMLimit: tpmLimit, Routes: planRoutes, CreatedAt: versionCreatedAt.UTC()}
+	plan.CurrentVersion = &subscription.PlanVersion{ID: *versionID, Version: *version, Routes: planRoutes, CreatedAt: versionCreatedAt.UTC()}
 	return plan, nil
 }

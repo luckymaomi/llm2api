@@ -33,6 +33,10 @@ type Probe struct {
 	Request          *http.Request
 }
 
+type DiscoveredModel struct {
+	ID string
+}
+
 type StreamParser interface {
 	Feed([]byte) ([]canonical.StreamEvent, error)
 	Close() ([]canonical.StreamEvent, error)
@@ -46,5 +50,6 @@ type Adapter interface {
 	ParseStream() StreamParser
 	ClassifyError(statusCode int, headers http.Header, body []byte) *canonical.Error
 	Probe(context.Context, Credential) (Probe, error)
+	ParseProbe(ProbeKind, int, http.Header, []byte) ([]DiscoveredModel, *canonical.Error)
 	ValidateProbe(ProbeKind, int, http.Header, []byte) *canonical.Error
 }

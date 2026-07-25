@@ -34,6 +34,63 @@ func New(policy security.SSRFPolicy, timeout time.Duration, maxResponseBytes int
 	return &Executor{policy: policy, timeout: timeout, maxResponseBytes: maxResponseBytes, catalog: providers.DefaultCatalog()}, nil
 }
 
+func (e *Executor) Discover(ctx context.Context, target registry.ModelDiscoveryTarget) registry.ModelDiscoveryExecution {
+	startedAt := time.Now()
+	result := registry.ModelDiscoveryExecution{Status: "failed", Models: []string{}}
+	adapter, err := e.catalog.Build(target.Provider.Kind, providers.AdapterOptions{
+		BaseURL: target.Provider.BaseURL, Capabilities: providers.NarrowOpenAICompatibleCapabilities(),
+	})
+	if err != nil {
+		result.ErrorKind = stringPointer(string(canonical.ErrorProviderConfiguration))
+		return withDiscoveryLatency(result, startedAt)
+	}
+	probeContext, cancel := context.WithTimeout(ctx, e.timeout)
+	defer cancel()
+	probe, err := adapter.Probe(probeContext, providers.Credential{APIKey: target.Secret})
+	if err != nil {
+		result.ErrorKind = stringPointer(canonicalErrorKind(err))
+		return withDiscoveryLatency(result, startedAt)
+	}
+	if !probe.Available || probe.Request == nil {
+		result.ErrorKind = stringPointer("model_discovery_unsupported")
+		return withDiscoveryLatency(result, startedAt)
+	}
+	client, err := security.NewSSRFSafeClient(e.policy)
+	if err != nil {
+		result.ErrorKind = stringPointer(string(canonical.ErrorProviderConfiguration))
+		return withDiscoveryLatency(result, startedAt)
+	}
+	response, err := client.Do(probe.Request)
+	if err != nil {
+		result.Status, result.ErrorKind, result.Retryable = classifyTransportFailure(err)
+		return withDiscoveryLatency(result, startedAt)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, e.maxResponseBytes+1))
+	if err != nil {
+		result.Status = "uncertain"
+		result.ErrorKind = stringPointer(string(canonical.ErrorUncertain))
+		return withDiscoveryLatency(result, startedAt)
+	}
+	if int64(len(body)) > e.maxResponseBytes {
+		result.ErrorKind = stringPointer("probe_response_too_large")
+		return withDiscoveryLatency(result, startedAt)
+	}
+	models, providerError := adapter.ParseProbe(probe.Kind, response.StatusCode, response.Header, body)
+	if providerError != nil {
+		kind := string(providerError.Kind)
+		result.ErrorKind = &kind
+		result.Retryable = retryableKind(kind)
+		return withDiscoveryLatency(result, startedAt)
+	}
+	result.Models = make([]string, 0, len(models))
+	for _, model := range models {
+		result.Models = append(result.Models, model.ID)
+	}
+	result.Status = "succeeded"
+	return withDiscoveryLatency(result, startedAt)
+}
+
 func (e *Executor) Execute(ctx context.Context, target registry.CredentialProbeTarget) registry.CredentialProbeExecution {
 	startedAt := time.Now()
 	result := registry.CredentialProbeExecution{
@@ -176,6 +233,11 @@ func canonicalErrorKind(err error) string {
 }
 
 func withLatency(result registry.CredentialProbeExecution, startedAt time.Time) registry.CredentialProbeExecution {
+	result.LatencyMillis = max(time.Since(startedAt).Milliseconds(), 0)
+	return result
+}
+
+func withDiscoveryLatency(result registry.ModelDiscoveryExecution, startedAt time.Time) registry.ModelDiscoveryExecution {
 	result.LatencyMillis = max(time.Since(startedAt).Milliseconds(), 0)
 	return result
 }

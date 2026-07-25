@@ -8,7 +8,7 @@ import (
 )
 
 func TestGateWaitsWithoutLosingFairQueueOrder(t *testing.T) {
-	gate, err := NewGate(Config{MaxQueued: 4, MaxActive: 1, MaxActivePerUser: 1, MaxQueueWait: time.Minute}, wallClock{})
+	gate, err := NewGate(Config{MaxQueued: 4, MaxActive: 1, MaxQueueWait: time.Minute}, wallClock{})
 	if err != nil {
 		t.Fatalf("NewGate() error = %v", err)
 	}
@@ -38,7 +38,7 @@ func TestGateWaitsWithoutLosingFairQueueOrder(t *testing.T) {
 }
 
 func TestGateCancellationRemovesWaitingTicket(t *testing.T) {
-	gate, err := NewGate(Config{MaxQueued: 4, MaxActive: 1, MaxActivePerUser: 1, MaxQueueWait: time.Minute}, wallClock{})
+	gate, err := NewGate(Config{MaxQueued: 4, MaxActive: 1, MaxQueueWait: time.Minute}, wallClock{})
 	if err != nil {
 		t.Fatalf("NewGate() error = %v", err)
 	}

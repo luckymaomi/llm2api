@@ -17,11 +17,6 @@ import (
 
 func (r *RegistryRepository) CreateCredential(ctx context.Context, input registry.NewCredential, actorID uuid.UUID, mutation registry.Mutation) (registry.Credential, error) {
 	return r.executeCredentialMutation(ctx, actorID, mutation, func(queries *db.Queries) (registry.Credential, error) {
-		for _, binding := range input.ModelBindings {
-			if _, err := queries.GetModelForCredentialBinding(ctx, db.GetModelForCredentialBindingParams{ID: binding.ModelID, ResourcePoolID: input.ResourcePoolID}); err != nil {
-				return registry.Credential{}, translateRegistryError(err)
-			}
-		}
 		created, err := queries.CreateCredential(ctx, db.CreateCredentialParams{
 			ID: input.ID, ResourcePoolID: input.ResourcePoolID, Name: input.Name, EncryptedSecret: input.EncryptedSecret,
 			RpmLimit: input.RPMLimit, TpmLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit,
@@ -29,8 +24,19 @@ func (r *RegistryRepository) CreateCredential(ctx context.Context, input registr
 		if err != nil {
 			return registry.Credential{}, translateRegistryError(err)
 		}
-		if err := bindCredentialModels(ctx, queries, created.ID, input.ModelBindings); err != nil {
+		bindings, err := upsertDiscoveredModels(ctx, queries, input.ResourcePoolID, input.DiscoveredModels)
+		if err != nil {
 			return registry.Credential{}, err
+		}
+		if err := bindCredentialModels(ctx, queries, created.ID, bindings); err != nil {
+			return registry.Credential{}, err
+		}
+		latency, kind, status := input.Discovery.LatencyMillis, "models", input.Discovery.Status
+		if _, err := queries.RecordCredentialProbe(ctx, db.RecordCredentialProbeParams{
+			LastProbeAt: timestamp(time.Now().UTC()), LastProbeLatencyMs: &latency, LastProbeKind: &kind,
+			LastProbeStatus: &status, LastProbeErrorKind: input.Discovery.ErrorKind, ID: created.ID,
+		}); err != nil {
+			return registry.Credential{}, translateRegistryError(err)
 		}
 		return credentialByID(ctx, queries, created.ID)
 	})
@@ -42,11 +48,6 @@ func (r *RegistryRepository) UpdateCredential(ctx context.Context, input registr
 		if err != nil {
 			return registry.Credential{}, translateRegistryError(err)
 		}
-		for _, binding := range input.ModelBindings {
-			if _, err := queries.GetModelForCredentialBinding(ctx, db.GetModelForCredentialBindingParams{ID: binding.ModelID, ResourcePoolID: current.ResourcePoolID}); err != nil {
-				return registry.Credential{}, translateRegistryError(err)
-			}
-		}
 		if _, err := queries.UpdateCredential(ctx, db.UpdateCredentialParams{
 			Name: input.Name, ReplaceSecret: input.ReplaceSecret, EncryptedSecret: input.EncryptedSecret,
 			RpmLimit: input.RPMLimit, TpmLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit,
@@ -54,14 +55,53 @@ func (r *RegistryRepository) UpdateCredential(ctx context.Context, input registr
 		}); err != nil {
 			return registry.Credential{}, translateRegistryError(err)
 		}
-		if err := queries.DeleteCredentialModelBindings(ctx, input.ID); err != nil {
-			return registry.Credential{}, translateRegistryError(err)
-		}
-		if err := bindCredentialModels(ctx, queries, input.ID, input.ModelBindings); err != nil {
-			return registry.Credential{}, err
+		if input.ReplaceModels {
+			bindings, err := upsertDiscoveredModels(ctx, queries, current.ResourcePoolID, input.DiscoveredModels)
+			if err != nil {
+				return registry.Credential{}, err
+			}
+			if err := queries.DeleteCredentialModelBindings(ctx, input.ID); err != nil {
+				return registry.Credential{}, translateRegistryError(err)
+			}
+			if err := bindCredentialModels(ctx, queries, input.ID, bindings); err != nil {
+				return registry.Credential{}, err
+			}
+			latency, kind, status := input.Discovery.LatencyMillis, "models", input.Discovery.Status
+			if _, err := queries.RecordCredentialProbe(ctx, db.RecordCredentialProbeParams{
+				LastProbeAt: timestamp(time.Now().UTC()), LastProbeLatencyMs: &latency, LastProbeKind: &kind,
+				LastProbeStatus: &status, LastProbeErrorKind: input.Discovery.ErrorKind, ID: input.ID,
+			}); err != nil {
+				return registry.Credential{}, translateRegistryError(err)
+			}
 		}
 		return credentialByID(ctx, queries, input.ID)
 	})
+}
+
+func upsertDiscoveredModels(ctx context.Context, queries *db.Queries, resourcePoolID uuid.UUID, models []registry.DiscoveredModel) ([]registry.CredentialModelBinding, error) {
+	pool, err := queries.GetResourcePoolForUpdate(ctx, resourcePoolID)
+	if err != nil {
+		return nil, translateRegistryError(err)
+	}
+	bindings := make([]registry.CredentialModelBinding, 0, len(models))
+	for _, discovered := range models {
+		capabilities, err := json.Marshal(discovered.Capabilities)
+		if err != nil {
+			return nil, fmt.Errorf("encode discovered model capabilities: %w", err)
+		}
+		model, err := queries.UpsertDiscoveredModel(ctx, db.UpsertDiscoveredModelParams{
+			ProviderID: pool.ProviderID, PublicName: discovered.UpstreamName,
+			UpstreamName: discovered.UpstreamName, DisplayName: discovered.UpstreamName, Capabilities: capabilities,
+		})
+		if err != nil {
+			return nil, translateRegistryError(err)
+		}
+		if err := queries.BindResourcePoolModel(ctx, db.BindResourcePoolModelParams{ResourcePoolID: resourcePoolID, ModelID: model.ID}); err != nil {
+			return nil, translateRegistryError(err)
+		}
+		bindings = append(bindings, registry.CredentialModelBinding{ModelID: model.ID, ModelName: model.PublicName})
+	}
+	return bindings, nil
 }
 
 func (r *RegistryRepository) SetCredentialStatus(ctx context.Context, id uuid.UUID, status registry.CredentialStatus, expectedUpdatedAt time.Time, actorID uuid.UUID, mutation registry.Mutation) (registry.Credential, error) {
@@ -84,7 +124,7 @@ func (r *RegistryRepository) RetireCredential(ctx context.Context, id uuid.UUID,
 
 func bindCredentialModels(ctx context.Context, queries *db.Queries, credentialID uuid.UUID, bindings []registry.CredentialModelBinding) error {
 	for _, binding := range bindings {
-		if err := queries.BindCredentialModel(ctx, db.BindCredentialModelParams{CredentialID: credentialID, ModelID: binding.ModelID, Priority: binding.Priority, Weight: binding.Weight}); err != nil {
+		if err := queries.BindCredentialModel(ctx, db.BindCredentialModelParams{CredentialID: credentialID, ModelID: binding.ModelID}); err != nil {
 			return translateRegistryError(err)
 		}
 	}
@@ -178,7 +218,7 @@ func credentialByID(ctx context.Context, queries *db.Queries, id uuid.UUID) (reg
 	return registry.Credential{
 		ID: row.ID, ResourcePoolID: row.ResourcePoolID, ResourcePoolName: row.ResourcePoolName, ResourcePoolSlug: row.ResourcePoolSlug,
 		ProviderID: row.ProviderID, ProviderName: row.ProviderName, ProviderKind: providers.Kind(row.ProviderKind), ProviderBaseURL: row.ProviderBaseUrl,
-		Name: row.Name, Status: registry.CredentialStatus(row.Status), RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit, ConcurrencyLimit: row.ConcurrencyLimit,
+		Name: row.Name, Status: registry.CredentialStatus(row.Status), HealthStatus: registry.CredentialHealthStatus(row.HealthStatus), HealthGeneration: row.HealthGeneration, RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit, ConcurrencyLimit: row.ConcurrencyLimit,
 		CooldownUntil: timePointer(row.CooldownUntil), ConsecutiveFailures: row.ConsecutiveFailures, LastSuccessAt: timePointer(row.LastSuccessAt), LastErrorKind: row.LastErrorKind,
 		LastProbeAt: timePointer(row.LastProbeAt), LastProbeLatencyMs: row.LastProbeLatencyMs, LastProbeKind: row.LastProbeKind, LastProbeStatus: row.LastProbeStatus, LastProbeErrorKind: row.LastProbeErrorKind,
 		RetiredAt: timePointer(row.RetiredAt), CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ModelBindings: bindings,
@@ -199,7 +239,7 @@ func (r *RegistryRepository) ListCredentials(ctx context.Context, includeRetired
 		item := registry.Credential{
 			ID: row.ID, ResourcePoolID: row.ResourcePoolID, ResourcePoolName: row.ResourcePoolName, ResourcePoolSlug: row.ResourcePoolSlug,
 			ProviderID: row.ProviderID, ProviderName: row.ProviderName, ProviderKind: providers.Kind(row.ProviderKind), ProviderBaseURL: row.ProviderBaseUrl,
-			Name: row.Name, Status: registry.CredentialStatus(row.Status), RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit, ConcurrencyLimit: row.ConcurrencyLimit,
+			Name: row.Name, Status: registry.CredentialStatus(row.Status), HealthStatus: registry.CredentialHealthStatus(row.HealthStatus), HealthGeneration: row.HealthGeneration, RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit, ConcurrencyLimit: row.ConcurrencyLimit,
 			CooldownUntil: timePointer(row.CooldownUntil), ConsecutiveFailures: row.ConsecutiveFailures, LastSuccessAt: timePointer(row.LastSuccessAt), LastErrorKind: row.LastErrorKind,
 			LastProbeAt: timePointer(row.LastProbeAt), LastProbeLatencyMs: row.LastProbeLatencyMs, LastProbeKind: row.LastProbeKind, LastProbeStatus: row.LastProbeStatus, LastProbeErrorKind: row.LastProbeErrorKind,
 			RetiredAt: timePointer(row.RetiredAt), CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ModelBindings: bindings,
@@ -230,7 +270,7 @@ func credentialBindings(ctx context.Context, queries *db.Queries, id uuid.UUID) 
 	}
 	items := make([]registry.CredentialModelBinding, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, registry.CredentialModelBinding{ModelID: row.ModelID, ModelName: row.ModelName, Priority: row.Priority, Weight: row.Weight})
+		items = append(items, registry.CredentialModelBinding{ModelID: row.ModelID, ModelName: row.ModelName})
 	}
 	return items, nil
 }

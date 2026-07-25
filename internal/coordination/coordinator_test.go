@@ -13,18 +13,15 @@ import (
 
 func TestAcquireRateUsesStableOpaqueKeysForEveryScope(t *testing.T) {
 	serverTime := time.Date(2026, 7, 19, 14, 0, 0, 0, time.UTC)
-	runner := &recordingScripter{result: scriptValues(1, serverTime.UnixMilli(), 0, 9, 9, 9, 9, 9, 9, 9, 9)}
+	runner := &recordingScripter{result: scriptValues(1, serverTime.UnixMilli(), 0, 9, 9, 9, 9, 9)}
 	coordinator := mustCoordinator(t, runner, "scope-test")
-	identifiers := []string{"", "pool-id", "person@example.com", "subscription-id", "llmg_secret-key", "model/body-text", "provider-id", "credential-id"}
+	identifiers := []string{"", "pool-id", "model/body-text", "provider-id", "credential-id"}
 	limits := []BucketLimit{
 		rateLimit(GlobalDimension(), MetricRequests, 10),
 		rateLimit(Dimension{Scope: ScopeResourcePool, SubjectID: identifiers[1]}, MetricRequests, 10),
-		rateLimit(Dimension{Scope: ScopeUser, SubjectID: identifiers[2]}, MetricRequests, 10),
-		rateLimit(Dimension{Scope: ScopeSubscription, SubjectID: identifiers[3]}, MetricTokens, 10),
-		rateLimit(Dimension{Scope: ScopeGatewayKey, SubjectID: identifiers[4]}, MetricRequests, 10),
-		rateLimit(Dimension{Scope: ScopeModel, SubjectID: identifiers[5]}, MetricTokens, 10),
-		rateLimit(Dimension{Scope: ScopeProvider, SubjectID: identifiers[6]}, MetricRequests, 10),
-		rateLimit(Dimension{Scope: ScopeCredential, SubjectID: identifiers[7]}, MetricRequests, 10),
+		rateLimit(Dimension{Scope: ScopeModel, SubjectID: identifiers[2]}, MetricTokens, 10),
+		rateLimit(Dimension{Scope: ScopeProvider, SubjectID: identifiers[3]}, MetricRequests, 10),
+		rateLimit(Dimension{Scope: ScopeCredential, SubjectID: identifiers[4]}, MetricRequests, 10),
 	}
 
 	decision, err := coordinator.AcquireRate(context.Background(), limits)
@@ -82,9 +79,9 @@ func TestLeaseKeysAndMembersDoNotExposeCallerValues(t *testing.T) {
 	runner := &recordingScripter{result: scriptValues(1, serverTime.UnixMilli(), serverTime.Add(time.Minute).UnixMilli(), 1)}
 	coordinator := mustCoordinator(t, runner, "lease-key-test")
 	leaseID := "sk-request-body-secret"
-	subjectID := "person@example.com"
+	subjectID := "credential-secret-label"
 	decision, err := coordinator.AcquireLease(context.Background(), leaseID, time.Minute, []ConcurrencyLimit{{
-		Dimension: Dimension{Scope: ScopeUser, SubjectID: subjectID}, MaxInFlight: 1,
+		Dimension: Dimension{Scope: ScopeCredential, SubjectID: subjectID}, MaxInFlight: 1,
 	}})
 	if err != nil || !decision.Granted {
 		t.Fatalf("AcquireLease() = %#v, %v", decision, err)

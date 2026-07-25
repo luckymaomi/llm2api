@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { FormProblem } from '@/features/auth/form-problem'
 import { useListSearch } from '@/hooks/use-list-search'
-import { formatDateTime, formatNumber } from '@/lib/format'
+import { formatDateTime } from '@/lib/format'
 
 import { SubscriptionForm } from './subscription-form'
 
@@ -68,24 +68,9 @@ export function SubscriptionsPage() {
         cell: ({ row }) => (
           <div>
             <strong>{row.original.servicePlanName}</strong>
-            <small className="table-subline">
-              v{row.original.planVersion} ·{' '}
-              {row.original.planKind === 'coding' ? '编程套餐' : '通用 Token 套餐'}
-            </small>
+            <small className="table-subline">v{row.original.planVersion}</small>
           </div>
         ),
-      },
-      {
-        accessorKey: 'grantedTokens',
-        header: '发放额度（Token）',
-        cell: ({ row }) => formatNumber(row.original.grantedTokens),
-        meta: { align: 'right' },
-      },
-      {
-        accessorKey: 'balanceTokens',
-        header: '当前余额（Token）',
-        cell: ({ row }) => formatNumber(row.original.balanceTokens),
-        meta: { align: 'right' },
       },
       {
         accessorKey: 'startsAt',

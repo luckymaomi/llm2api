@@ -18,16 +18,16 @@ func TestValkeyRateAcquisitionIsAtomicAcrossDimensions(t *testing.T) {
 		Dimension: GlobalDimension(), Metric: MetricRequests,
 		CapacityTokens: 2, RefillTokens: 2, RefillInterval: time.Hour, RequestedTokens: 1,
 	}
-	user := BucketLimit{
-		Dimension: Dimension{Scope: ScopeUser, SubjectID: "user-42"}, Metric: MetricRequests,
+	credential := BucketLimit{
+		Dimension: Dimension{Scope: ScopeCredential, SubjectID: "credential-42"}, Metric: MetricRequests,
 		CapacityTokens: 1, RefillTokens: 1, RefillInterval: time.Hour, RequestedTokens: 1,
 	}
 
-	first, err := coordinator.AcquireRate(context.Background(), []BucketLimit{global, user})
+	first, err := coordinator.AcquireRate(context.Background(), []BucketLimit{global, credential})
 	if err != nil || !first.Granted {
 		t.Fatalf("first AcquireRate() = %#v, %v", first, err)
 	}
-	second, err := coordinator.AcquireRate(context.Background(), []BucketLimit{global, user})
+	second, err := coordinator.AcquireRate(context.Background(), []BucketLimit{global, credential})
 	if err != nil {
 		t.Fatalf("second AcquireRate() error = %v", err)
 	}
@@ -44,7 +44,7 @@ func TestValkeyRateAcquisitionIsAtomicAcrossDimensions(t *testing.T) {
 func TestValkeyRateRetryDeadlineComesFromServerTime(t *testing.T) {
 	coordinator, _, _ := integrationCoordinator(t)
 	limit := BucketLimit{
-		Dimension: Dimension{Scope: ScopeGatewayKey, SubjectID: "gateway-key-3"}, Metric: MetricTokens,
+		Dimension: Dimension{Scope: ScopeCredential, SubjectID: "credential-3"}, Metric: MetricTokens,
 		CapacityTokens: 1, RefillTokens: 1, RefillInterval: 40 * time.Millisecond, RequestedTokens: 1,
 	}
 	first, err := coordinator.AcquireRate(context.Background(), []BucketLimit{limit})

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 
 import { accessApi, subscriptionsApi, type Subscription } from '@/api'
 import { Button } from '@/components/ui/button'
@@ -19,12 +19,11 @@ export function SubscriptionForm({
   const queryClient = useQueryClient()
   const [userId, setUserId] = useState(subscription?.userId ?? '')
   const [servicePlanId, setServicePlanId] = useState(subscription?.servicePlanId ?? '')
-  const [grantedTokens, setGrantedTokens] = useState(subscription?.grantedTokens ?? 1)
   const [startsAt, setStartsAt] = useState(() =>
     localDateTime(subscription?.startsAt ?? new Date().toISOString()),
   )
   const [expiresAt, setExpiresAt] = useState(() =>
-    localDateTime(subscription?.expiresAt ?? new Date(Date.now() + 30 * 86_400_000).toISOString()),
+    subscription?.expiresAt ? localDateTime(subscription.expiresAt) : '',
   )
   const [notes, setNotes] = useState(subscription?.notes ?? '')
   const members = useQuery({
@@ -38,22 +37,8 @@ export function SubscriptionForm({
     queryFn: ({ signal }) => subscriptionsApi.plans(false, signal),
     enabled: open,
   })
-  const selectedPlan = useMemo(
-    () => plans.data?.find((plan) => plan.id === servicePlanId),
-    [plans.data, servicePlanId],
-  )
-
   function selectPlan(planId: string) {
     setServicePlanId(planId)
-    const plan = plans.data?.find((item) => item.id === planId)
-    if (!plan?.currentVersion) return
-    setGrantedTokens(plan.currentVersion.tokenQuota)
-    const start = startsAt ? new Date(startsAt) : new Date()
-    setExpiresAt(
-      localDateTime(
-        new Date(start.getTime() + plan.currentVersion.validityDays * 86_400_000).toISOString(),
-      ),
-    )
   }
 
   const mutation = useMutation({
@@ -62,9 +47,8 @@ export function SubscriptionForm({
         ? subscriptionsApi.updateSubscription(
             subscription.id,
             {
-              grantedTokens,
               startsAt: new Date(startsAt).toISOString(),
-              expiresAt: new Date(expiresAt).toISOString(),
+              ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
               notes: notes.trim(),
               expectedUpdatedAt: subscription.updatedAt,
             },
@@ -74,9 +58,8 @@ export function SubscriptionForm({
             {
               userId,
               servicePlanId,
-              grantedTokens,
               startsAt: new Date(startsAt).toISOString(),
-              expiresAt: new Date(expiresAt).toISOString(),
+              ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
               notes: notes.trim(),
             },
             crypto.randomUUID(),
@@ -93,10 +76,8 @@ export function SubscriptionForm({
     if (
       !userId ||
       !servicePlanId ||
-      grantedTokens < 1 ||
       !startsAt ||
-      !expiresAt ||
-      new Date(expiresAt) <= new Date(startsAt)
+      (expiresAt && new Date(expiresAt) <= new Date(startsAt))
     )
       return
     mutation.mutate()
@@ -169,28 +150,6 @@ export function SubscriptionForm({
               ))}
           </NativeSelect>
         </Field>
-        <Field
-          label="实际发放额度（Token）"
-          htmlFor="subscription-tokens"
-          hint="默认使用套餐额度，也可以为该成员单独调整"
-        >
-          <Input
-            id="subscription-tokens"
-            type="number"
-            required
-            min={1}
-            value={grantedTokens}
-            readOnly={locked}
-            onChange={(event) => setGrantedTokens(Number(event.target.value))}
-          />
-        </Field>
-        <Field label="套餐默认额度（Token）" htmlFor="subscription-plan-quota">
-          <Input
-            id="subscription-plan-quota"
-            value={selectedPlan?.currentVersion?.tokenQuota ?? subscription?.grantedTokens ?? ''}
-            readOnly
-          />
-        </Field>
         <Field label="开始时间" htmlFor="subscription-start">
           <Input
             id="subscription-start"
@@ -201,11 +160,10 @@ export function SubscriptionForm({
             onChange={(event) => setStartsAt(event.target.value)}
           />
         </Field>
-        <Field label="到期时间" htmlFor="subscription-expiry">
+        <Field label="到期时间" htmlFor="subscription-expiry" hint="留空表示永久有效">
           <Input
             id="subscription-expiry"
             type="datetime-local"
-            required
             value={expiresAt}
             readOnly={locked}
             onChange={(event) => setExpiresAt(event.target.value)}

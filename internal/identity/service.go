@@ -178,20 +178,20 @@ func (s *Service) UserDisplayNames(ctx context.Context, actor Principal, userIDs
 	return s.repository.UserDisplayNames(ctx, uniqueUserIDs)
 }
 
-func (s *Service) CreateGatewayKey(ctx context.Context, actor Principal, userID uuid.UUID, name string, authorizedModelIDs []uuid.UUID, expiresAt *time.Time, request MutationRequest) (GatewayKey, error) {
+func (s *Service) CreateGatewayKey(ctx context.Context, actor Principal, userID uuid.UUID, name string, routes []GatewayKeyRoute, expiresAt *time.Time, request MutationRequest) (GatewayKey, error) {
 	if actor.Status != StatusActive || actor.Role != RoleAdministrator && (actor.Role != RoleMember || actor.UserID != userID) {
 		return GatewayKey{}, ErrForbidden
 	}
 	name = strings.TrimSpace(name)
-	if userID == uuid.Nil || name == "" || utf8.RuneCountInString(name) > maximumNameRunes || len(authorizedModelIDs) == 0 || len(authorizedModelIDs) > maximumKeyModels {
+	if userID == uuid.Nil || name == "" || utf8.RuneCountInString(name) > maximumNameRunes || len(routes) == 0 || len(routes) > maximumKeyModels {
 		return GatewayKey{}, ErrInvalidInput
 	}
-	normalizedModelIDs := append([]uuid.UUID(nil), authorizedModelIDs...)
-	sort.Slice(normalizedModelIDs, func(i, j int) bool {
-		return normalizedModelIDs[i].String() < normalizedModelIDs[j].String()
+	normalizedRoutes := append([]GatewayKeyRoute(nil), routes...)
+	sort.Slice(normalizedRoutes, func(i, j int) bool {
+		return normalizedRoutes[i].ModelID.String() < normalizedRoutes[j].ModelID.String()
 	})
-	for index, modelID := range normalizedModelIDs {
-		if modelID == uuid.Nil || index > 0 && modelID == normalizedModelIDs[index-1] {
+	for index, route := range normalizedRoutes {
+		if route.ModelID == uuid.Nil || route.ResourcePoolID == uuid.Nil || index > 0 && route.ModelID == normalizedRoutes[index-1].ModelID {
 			return GatewayKey{}, ErrInvalidInput
 		}
 	}
@@ -203,7 +203,7 @@ func (s *Service) CreateGatewayKey(ctx context.Context, actor Principal, userID 
 	if normalizedExpiresAt != nil && !normalizedExpiresAt.After(s.now()) {
 		return GatewayKey{}, ErrInvalidInput
 	}
-	return s.createGatewayKey(ctx, actor, userID, name, normalizedModelIDs, normalizedExpiresAt, nil, request)
+	return s.createGatewayKey(ctx, actor, userID, name, normalizedRoutes, normalizedExpiresAt, nil, request)
 }
 
 func (s *Service) ReplaceGatewayKey(ctx context.Context, actor Principal, keyID uuid.UUID, request MutationRequest) (GatewayKey, error) {
@@ -223,13 +223,12 @@ func (s *Service) ReplaceGatewayKey(ctx context.Context, actor Principal, keyID 
 		nameRunes = nameRunes[:maximumNameRunes-len([]rune(suffix))]
 	}
 	name := strings.TrimSpace(string(nameRunes)) + suffix
-	modelIDs := append([]uuid.UUID(nil), original.AuthorizedModelIDs...)
-	sort.Slice(modelIDs, func(i, j int) bool { return modelIDs[i].String() < modelIDs[j].String() })
-	return s.createGatewayKey(ctx, actor, original.UserID, name, modelIDs, original.ExpiresAt, &original.ID, request)
+	routes := append([]GatewayKeyRoute(nil), original.Routes...)
+	return s.createGatewayKey(ctx, actor, original.UserID, name, routes, original.ExpiresAt, &original.ID, request)
 }
 
-func (s *Service) createGatewayKey(ctx context.Context, actor Principal, userID uuid.UUID, name string, normalizedModelIDs []uuid.UUID, normalizedExpiresAt *time.Time, replacesKeyID *uuid.UUID, request MutationRequest) (GatewayKey, error) {
-	mutation, err := newGatewayKeyMutation(request, userID, name, normalizedModelIDs, normalizedExpiresAt, replacesKeyID)
+func (s *Service) createGatewayKey(ctx context.Context, actor Principal, userID uuid.UUID, name string, routes []GatewayKeyRoute, normalizedExpiresAt *time.Time, replacesKeyID *uuid.UUID, request MutationRequest) (GatewayKey, error) {
+	mutation, err := newGatewayKeyMutation(request, userID, name, routes, normalizedExpiresAt, replacesKeyID)
 	if err != nil {
 		return GatewayKey{}, err
 	}
@@ -243,7 +242,7 @@ func (s *Service) createGatewayKey(ctx context.Context, actor Principal, userID 
 	}
 	key, err := s.repository.CreateGatewayKey(ctx, NewGatewayKey{
 		UserID: userID, Name: name, Prefix: credentialPrefix(secret), SecretDigest: digest[:],
-		AuthorizedModelIDs: normalizedModelIDs, ExpiresAt: normalizedExpiresAt, ReplacesKeyID: replacesKeyID,
+		Routes: routes, ExpiresAt: normalizedExpiresAt, ReplacesKeyID: replacesKeyID,
 	}, actor.UserID, mutation)
 	if err != nil {
 		return GatewayKey{}, err
@@ -432,8 +431,8 @@ func (s *Service) ListGatewayKeys(ctx context.Context, actor Principal, userID u
 	return s.repository.ListGatewayKeys(ctx, userID)
 }
 
-func (s *Service) RevokeGatewayKey(ctx context.Context, actor Principal, keyID uuid.UUID) error {
-	return s.repository.RevokeGatewayKey(ctx, keyID, actor.UserID, actor.CanManageUsers())
+func (s *Service) DeleteGatewayKey(ctx context.Context, actor Principal, keyID uuid.UUID) error {
+	return s.repository.DeleteGatewayKey(ctx, keyID, actor.UserID, actor.CanManageUsers())
 }
 
 func (s *Service) issueSession(ctx context.Context, user User) (SessionCredentials, error) {

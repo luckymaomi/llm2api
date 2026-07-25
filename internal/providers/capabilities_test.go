@@ -23,6 +23,29 @@ func TestProviderCapabilitiesDescribeExecutableContracts(t *testing.T) {
 	}
 }
 
+func TestModelsProbePreservesAllUniqueUpstreamModelIDs(t *testing.T) {
+	t.Parallel()
+
+	models, providerError := NewAgnes().ParseProbe(ProbeModels, http.StatusOK, nil, []byte(`{
+		"data":[{"id":"agnes-2.0-flash"},{"id":"agnes-2.0-pro"},{"id":"agnes-2.0-flash"}]
+	}`))
+	if providerError != nil {
+		t.Fatalf("ParseProbe() error = %v", providerError)
+	}
+	if len(models) != 2 || models[0].ID != "agnes-2.0-flash" || models[1].ID != "agnes-2.0-pro" {
+		t.Fatalf("ParseProbe() models = %#v", models)
+	}
+}
+
+func TestModelsProbeRejectsMalformedModelIdentity(t *testing.T) {
+	t.Parallel()
+
+	models, providerError := NewZhipu().ParseProbe(ProbeModels, http.StatusOK, nil, []byte(`{"data":[{"id":"glm-5.2\nsecret"}]}`))
+	if providerError == nil || providerError.Code != "invalid_model_id" || models != nil {
+		t.Fatalf("ParseProbe() = (%#v, %#v), want safe invalid_model_id", models, providerError)
+	}
+}
+
 func TestPublishedProviderModelsProbesAreNonGenerating(t *testing.T) {
 	t.Parallel()
 

@@ -182,7 +182,7 @@ func (q *Queue) takeNextLocked() (Ticket, bool) {
 		index := (q.cursor + offset) % len(q.userOrder)
 		userID := q.userOrder[index]
 		queue := q.waiting[userID]
-		if len(queue) == 0 || q.activeByUser[userID] >= q.config.MaxActivePerUser {
+		if len(queue) == 0 {
 			continue
 		}
 		ticket := queue[0]

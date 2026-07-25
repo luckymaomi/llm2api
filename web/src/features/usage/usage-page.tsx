@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { CircleDot, Clock3, Network } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
-import { accessApi, catalogApi, ledgerApi, type ListQuery, type RequestLog } from '@/api'
+import { accessApi, catalogApi, usageApi, type ListQuery, type RequestLog } from '@/api'
 import { useSession } from '@/app/session'
 import { DataTable, type ColumnDef } from '@/components/data-table/data-table'
 import { TableToolbar } from '@/components/data-table/table-toolbar'
@@ -41,7 +41,7 @@ export function UsagePage() {
   }
   const query = useQuery({
     queryKey: ['request-logs', filters],
-    queryFn: ({ signal }) => ledgerApi.requestLogs(filters, signal),
+    queryFn: ({ signal }) => usageApi.requestLogs(filters, signal),
     placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   })
@@ -65,9 +65,7 @@ export function UsagePage() {
     }
     const result = new Map<string, string>()
     for (const key of keys.data?.items ?? []) {
-      key.authorizedModelIds.forEach((id, index) => {
-        result.set(id, key.authorizedModels[index] ?? id)
-      })
+      key.routes.forEach((route) => result.set(route.modelId, route.modelName))
     }
     return Array.from(result, ([id, name]) => ({ id, name }))
   }, [keys.data?.items, models.data, session.role])
@@ -243,7 +241,7 @@ function RequestDetail({
 }) {
   const detail = useQuery({
     queryKey: ['request-log', request?.requestId],
-    queryFn: ({ signal }) => ledgerApi.requestLog(request?.requestId ?? '', signal),
+    queryFn: ({ signal }) => usageApi.requestLog(request?.requestId ?? '', signal),
     enabled: request !== null,
     refetchInterval: request && isTerminal(request.status) ? false : 3_000,
   })

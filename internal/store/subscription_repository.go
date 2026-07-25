@@ -34,16 +34,10 @@ func (r *SubscriptionRepository) CreateSubscription(ctx context.Context, input s
 			status = db.SubscriptionStatusScheduled
 		}
 		created, err := queries.CreateSubscription(ctx, db.CreateSubscriptionParams{
-			UserID: input.UserID, ServicePlanVersionID: version.ID, Status: status, GrantedTokens: input.GrantedTokens,
-			StartsAt: timestamp(input.StartsAt), ExpiresAt: timestamp(input.ExpiresAt), Notes: input.Notes, AssignedBy: actorID,
+			UserID: input.UserID, ServicePlanVersionID: version.ID, Status: status,
+			StartsAt: timestamp(input.StartsAt), ExpiresAt: subscriptionExpiryTimestamp(input.ExpiresAt), Notes: input.Notes, AssignedBy: actorID,
 		})
 		if err != nil {
-			return subscription.Subscription{}, translateSubscriptionError(err)
-		}
-		if _, err := queries.CreateLedgerEvent(ctx, db.CreateLedgerEventParams{
-			UserID: input.UserID, SubscriptionID: created.ID, Kind: db.LedgerEventKindGrant, TokenDelta: input.GrantedTokens,
-			UsageSource: db.UsageSourceUnknown, SourceEventID: &mutation.IdempotencyKey, CreatedBy: &actorID,
-		}); err != nil {
 			return subscription.Subscription{}, translateSubscriptionError(err)
 		}
 		return subscriptionByID(ctx, queries, created.ID)
@@ -52,25 +46,11 @@ func (r *SubscriptionRepository) CreateSubscription(ctx context.Context, input s
 
 func (r *SubscriptionRepository) UpdateSubscription(ctx context.Context, change subscription.SubscriptionChange, status subscription.SubscriptionStatus, actorID uuid.UUID, mutation subscription.Mutation) (subscription.Subscription, error) {
 	return r.executeSubscriptionMutation(ctx, actorID, mutation, func(queries *db.Queries) (subscription.Subscription, error) {
-		current, err := queries.GetSubscriptionForUpdate(ctx, change.ID)
-		if err != nil {
-			return subscription.Subscription{}, translateSubscriptionError(err)
-		}
 		if _, err := queries.UpdateSubscriptionTerm(ctx, db.UpdateSubscriptionTermParams{
-			GrantedTokens: change.GrantedTokens, StartsAt: timestamp(change.StartsAt), ExpiresAt: timestamp(change.ExpiresAt),
+			StartsAt: timestamp(change.StartsAt), ExpiresAt: subscriptionExpiryTimestamp(change.ExpiresAt),
 			Notes: change.Notes, Status: db.SubscriptionStatus(status), ID: change.ID, ExpectedUpdatedAt: timestamp(change.ExpectedUpdatedAt),
 		}); err != nil {
 			return subscription.Subscription{}, translateSubscriptionError(err)
-		}
-		delta := change.GrantedTokens - current.GrantedTokens
-		if delta != 0 {
-			note := "subscription grant adjusted"
-			if _, err := queries.CreateLedgerEvent(ctx, db.CreateLedgerEventParams{
-				UserID: current.UserID, SubscriptionID: current.ID, Kind: db.LedgerEventKindAdjustment, TokenDelta: delta,
-				UsageSource: db.UsageSourceUnknown, SourceEventID: &mutation.IdempotencyKey, Note: &note, CreatedBy: &actorID,
-			}); err != nil {
-				return subscription.Subscription{}, translateSubscriptionError(err)
-			}
 		}
 		return subscriptionByID(ctx, queries, change.ID)
 	})
@@ -107,7 +87,7 @@ func (r *SubscriptionRepository) executeSubscriptionMutation(ctx context.Context
 	if err != nil {
 		return subscription.Subscription{}, err
 	}
-	audit := auditParams(&actorID, mutation.Action, "subscription", result.ID.String(), map[string]any{"user_id": result.UserID, "plan_version_id": result.ServicePlanVersionID, "status": result.Status, "granted_tokens": result.GrantedTokens})
+	audit := auditParams(&actorID, mutation.Action, "subscription", result.ID.String(), map[string]any{"user_id": result.UserID, "plan_version_id": result.ServicePlanVersionID, "status": result.Status, "expires_at": result.ExpiresAt})
 	audit.RequestID = &mutation.RequestID
 	if _, err := queries.CreateAuditEvent(ctx, audit); err != nil {
 		return subscription.Subscription{}, err
@@ -175,7 +155,7 @@ func (r *SubscriptionRepository) ListSubscriptions(ctx context.Context, query su
 			}
 			routesByVersion[row.ServicePlanVersionID] = routes
 		}
-		item := subscriptionFromParts(row.ID, row.UserID, row.ServicePlanVersionID, row.ServicePlanID, row.MemberEmail, row.MemberName, row.ServicePlanName, row.PlanKind, row.PlanVersion, row.Status, row.GrantedTokens, row.BalanceTokens, row.StartsAt.Time, row.ExpiresAt.Time, row.Notes, row.ConcurrencyLimit, row.RpmLimit, row.TpmLimit, row.SuspendedAt, row.CanceledAt, row.CreatedAt.Time, row.UpdatedAt.Time)
+		item := subscriptionFromParts(row.ID, row.UserID, row.ServicePlanVersionID, row.ServicePlanID, row.MemberEmail, row.MemberName, row.ServicePlanName, row.PlanVersion, row.Status, row.StartsAt.Time, timePointer(row.ExpiresAt), row.Notes, row.SuspendedAt, row.CanceledAt, row.CreatedAt.Time, row.UpdatedAt.Time)
 		item.Routes = routes
 		items = append(items, item)
 	}
@@ -191,7 +171,7 @@ func subscriptionByID(ctx context.Context, queries *db.Queries, id uuid.UUID) (s
 	if err != nil {
 		return subscription.Subscription{}, translateSubscriptionError(err)
 	}
-	item := subscriptionFromParts(row.ID, row.UserID, row.ServicePlanVersionID, row.ServicePlanID, row.MemberEmail, row.MemberName, row.ServicePlanName, row.PlanKind, row.PlanVersion, row.Status, row.GrantedTokens, row.BalanceTokens, row.StartsAt.Time, row.ExpiresAt.Time, row.Notes, row.ConcurrencyLimit, row.RpmLimit, row.TpmLimit, row.SuspendedAt, row.CanceledAt, row.CreatedAt.Time, row.UpdatedAt.Time)
+	item := subscriptionFromParts(row.ID, row.UserID, row.ServicePlanVersionID, row.ServicePlanID, row.MemberEmail, row.MemberName, row.ServicePlanName, row.PlanVersion, row.Status, row.StartsAt.Time, timePointer(row.ExpiresAt), row.Notes, row.SuspendedAt, row.CanceledAt, row.CreatedAt.Time, row.UpdatedAt.Time)
 	item.Routes, err = subscriptionRoutes(ctx, queries, row.ServicePlanVersionID)
 	if err != nil {
 		return subscription.Subscription{}, err
@@ -214,11 +194,11 @@ func subscriptionRoutes(ctx context.Context, queries *db.Queries, versionID uuid
 	return routes, nil
 }
 
-func subscriptionFromParts(id, userID, versionID, planID uuid.UUID, email, memberName, planName string, kind db.PlanKind, version int32, persistedStatus db.SubscriptionStatus, granted, balance int64, startsAt, expiresAt time.Time, notes string, concurrency int32, rpm *int32, tpm *int64, suspendedAt, canceledAt pgtype.Timestamptz, createdAt, updatedAt time.Time) subscription.Subscription {
+func subscriptionFromParts(id, userID, versionID, planID uuid.UUID, email, memberName, planName string, version int32, persistedStatus db.SubscriptionStatus, startsAt time.Time, expiresAt *time.Time, notes string, suspendedAt, canceledAt pgtype.Timestamptz, createdAt, updatedAt time.Time) subscription.Subscription {
 	status := subscription.SubscriptionStatus(persistedStatus)
 	now := time.Now().UTC()
 	if status != subscription.StatusSuspended && status != subscription.StatusCanceled {
-		if !expiresAt.After(now) {
+		if expiresAt != nil && !expiresAt.After(now) {
 			status = subscription.StatusExpired
 		} else if startsAt.After(now) {
 			status = subscription.StatusScheduled
@@ -228,10 +208,17 @@ func subscriptionFromParts(id, userID, versionID, planID uuid.UUID, email, membe
 	}
 	return subscription.Subscription{
 		ID: id, UserID: userID, MemberEmail: email, MemberName: memberName, ServicePlanID: planID, ServicePlanVersionID: versionID,
-		ServicePlanName: planName, PlanKind: subscription.PlanKind(kind), PlanVersion: version, Status: status,
-		GrantedTokens: granted, BalanceTokens: balance, StartsAt: startsAt.UTC(), ExpiresAt: expiresAt.UTC(), Notes: notes,
-		ConcurrencyLimit: concurrency, RPMLimit: rpm, TPMLimit: tpm, SuspendedAt: timePointer(suspendedAt), CanceledAt: timePointer(canceledAt), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC(),
+		ServicePlanName: planName, PlanVersion: version, Status: status,
+		StartsAt: startsAt.UTC(), ExpiresAt: expiresAt, Notes: notes,
+		SuspendedAt: timePointer(suspendedAt), CanceledAt: timePointer(canceledAt), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC(),
 	}
+}
+
+func subscriptionExpiryTimestamp(value *time.Time) pgtype.Timestamptz {
+	if value == nil {
+		return pgtype.Timestamptz{}
+	}
+	return timestamp(*value)
 }
 
 func translateSubscriptionError(err error) error {

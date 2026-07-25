@@ -36,10 +36,10 @@ type identityService interface {
 	DeleteMember(context.Context, identity.Principal, uuid.UUID, identity.MutationRequest) (identity.User, error)
 	ResetMemberPassword(context.Context, identity.Principal, uuid.UUID, string, identity.MutationRequest) (identity.SessionRevocation, error)
 	RevokeUserSessions(context.Context, identity.Principal, uuid.UUID, string) (identity.SessionRevocation, error)
-	CreateGatewayKey(context.Context, identity.Principal, uuid.UUID, string, []uuid.UUID, *time.Time, identity.MutationRequest) (identity.GatewayKey, error)
+	CreateGatewayKey(context.Context, identity.Principal, uuid.UUID, string, []identity.GatewayKeyRoute, *time.Time, identity.MutationRequest) (identity.GatewayKey, error)
 	ReplaceGatewayKey(context.Context, identity.Principal, uuid.UUID, identity.MutationRequest) (identity.GatewayKey, error)
 	ListGatewayKeys(context.Context, identity.Principal, uuid.UUID) ([]identity.GatewayKey, error)
-	RevokeGatewayKey(context.Context, identity.Principal, uuid.UUID) error
+	DeleteGatewayKey(context.Context, identity.Principal, uuid.UUID) error
 }
 
 type registryService interface {
@@ -51,10 +51,11 @@ type registryService interface {
 	SetResourcePoolStatus(context.Context, identity.Principal, uuid.UUID, registry.ResourcePoolStatus, time.Time, registry.MutationRequest) (registry.ResourcePool, error)
 	ListResourcePools(context.Context, identity.Principal, bool) ([]registry.ResourcePool, error)
 	GetResourcePool(context.Context, identity.Principal, uuid.UUID) (registry.ResourcePool, error)
-	ImportCredentials(context.Context, identity.Principal, uuid.UUID, []registry.CredentialBatchItem, []registry.CredentialModelBinding, *int32, *int64, *int32, registry.MutationRequest) ([]registry.CredentialBatchResult, error)
+	ImportCredentials(context.Context, identity.Principal, uuid.UUID, []registry.CredentialBatchItem, *int32, *int64, *int32, registry.MutationRequest) ([]registry.CredentialBatchResult, error)
 	UpdateCredential(context.Context, identity.Principal, registry.CredentialChange, string, registry.MutationRequest) (registry.Credential, error)
 	SetCredentialStatus(context.Context, identity.Principal, uuid.UUID, registry.CredentialStatus, time.Time, registry.MutationRequest) (registry.Credential, error)
 	RetireCredential(context.Context, identity.Principal, uuid.UUID, time.Time, registry.MutationRequest) (registry.Credential, error)
+	RefreshCredentialModels(context.Context, identity.Principal, uuid.UUID, time.Time, registry.MutationRequest) (registry.ModelDiscoveryExecution, registry.Credential, error)
 	ProbeCredential(context.Context, identity.Principal, uuid.UUID, uuid.UUID, string) (registry.CredentialProbeExecution, registry.Credential, error)
 	ListCredentials(context.Context, identity.Principal, bool) ([]registry.Credential, error)
 }
@@ -86,8 +87,7 @@ type API struct {
 	loginGuard     LoginGuard
 	config         config.Security
 	logger         *slog.Logger
-	quota          *QuotaAPI
-	costing        *CostingAPI
+	usage          *UsageAPI
 	gatewayKeyTest gatewayKeyTestWorkflow
 	siteProfile    *SiteProfileAPI
 	operations     *OperationsAPI
@@ -99,8 +99,7 @@ func New(identity identityService, registry registryService, subscriptions subsc
 
 func (a *API) WithSiteProfileAPI(value *SiteProfileAPI) *API { a.siteProfile = value; return a }
 func (a *API) WithOperationsAPI(value *OperationsAPI) *API   { a.operations = value; return a }
-func (a *API) WithCostingAPI(value *CostingAPI) *API         { a.costing = value; return a }
-func (a *API) WithQuotaAPI(value *QuotaAPI) *API             { a.quota = value; return a }
+func (a *API) WithUsageAPI(value *UsageAPI) *API             { a.usage = value; return a }
 func (a *API) WithGatewayKeyTestWorkflow(value gatewayKeyTestWorkflow) *API {
 	a.gatewayKeyTest = value
 	return a
@@ -130,11 +129,8 @@ func (a *API) Routes() http.Handler {
 			if a.siteProfile != nil {
 				a.siteProfile.RegisterAuthenticatedRoutes(authenticated, a.requireAdministrator, a.requireCSRF)
 			}
-			if a.quota != nil {
-				a.quota.RegisterRoutes(authenticated, a.requireAdministrator, a.requireCSRF)
-			}
-			if a.costing != nil {
-				a.costing.RegisterRoutes(authenticated, a.requireAdministrator, a.requireCSRF)
+			if a.usage != nil {
+				a.usage.RegisterRoutes(authenticated, a.requireAdministrator, a.requireCSRF)
 			}
 			if a.gatewayKeyTest != nil {
 				a.registerGatewayKeyTestRoutes(authenticated)
@@ -153,7 +149,7 @@ func (a *API) registerAccessRoutes(router chi.Router) {
 	router.With(a.requireAdministrator, a.requireCSRF).Post("/members/{userID}/password", a.resetMemberPassword)
 	router.Get("/keys", a.listKeys)
 	router.With(a.requireCSRF).Post("/keys", a.createKey)
-	router.With(a.requireCSRF).Post("/keys/{keyID}/revoke", a.revokeKey)
+	router.With(a.requireCSRF).Delete("/keys/{keyID}", a.deleteKey)
 	router.With(a.requireCSRF).Post("/keys/{keyID}/replacement", a.replaceKey)
 }
 
@@ -171,6 +167,7 @@ func (a *API) registerRegistryRoutes(router chi.Router) {
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Put("/credentials/{credentialID}/status", a.setCredentialStatus)
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Delete("/credentials/{credentialID}", a.retireCredential)
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Post("/credentials/{credentialID}/probe", a.probeCredential)
+	router.With(a.requireProviderAdministrator, a.requireCSRF).Post("/credentials/{credentialID}/deep-test", a.deepTestCredential)
 }
 
 func (a *API) registerSubscriptionRoutes(router chi.Router) {

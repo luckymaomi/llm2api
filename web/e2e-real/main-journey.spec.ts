@@ -120,25 +120,10 @@ test('completes the administrator and member subscription journey against real s
   ).toBeVisible()
   await probeDialog.getByRole('button', { name: '关闭', exact: true }).last().click()
 
-  await page.goto('/costs')
-  await page.getByRole('button', { name: '新增价格' }).click()
-  const priceDialog = page.getByRole('dialog', { name: '新增价格版本' })
-  await priceDialog.getByLabel('模型').selectOption({ label: 'qwen3.5-9b' })
-  await priceDialog.getByLabel('输入价格 / 百万 Token').fill('0.1')
-  await priceDialog.getByLabel('输出价格 / 百万 Token').fill('0.2')
-  const priceResponse = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === '/api/control/model-prices' &&
-      response.request().method() === 'POST',
-  )
-  await priceDialog.getByRole('button', { name: '保存' }).click()
-  expect((await priceResponse).status()).toBe(201)
-
   await page.goto('/plans')
   await page.getByRole('button', { name: '创建套餐' }).click()
   const planDialog = page.getByRole('dialog', { name: '创建并发布套餐' })
   await planDialog.getByLabel('套餐名称').fill('Browser Plan')
-  await planDialog.getByLabel('每份订阅总额度（Token）').fill('50000')
   await planDialog.getByRole('checkbox', { name: 'qwen3.5-9b' }).check()
   await page.screenshot({ path: acceptanceArtifactPath('plan-form-desktop.png'), fullPage: true })
   const planResponse = page.waitForResponse(
@@ -221,19 +206,6 @@ test('completes the administrator and member subscription journey against real s
   })
   await page.getByRole('button', { name: '关闭详情' }).click()
 
-  await page.goto('/quota-records')
-  await expect(page.getByRole('row').filter({ hasText: 'Browser Plan' }).first()).toBeVisible()
-  await expectPageWidthToFit(page)
-  await page.screenshot({
-    path: acceptanceArtifactPath('quota-records-desktop.png'),
-    fullPage: true,
-  })
-
-  await page.goto('/costs')
-  await expect(page.getByRole('row').filter({ hasText: 'Browser Member' })).toBeVisible()
-  await expectPageWidthToFit(page)
-  await page.screenshot({ path: acceptanceArtifactPath('costs-desktop.png'), fullPage: true })
-
   await page.goto('/site-settings')
   await expectPageWidthToFit(page)
   await page.screenshot({
@@ -275,14 +247,6 @@ test('completes the administrator and member subscription journey against real s
   await expectPageWidthToFit(page)
   await page.screenshot({
     path: acceptanceArtifactPath('member-api-logs-desktop.png'),
-    fullPage: true,
-  })
-
-  await page.goto('/quota-records')
-  await expect(page.getByRole('row').filter({ hasText: 'Browser Plan' }).first()).toBeVisible()
-  await expectPageWidthToFit(page)
-  await page.screenshot({
-    path: acceptanceArtifactPath('member-quota-records-desktop.png'),
     fullPage: true,
   })
 

@@ -15,17 +15,15 @@ import (
 )
 
 var (
-	ErrModelNotFound            = errors.New("model not found")
-	ErrModelNotAuthorized       = errors.New("model not authorized")
-	ErrNoEligibleUpstream       = errors.New("no eligible upstream")
-	ErrCoordinationFailed       = errors.New("coordination unavailable")
-	ErrAdmissionQueueFull       = errors.New("admission queue full")
-	ErrAdmissionTimedOut        = errors.New("admission queue timed out")
-	ErrAdmissionCanceled        = errors.New("admission canceled")
-	ErrIdempotencyConflict      = errors.New("idempotency conflict")
-	ErrQuotaExhausted           = errors.New("quota exhausted")
-	ErrCostConfigurationMissing = errors.New("model cost configuration is missing")
-	ErrInvalidAccounting        = errors.New("invalid accounting command")
+	ErrModelNotFound       = errors.New("model not found")
+	ErrModelNotAuthorized  = errors.New("model not authorized")
+	ErrNoEligibleUpstream  = errors.New("no eligible upstream")
+	ErrCoordinationFailed  = errors.New("coordination unavailable")
+	ErrAdmissionQueueFull  = errors.New("admission queue full")
+	ErrAdmissionTimedOut   = errors.New("admission queue timed out")
+	ErrAdmissionCanceled   = errors.New("admission canceled")
+	ErrIdempotencyConflict = errors.New("idempotency conflict")
+	ErrInvalidAccounting   = errors.New("invalid accounting command")
 )
 
 type Model struct {
@@ -42,14 +40,13 @@ type Model struct {
 
 type Candidate struct {
 	ID                  uuid.UUID
-	Priority            int32
-	Weight              int32
 	RPMLimit            *int32
 	TPMLimit            *int64
 	ConcurrencyLimit    *int32
 	ConsecutiveFailures int32
 	LastSuccessAt       *time.Time
 	CooldownUntil       *time.Time
+	HealthGeneration    int64
 }
 
 type AttemptUpdate struct {
@@ -73,10 +70,11 @@ const (
 )
 
 type CredentialObservation struct {
-	Kind          CredentialObservationKind
-	ObservedAt    time.Time
-	ErrorKind     string
-	CooldownUntil *time.Time
+	Kind             CredentialObservationKind
+	HealthGeneration int64
+	ObservedAt       time.Time
+	ErrorKind        string
+	CooldownUntil    *time.Time
 }
 
 type CatalogRepository interface {
@@ -87,37 +85,33 @@ type Repository interface {
 	CatalogRepository
 	ResolveAvailableModel(context.Context, uuid.UUID, string) (Model, error)
 	ListResourcePoolCandidates(context.Context, uuid.UUID, uuid.UUID) ([]Candidate, error)
+	AcquireCredentialHealthPermit(context.Context, uuid.UUID) (int64, error)
 	ClaimExecution(context.Context, uuid.UUID, uuid.UUID) (execution.Claim, error)
 	HeartbeatExecution(context.Context, execution.Claim) error
 	MarkExecutionStreaming(context.Context, execution.Claim, uuid.UUID, AttemptUpdate) error
 	MarkExecutionUncertain(context.Context, execution.Claim, uuid.UUID, AttemptUpdate, string, string) error
 	RecoverStaleExecutions(context.Context, time.Time, int32) (int64, error)
-	ListRecoverableSettlements(context.Context, time.Time, int32) ([]RecoverableSettlement, error)
+	ListRecoverableCompletions(context.Context, time.Time, int32) ([]RecoverableCompletion, error)
 	ListStaleQueuedRequests(context.Context, time.Time, int32) ([]uuid.UUID, error)
 	CreateAttempt(context.Context, execution.Claim, uuid.UUID, int) (uuid.UUID, error)
 	UpdateAttempt(context.Context, execution.Claim, uuid.UUID, AttemptUpdate) error
 }
 
-type RecoverableSettlement struct {
+type RecoverableCompletion struct {
 	Claim execution.Claim
 	Usage Usage
 }
 
 type RecoveryResult struct {
-	Settled   int64
-	Released  int64
-	Uncertain int64
+	Completed      int64
+	FailedAccepted int64
+	Uncertain      int64
 }
 
 type Accepted struct {
-	RequestID               uuid.UUID
-	ReservationID           uuid.UUID
-	SubscriptionID          uuid.UUID
-	ResourcePoolID          uuid.UUID
-	SubscriptionConcurrency int32
-	SubscriptionRPMLimit    *int32
-	SubscriptionTPMLimit    *int64
-	Existing                bool
+	RequestID      uuid.UUID
+	ResourcePoolID uuid.UUID
+	Existing       bool
 }
 
 type AdmissionRequest struct {
@@ -126,7 +120,6 @@ type AdmissionRequest struct {
 }
 
 type AdmissionPermit interface {
-	CapacityWaitDeadline() time.Time
 	Release()
 }
 
@@ -142,7 +135,6 @@ type AcceptCommand struct {
 	IdempotencyKey *string
 	RequestDigest  []byte
 	Stream         bool
-	ReservedTokens int64
 }
 
 type Usage struct {
@@ -153,10 +145,10 @@ type Usage struct {
 
 type Accounting interface {
 	AcceptRequest(context.Context, AcceptCommand) (Accepted, error)
-	Settle(context.Context, execution.Claim, Usage) error
-	Release(context.Context, execution.Claim, string, string) error
-	ReleaseAccepted(context.Context, uuid.UUID, string, string) error
-	Compensate(context.Context, execution.Claim, Usage, string) error
+	Complete(context.Context, execution.Claim, Usage) error
+	Fail(context.Context, execution.Claim, string, string) error
+	FailAccepted(context.Context, uuid.UUID, string, string) error
+	FailWithUsage(context.Context, execution.Claim, Usage, string) error
 }
 
 type SecretResolver interface {
@@ -164,23 +156,16 @@ type SecretResolver interface {
 }
 
 type LeaseRequest struct {
-	RequestID               uuid.UUID
-	ExecutionID             uuid.UUID
-	UserID                  uuid.UUID
-	GatewayKeyID            uuid.UUID
-	ModelID                 uuid.UUID
-	ProviderID              uuid.UUID
-	CredentialID            uuid.UUID
-	SubscriptionID          uuid.UUID
-	ResourcePoolID          uuid.UUID
-	EstimatedTokens         int64
-	RPMLimit                *int32
-	TPMLimit                *int64
-	Concurrency             *int32
-	SubscriptionConcurrency int32
-	SubscriptionRPMLimit    *int32
-	SubscriptionTPMLimit    *int64
-	CapacityWaitDeadline    time.Time
+	RequestID       uuid.UUID
+	ExecutionID     uuid.UUID
+	ModelID         uuid.UUID
+	ProviderID      uuid.UUID
+	CredentialID    uuid.UUID
+	ResourcePoolID  uuid.UUID
+	EstimatedTokens int64
+	RPMLimit        *int32
+	TPMLimit        *int64
+	Concurrency     *int32
 }
 
 type Lease interface {

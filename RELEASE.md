@@ -10,9 +10,9 @@
 
 - OpenAI-compatible Models、Chat Completions 与 Responses，覆盖非流、SSE、工具、reasoning、usage、取消和稳定错误。
 - Agnes、智谱 GLM、Google Gemini 专用 adapter，以及通用 OpenAI-compatible 文本 adapter。
-- 首位管理员一次性初始凭据、自助换密、管理员直接创建成员、成员权限、原子额度、API 密钥、重叠更换和账号恢复。
-- 代码内置 Provider catalog、资源池与上游 API Key 管理、不可变套餐版本、成员订阅、优先级/权重路由、跨池隔离和有界恢复；上游 API Key 使用一个逐行粘贴入口同时添加一条或多条。
-- PostgreSQL 持久事实、Valkey 短期协调、请求成本快照、Prometheus/Grafana 观测和脱敏审计。
+- 首位管理员一次性初始凭据、自助换密、管理员直接创建成员、成员权限、API 密钥、重叠更换和账号恢复。
+- 代码内置 Provider catalog、资源池与上游 API Key 管理、不可变路由套餐、有效期订阅、同池多 Key 接管、跨池隔离和有界恢复；上游 API Key 使用一个逐行粘贴入口同时添加一条或多条。
+- PostgreSQL 持久请求与 usage 事实、Valkey 短期容量协调、Prometheus/Grafana 观测和脱敏审计；不包含价格、币种、成本换算或成本汇总域。
 - Linux 双 Gateway/Caddy TLS Compose、Windows SCM、独立 migration、滚动升级、加密备份和空环境灾备工具。
 - Windows/Linux amd64 压缩包、Linux OCI tar、许可证清单、SPDX/CycloneDX SBOM、checksum、manifest、provenance 与签名 bundle。
 

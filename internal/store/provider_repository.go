@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -36,24 +34,12 @@ func (r *RegistryRepository) SyncCatalog(ctx context.Context, projections []regi
 	defer tx.Rollback(ctx)
 	queries := r.queries.WithTx(tx)
 	for _, projection := range projections {
-		provider, err := queries.UpsertProviderProjection(ctx, db.UpsertProviderProjectionParams{
+		_, err := queries.UpsertProviderProjection(ctx, db.UpsertProviderProjectionParams{
 			CatalogID: projection.CatalogID, Slug: projection.Slug, Name: projection.Name, Kind: string(projection.Kind),
 			BaseUrl: projection.BaseURL, SourceUrl: projection.SourceURL, VerifiedAt: timestamp(projection.VerifiedAt),
 		})
 		if err != nil {
 			return translateRegistryError(err)
-		}
-		for _, model := range projection.Models {
-			capabilities, err := json.Marshal(model.Capabilities)
-			if err != nil {
-				return fmt.Errorf("encode catalog model %s: %w", model.PublicName, err)
-			}
-			if _, err := queries.UpsertModelProjection(ctx, db.UpsertModelProjectionParams{
-				ProviderID: provider.ID, PublicName: model.PublicName, UpstreamName: model.UpstreamName,
-				DisplayName: model.DisplayName, Capabilities: capabilities,
-			}); err != nil {
-				return translateRegistryError(err)
-			}
 		}
 	}
 	return tx.Commit(ctx)

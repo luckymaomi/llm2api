@@ -85,6 +85,10 @@ func (a *openAIAdapter) ClassifyError(statusCode int, headers http.Header, body 
 func (a *openAIAdapter) classifyWireError(statusCode int, headers http.Header, providerError *wireError, requestID string) *canonical.Error {
 	code := string(providerError.Code)
 	kind := a.policy.classify(statusCode, providerError)
+	replaySafe := explicitRejectionReplaySafe(kind)
+	if a.policy.replaySafe != nil {
+		replaySafe = replaySafe || a.policy.replaySafe(statusCode, providerError)
+	}
 	message := strings.TrimSpace(providerError.Message)
 	if message == "" {
 		message = "provider request failed"
@@ -99,7 +103,16 @@ func (a *openAIAdapter) classifyWireError(statusCode int, headers http.Header, p
 	return &canonical.Error{
 		Kind: kind, Code: code, Message: message, Parameter: providerError.Parameter,
 		Provider: string(a.policy.kind), ProviderType: providerType, RequestID: requestID, HTTPStatus: statusCode,
-		RetryAfter: a.policy.retryAfter(headers, providerError), ReplaySafe: a.policy.replaySafe != nil && a.policy.replaySafe(statusCode, providerError),
+		RetryAfter: a.policy.retryAfter(headers, providerError), ReplaySafe: replaySafe,
+	}
+}
+
+func explicitRejectionReplaySafe(kind canonical.ErrorKind) bool {
+	switch kind {
+	case canonical.ErrorAuthentication, canonical.ErrorPermission, canonical.ErrorQuota, canonical.ErrorRateLimit:
+		return true
+	default:
+		return false
 	}
 }
 

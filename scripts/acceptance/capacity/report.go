@@ -143,12 +143,8 @@ func validateReport(report capacityReport, postgresConnectionLimit int64) []stri
 	if report.Database.Users != int64(report.Users) {
 		failures = append(failures, "database user fixture count drifted")
 	}
-	expectedHolds := int64(0)
-	if len(report.Faults) > 0 {
-		expectedHolds = 4
-	}
-	if report.Database.NonTerminalRequests != 0 || report.Database.ReservedHolds != expectedHolds {
-		failures = append(failures, "request or reservation terminal/hold facts drifted")
+	if report.Database.NonTerminalRequests != 0 {
+		failures = append(failures, "request terminal facts drifted")
 	}
 	failures = append(failures, validateFaults(report.Faults)...)
 	return failures
