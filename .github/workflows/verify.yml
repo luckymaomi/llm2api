@@ -61,7 +61,16 @@ jobs:
           LLM2API_POSTGRES_PASSWORD: llm2api_ci
           LLM2API_DATABASE_URL: postgres://llm2api:llm2api_ci@127.0.0.1:15432/llm2api?sslmode=disable
           LLM2API_VALKEY_PASSWORD: ""
-        run: pwsh -NoProfile -File ./scripts/verify.ps1 -SkipBuildMatrix
+        run: |
+          set +e
+          output="$(pwsh -NoProfile -File ./scripts/verify.ps1 -SkipBuildMatrix 2>&1)"
+          exit_code=$?
+          printf '%s\n' "$output"
+          if [ "$exit_code" -ne 0 ]; then
+            sanitized_output="$(printf '%s' "$output" | tr '\n' ' ' | sed -E 's/(postgres:\/\/[^:]+:)[^@ ]+@/\1***@/g' | cut -c1-3500)"
+            echo "::error title=Linux verification failed::$sanitized_output"
+            exit "$exit_code"
+          fi
       - name: Supply-chain source and dependency policy
         shell: pwsh
         run: ./scripts/test-supply-chain.ps1 -SkipImage
