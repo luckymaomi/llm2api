@@ -128,13 +128,19 @@ jobs:
       - name: Build and verify test-signed release
         shell: pwsh
         run: |
-          if ($env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') { throw "GitHub did not provide a full commit SHA." }
-          $builtAt = [string](& git show -s --format=%cI $env:GITHUB_SHA)
-          if ($LASTEXITCODE -ne 0 -or -not $builtAt) { throw "Could not resolve the release commit timestamp." }
-          $directory = ".build/release-$env:RELEASE_VERSION"
-          ./scripts/build-release.ps1 -Version $env:RELEASE_VERSION -Revision $env:GITHUB_SHA -BuiltAt $builtAt.Trim() -SigningMode Test
-          ./scripts/verify-release.ps1 -Directory $directory -ExpectedVersion $env:RELEASE_VERSION -ExpectedRevision $env:GITHUB_SHA
-          ./scripts/test-supply-chain.ps1 -ReleaseDirectory $directory -SkipImage
+          try {
+            if ($env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') { throw "GitHub did not provide a full commit SHA." }
+            $builtAt = [string](& git show -s --format=%cI $env:GITHUB_SHA)
+            if ($LASTEXITCODE -ne 0 -or -not $builtAt) { throw "Could not resolve the release commit timestamp." }
+            $directory = ".build/release-$env:RELEASE_VERSION"
+            ./scripts/build-release.ps1 -Version $env:RELEASE_VERSION -Revision $env:GITHUB_SHA -BuiltAt $builtAt.Trim() -SigningMode Test
+            ./scripts/verify-release.ps1 -Directory $directory -ExpectedVersion $env:RELEASE_VERSION -ExpectedRevision $env:GITHUB_SHA
+            ./scripts/test-supply-chain.ps1 -ReleaseDirectory $directory -SkipImage
+          } catch {
+            $message = $_.Exception.Message -replace '(postgres:\/\/[^:]+:)[^@ ]+@', '$1***@' -replace "[\r\n]+", " "
+            Write-Host "::error title=Release acceptance failed::$($message.Substring(0, [Math]::Min(3500, $message.Length)))"
+            throw
+          }
 
   release:
     if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') }}
