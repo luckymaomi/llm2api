@@ -194,7 +194,7 @@ func (f *fixture) providerRoutes() http.Handler {
 }
 
 func validFixtureAuthorization(value string) bool {
-	return value == "Bearer core-upstream-secret" || value == "Bearer browser-upstream-secret-replaced"
+	return value == "Bearer core-upstream-secret" || value == "Bearer replacement-upstream-secret"
 }
 
 func (f *fixture) adminRoutes() http.Handler {

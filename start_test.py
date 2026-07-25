@@ -9,7 +9,7 @@ r"""LLM2API 唯一人工测试入口。
         日常确定性检查：格式、静态分析、全部 Go 测试、sqlc 漂移、前端测试/构建。
 
     python .\start_test.py full
-        完整本机验收：daily 加有头浏览器、Docker 集成、强杀恢复、Windows SCM、
+        完整本机验收：daily 加真实 HTTP 合同、Docker 集成、强杀恢复、Windows SCM、
         TLS 滚动升级、加密灾备和跨平台构建。通常需要 15 分钟左右。
 
     python .\start_test.py provider
@@ -112,7 +112,7 @@ def test_commands(mode: str, powershell: str, capacity_duration_seconds: int, ru
                 + [
                     str(ROOT / "scripts" / "verify.ps1"),
                     "-SkipIntegration",
-                    "-SkipBrowser",
+                    "-SkipDeployment",
                     "-SkipBuildMatrix",
                 ],
             )

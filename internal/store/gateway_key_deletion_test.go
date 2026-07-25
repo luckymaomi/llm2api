@@ -194,5 +194,10 @@ func insertGatewayKeyDeletionKey(t *testing.T, pool *pgxpool.Pool, ownerID uuid.
 VALUES ($1, $2, 'Deletion Fixture', $3, $4)`, id, ownerID, "llmg_"+id.String()[:12], digest); err != nil {
 		t.Fatalf("insert gateway key deletion fixture: %v", err)
 	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM gateway_keys WHERE id = $1", id); err != nil {
+			t.Errorf("delete gateway key deletion fixture: %v", err)
+		}
+	})
 	return id
 }

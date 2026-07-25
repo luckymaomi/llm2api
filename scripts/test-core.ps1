@@ -46,7 +46,7 @@ function Set-ProviderFixtureCatalog {
   )
 
   & $Docker exec $Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_core -c `
-    "UPDATE providers SET base_url = '$ProviderBaseURL' WHERE catalog_id = 'siliconflow'; UPDATE models SET upstream_name = 'fixture-chat' WHERE provider_id = (SELECT id FROM providers WHERE catalog_id = 'siliconflow');" | Out-Null
+    "UPDATE providers SET base_url = '$ProviderBaseURL' WHERE catalog_id = 'siliconflow';" | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Could not redirect the code-owned Provider catalog to the fixture." }
 }
 
@@ -204,13 +204,11 @@ try {
 
   $providers = Invoke-RestMethod -Uri "$baseURL/api/control/providers" -WebSession $adminSession
   $provider = @($providers.data | Where-Object { $_.catalog_id -eq "siliconflow" }) | Select-Object -First 1
-  $models = Invoke-RestMethod -Uri "$baseURL/api/control/models" -WebSession $adminSession
-  $model = @($models.data | Where-Object { $_.provider_id -eq $provider.id }) | Select-Object -First 1
-  if ($null -eq $provider -or $null -eq $model) { throw "The code-owned Provider and model catalog was not available." }
+  if ($null -eq $provider) { throw "The code-owned Provider catalog was not available." }
 
   $naturalPoolName = -join ([char[]]@(0x6838, 0x5FC3, 0x6C60))
   $naturalPoolBody = [System.Text.Encoding]::UTF8.GetBytes((@{
-      providerId = $provider.id; name = $naturalPoolName; modelIds = @($model.id)
+      providerId = $provider.id; name = $naturalPoolName
     } | ConvertTo-Json -Depth 5))
   $pool = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/resource-pools" -WebSession $adminSession `
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json; charset=utf-8" -Body $naturalPoolBody
@@ -224,15 +222,21 @@ try {
   $credentialSecret = "core-upstream-secret"
   $credentialBatch = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/credentials/batch" -WebSession $adminSession `
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
-    -Body (@{ resourcePoolId = $pool.data.id; items = @(@{ name = "Core Upstream Key"; secret = $credentialSecret }); modelBindings = @(@{ model_id = $model.id }); rpmLimit = 60; tpmLimit = 50000; concurrencyLimit = 2 } | ConvertTo-Json -Depth 6)
+    -Body (@{ resourcePoolId = $pool.data.id; items = @(@{ name = "Core Upstream Key"; secret = $credentialSecret }); rpmLimit = 60; tpmLimit = 50000; concurrencyLimit = 2 } | ConvertTo-Json -Depth 6)
   $credential = @($credentialBatch.data | Select-Object -First 1)[0]
   if ($credential.status -ne "created" -or $credential.credential.status -ne "active" -or $credential.credential.model_bindings.Count -ne 1) { throw "Upstream API Key creation did not persist routing eligibility." }
+  $model = @($credential.credential.model_bindings | Where-Object { $_.model_name -eq "fixture-chat" }) | Select-Object -First 1
+  if ($null -eq $model) { throw "Upstream API Key discovery did not persist the fixture model." }
   $probe = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/credentials/$($credential.credential.id)/probe" -WebSession $adminSession `
-    -Headers @{ "X-CSRF-Token" = $adminCSRF } -ContentType "application/json" `
-    -Body (@{ modelId = $model.id } | ConvertTo-Json)
-  if ($probe.data.execution.status -ne "succeeded" -or [string]::IsNullOrWhiteSpace([string]$probe.data.execution.request_id)) {
-    throw "Upstream API Key probe did not return a successful execution and Request ID."
+    -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
+    -Body (@{ expectedUpdatedAt = $credential.credential.updated_at } | ConvertTo-Json)
+  if ($probe.data.execution.status -ne "succeeded" -or -not @($probe.data.credential.model_bindings.model_name).Contains("fixture-chat")) {
+    throw "Upstream API Key model discovery did not retain the fixture model."
   }
+
+  $models = Invoke-RestMethod -Uri "$baseURL/api/control/models" -WebSession $adminSession
+  $model = @($models.data | Where-Object { $_.id -eq $model.model_id }) | Select-Object -First 1
+  if ($null -eq $model -or $model.provider_id -ne $provider.id) { throw "Discovered model was not available to the control API." }
 
   $naturalPlanName = -join ([char[]]@(0x6838, 0x5FC3, 0x5957, 0x9910))
   $naturalPlanBody = [System.Text.Encoding]::UTF8.GetBytes((@{

@@ -55,15 +55,13 @@ jobs:
           test "$(pnpm --version)" = "10.33.0"
       - name: Install frontend dependencies
         run: pnpm --dir web install --frozen-lockfile
-      - name: Install browser
-        run: pnpm --dir web exec playwright install --with-deps chromium
       - name: Verify
         shell: bash
         env:
           LLM2API_POSTGRES_PASSWORD: llm2api_ci
           LLM2API_DATABASE_URL: postgres://llm2api:llm2api_ci@127.0.0.1:15432/llm2api?sslmode=disable
           LLM2API_VALKEY_PASSWORD: ""
-        run: xvfb-run --auto-servernum pwsh -NoProfile -File ./scripts/verify.ps1 -SkipBuildMatrix
+        run: pwsh -NoProfile -File ./scripts/verify.ps1 -SkipBuildMatrix
       - name: Supply-chain source and dependency policy
         shell: pwsh
         run: ./scripts/test-supply-chain.ps1 -SkipImage
@@ -92,7 +90,7 @@ jobs:
           if ((pnpm.cmd --version).Trim() -ne "10.33.0") { throw "Unexpected pnpm version." }
       - name: Verify code and builds
         shell: pwsh
-        run: ./scripts/verify.ps1 -SkipIntegration -SkipBrowser
+        run: ./scripts/verify.ps1 -SkipIntegration -SkipDeployment
 
   release-acceptance:
     if: ${{ github.ref_type != 'tag' }}

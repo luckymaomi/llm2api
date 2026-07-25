@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | Windows amd64 | Go 1.26.5、原生 SCM、Event Log、停止/重启与有界失败恢复 | 正式 TLS 前置代理 |
 | Linux amd64 容器 | scratch Gateway、PostgreSQL 18.4、Valkey 9.1.0、Caddy 2.10.2 双实例隔离拓扑 | 正式主机、DNS、证书与镜像仓库 |
-| 管理端 | 有头 Chromium 桌面浏览器，连接真实 Go/PostgreSQL/Valkey/生产前端 | owner 的视觉验收与正式站点 |
+| 管理端 | 生产前端构建与真实 HTTP 合同连接 Go/PostgreSQL/Valkey；桌面 UI 由 owner 人工验收 | owner 的视觉验收与正式站点 |
 | 上游探测 | 本机控制台通过正式解密、SSRF-safe transport 与 Agnes adapter 收到一次真实成功响应；隔离旅程持续验证稳定结果和脱敏 | 目标 Provider 当日网络、合同、额度与全套标准 SDK |
 | 标准客户端 | OpenAI Go v3.44.0、Python openai 2.46.0 | 目标 Provider 当日额度和网络 |
 | 容量 | 300 个受控用户 profile、900 秒稳态、突发、长流与强杀恢复 | 目标硬件的重新测量与长时 soak |

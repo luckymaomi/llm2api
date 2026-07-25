@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\isolated-services.ps1"
+. "$PSScriptRoot\deployment-http-contract.ps1"
 
 $root = Split-Path -Parent $PSScriptRoot
 $runID = New-LLM2APITestRunID -Purpose "dr"
@@ -38,7 +39,7 @@ $report = [ordered]@{
   postgresRestoredToNewDatabase = $false
   incompleteDatabaseReplacement = $false
   nonPostgresUnsafeStateRejected = $false
-  headedBrowserJourneys = 0
+  httpContractJourneys = 0
   confirmationGuards = $false
   wrongPasswordRejected = $false
   nonEmptyTargetRejected = $false
@@ -121,12 +122,9 @@ function Wait-HTTPSReady([string] $URL) {
   throw "The recovered production TLS entry did not become ready."
 }
 
-function Invoke-HeadedJourney([string] $Mode, [string] $URL) {
-  $env:LLM2API_DEPLOYMENT_MODE = $Mode
-  $env:LLM2API_DEPLOYMENT_URL = $URL
-  pnpm.cmd --dir web exec playwright test --config playwright.deployment.config.ts
-  if ($LASTEXITCODE -ne 0) { throw "The $Mode disaster-recovery browser journey failed." }
-  $report.headedBrowserJourneys++
+function Invoke-RecoveryHTTPContract([string] $Mode, [string] $URL) {
+  Invoke-DeploymentHTTPContract -Mode $Mode -BaseURL $URL
+  $report.httpContractJourneys++
 }
 
 function New-ResticOwner([string] $Operation) {
@@ -322,7 +320,7 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   Invoke-Controller "$sourceCompose --profile migration run --rm migrate" -Quiet | Out-Null
   Invoke-Controller "$sourceCompose up --detach --wait gateway-a gateway-b caddy" -Quiet | Out-Null
   Wait-HTTPSReady $deploymentURL
-  Invoke-HeadedJourney "setup" $deploymentURL
+  Invoke-RecoveryHTTPContract "setup" $deploymentURL
 
   $backupCommand = "export DEPLOY_DIRECTORY='$linuxRoot/deployment'; bash /workspace/deploy/backup-linux.sh '$backupControlRoot/backup.env'"
   Assert-ControllerFailure "bash /workspace/deploy/initialize-backup-linux.sh '$backupControlRoot/backup.env'" "Backup initialization succeeded without confirmation."
@@ -473,7 +471,7 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   Invoke-Controller "$recoveredCompose --profile migration run --rm migrate" -Quiet | Out-Null
   Invoke-Controller "$recoveredCompose up --detach --wait valkey gateway-a gateway-b caddy" -Quiet | Out-Null
   Wait-HTTPSReady $deploymentURL
-  Invoke-HeadedJourney "restored" $deploymentURL
+  Invoke-RecoveryHTTPContract "restored" $deploymentURL
   $report.recoveryTimeSeconds = [int][Math]::Ceiling(((Get-Date) - $recoveryStartedAt).TotalSeconds)
 
   $recoveredLogs = (Invoke-Controller "$recoveredCompose logs --no-color" -Quiet).Output -join "`n"
@@ -567,4 +565,4 @@ fi
   if ($cleanupFailures.Count) { throw "Disaster-recovery cleanup failed: $($cleanupFailures -join '; ')" }
 }
 
-Write-Host "Explicit encrypted snapshot recovery, source-volume loss, manifest-bound RPO, headed identity recovery, and corruption detection passed."
+Write-Host "Explicit encrypted snapshot recovery, source-volume loss, manifest-bound RPO, HTTP identity recovery, and corruption detection passed."

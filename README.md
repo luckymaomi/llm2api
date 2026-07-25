@@ -42,6 +42,16 @@ python .\start_dev.py
 5. 为管理员或成员创建下游 API 密钥。
 6. 打开左侧“接口文档”，复制 Base URL、示例或 Agent 索引链接。
 
+## Linux 一键部署
+
+准备一台已安装 Docker Engine 和 Compose plugin 的 Linux 服务器，完成域名 A/AAAA 记录解析，并在云服务器安全组和系统防火墙放行 TCP `80`、`443`。不要预先安装 Nginx：LLM2API 自带的 Caddy 负责 HTTPS 和反向代理。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/luckymaomi/llm2api/master/deploy/quick-install-linux.sh | sudo bash
+```
+
+安装器会询问域名和证书通知邮箱，自行生成所有服务 secret、固定镜像 digest、启动数据库/缓存/migration/两台 Gateway/Caddy，并输出控制台地址。完整的开始、停止、日志、诊断、备份和故障反馈说明见 [正式部署与恢复](deploy/README.md)。
+
 ## 交给 Agent 部署
 
 把下面这段话完整发给你的本地开发 Agent。它会先检查环境和仓库事实，再按仓库已有的部署文档完成部署；不会把任何真实 API Key、密码或私密配置写入仓库、日志或聊天记录。
@@ -109,7 +119,7 @@ python .\reset_dev.py
 
 ## 验证
 
-日常修改使用相应的定向测试。完整的环境、浏览器、真实 Provider、容量与发布验证由 owner 在本机执行：
+日常修改使用相应的定向测试。自动化验证前端构建、真实 HTTP 合同、真实 Provider、容量与发布物；控制台视觉与交互由管理员在桌面浏览器人工验收：
 
 ```powershell
 python .\start_test.py full

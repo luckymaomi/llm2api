@@ -2,13 +2,44 @@
 
 主部署目标是单台 Linux 主机上的 Docker Compose：Caddy 是唯一公开入口，两个 Gateway 逐实例替换；PostgreSQL、Valkey 只加入内部网络。目标容量基线是 300 个受控账号、约 60 个持续活跃用户，不代表跨地域高可用。正式公网部署仍需 owner 提供域名、DNS、主机、证书/ACME 邮箱和镜像仓库。
 
-## Linux 首装
+## Linux 一键首装
 
-1. 安装受支持的 Docker Engine 与 Compose plugin，启用 Docker 自启动；准备至少 4 vCPU、8 GiB RAM 和独立持久磁盘。容量基线使用 32 逻辑 CPU/15.5 GiB，较小主机必须重新跑容量门槛。
-2. 把 `production.env.example` 复制到 `/root/llm2api-deployment.env`，设为 `root:root 0600`，填入 `image@sha256:digest`、正式域名和八个固定 secret 路径。该源文件必须位于 `/etc/llm2api` 外，全部祖先由 root 拥有且不可被 group/world 写入；environment 只保存路径，secret 内容不得进入 environment、shell history 或工单。
-3. 先创建 `/etc/llm2api/secrets` 和八个非空普通文件；PostgreSQL DSN 指向 Compose service `postgres:5432`，Valkey ACL 使用 `user default on >PASSWORD ~* &* +@all`，其密码与 Gateway 的 Valkey password 文件一致。使用 secret 管理设施写入内容并先收紧为 root only，安装器随后按容器身份重建精确权限。
-4. 以 root 执行 `./install-linux.sh /root/llm2api-deployment.env`。安装器固定文件到 `/opt/llm2api/deploy`，把运行配置收敛为唯一的 `/etc/llm2api/deployment.env` 与精确 secret 树，先启动存储和独立 migration，再安装并启用 `llm2api-compose.service`。安装成功后删除 `/root/llm2api-deployment.env`，不要保留第二份活动配置。
-5. DNS 生效后检查 `https://域名/health/live`、`/health/ready`、登录页证书链和 Caddy/Gateway JSON 日志。只有 readiness 为 200 的实例进入代理池。
+这条命令适合只有命令行的全新 Ubuntu、Debian、Alibaba Cloud Linux 等服务器。准备至少 4 vCPU、8 GiB RAM 与持久磁盘；较小主机必须在自己的容量条件下重新验证。
+
+先完成这四件事：
+
+1. 安装并启动 Docker Engine 和 Docker Compose plugin。安装后执行 `docker version` 和 `docker compose version`，两条命令都必须成功。
+2. 在云服务器安全组和系统防火墙只放行 TCP `22`、`80`、`443`。不要暴露 `5432`、`6379` 或 `8080`。
+3. 把域名的 A 记录（有 IPv6 时也包括 AAAA）指向本机公网 IP；等待 `nslookup 你的域名` 返回该地址。
+4. 确认本机没有 Nginx、Apache 或其他服务占用 `80`、`443`：`sudo ss -ltnp '( sport = :80 or sport = :443 )'`。LLM2API 使用内置 Caddy 自动申请和续期 HTTPS 证书，不需要再配置 Nginx。
+
+运行一条安装命令：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/luckymaomi/llm2api/master/deploy/quick-install-linux.sh | sudo bash
+```
+
+安装器会询问域名和 ACME 通知邮箱，拉取镜像并固定到不可变 digest，生成所有 secret，写入唯一配置树 `/etc/llm2api`，并依次启动 PostgreSQL、Valkey、migration、两个 Gateway 与 Caddy。完成后访问 `https://你的域名`，输入管理员邮箱并妥善保存只显示一次的初始密码。
+
+如果镜像还在 GitHub Actions 的 `Publish Linux Image` 工作流中构建，安装器会在拉取镜像处失败。等待工作流成功后原样重试；已有安装不会被覆盖。
+
+### 日常命令
+
+```bash
+# 启动、停止、重启（停止不会删除数据库和配置）
+sudo /opt/llm2api/deploy/manage-linux.sh start
+sudo /opt/llm2api/deploy/manage-linux.sh stop
+sudo /opt/llm2api/deploy/manage-linux.sh restart
+
+# 服务状态、最近 300 行日志、持续跟随日志、外网健康与完整诊断
+sudo /opt/llm2api/deploy/manage-linux.sh status
+sudo /opt/llm2api/deploy/manage-linux.sh logs 300
+sudo /opt/llm2api/deploy/manage-linux.sh follow
+sudo /opt/llm2api/deploy/manage-linux.sh health
+sudo /opt/llm2api/deploy/manage-linux.sh doctor
+```
+
+排障时依次运行 `status`、`doctor`、`logs 300`，把三段完整输出和你访问的 URL 发给 Agent。不要发送 `/etc/llm2api/secrets/`、`deployment.env`、API Key、密码或截图中的密钥。`docker compose` 自身错误也请原样复制；它会指出缺少镜像、端口占用、DNS、证书或容器健康失败的具体原因。
 
 `Caddyfile.internal` 和 `compose.acceptance.yaml` 只用于隔离验收的 internal CA，不用于公网。生产 `Caddyfile` 使用 Caddy 自动 HTTPS；80/443 之外的公开监听必须单独审查防火墙和可信代理地址。
 
@@ -102,7 +133,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-se
 - 八个 secret 文件不在仓库/镜像/environment/日志；主密钥 ring 同时包含回滚所需版本并有异地密文备份。
 - 独立 migration 成功后才替换应用；升级前 dump 已通过 `pg_restore --list`，恢复目标库名从未覆盖当前库。
 - 两个 Gateway、PostgreSQL、Valkey 和 Caddy 均健康；Caddy 只代理 readiness 通过的实例，SSE 首字节和 30 秒流不被缓冲。
-- 有头桌面浏览器完成管理员初始化/重登、管理员创建成员并分配订阅、成员直接访问管理员 URL/API 被拒绝；标准 SDK 通过 Models/Chat/Responses/stream/tools/reasoning/cancel/error。
+- 真实 HTTP 合同完成管理员初始化/重登、管理员创建成员并分配订阅、成员直接访问管理员 URL/API 被拒绝；标准 SDK 通过 Models/Chat/Responses/stream/tools/reasoning/cancel/error。控制台视觉与交互由管理员在桌面浏览器人工确认。
 - 宿主按依赖顺序重启后资源池、套餐版本、订阅、成员、API 密钥、额度和账本仍在；Valkey 丢失只影响短期协调，不伪造持久事实。
 - 外部 Prometheus 从 backend 网络分别抓取两个 Gateway 的 `/metrics`，Grafana 导入 `observability/grafana-dashboard.json`，Prometheus 加载 `observability/prometheus-rules.yaml`；公网 Caddy 的 `/metrics` 必须保持 404。正式监控主机、通知渠道和证书告警属于部署环境依赖，未配置时不得声称已接入值班。
 - 账号恢复、API 密钥更换和指标告警按 `observability/runbook.md` 执行；只有目标环境的备份 timer 最近一次成功、远端仓库完整 check 和恢复演练均有现场证据，才能把该部署标记为灾备就绪。

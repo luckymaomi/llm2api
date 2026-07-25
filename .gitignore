@@ -22,8 +22,6 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 .build/
-web/playwright-report/
-web/test-results/
 web/dist/
 
 # Local reference repositories. The nested module boundary keeps root Go tooling out.

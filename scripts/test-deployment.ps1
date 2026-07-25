@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\docker.ps1"
 . "$PSScriptRoot\isolated-services.ps1"
+. "$PSScriptRoot\deployment-http-contract.ps1"
 
 $root = Split-Path -Parent $PSScriptRoot
 $runID = New-LLM2APITestRunID -Purpose "deployment"
@@ -29,7 +30,7 @@ $report = [ordered]@{
   rollingUpgrade = $false
   orderedRestart = $false
   restoredDatabase = $false
-  headedBrowserJourneys = 0
+  httpContractJourneys = 0
   publicMetricsBlocked = $false
   backendMetricsScrape = $false
   secretsInEnvironment = $false
@@ -136,12 +137,10 @@ function Assert-PublicMetricsBlocked {
   $report.publicMetricsBlocked = $true
 }
 
-function Invoke-HeadedJourney {
+function Invoke-ProductionHTTPContract {
   param([ValidateSet("setup", "restored")][string] $Mode)
-  $env:LLM2API_DEPLOYMENT_MODE = $Mode
-  pnpm.cmd --dir web exec playwright test --config playwright.deployment.config.ts
-  if ($LASTEXITCODE -ne 0) { throw "The $Mode deployment browser journey failed." }
-  $report.headedBrowserJourneys++
+  Invoke-DeploymentHTTPContract -Mode $Mode -BaseURL $env:LLM2API_DEPLOYMENT_URL
+  $report.httpContractJourneys++
 }
 
 function Set-DatabaseTarget {
@@ -220,7 +219,7 @@ try {
   }
   if ($report.secretsInEnvironment) { throw "A deployment secret entered the container environment." }
 
-  Invoke-HeadedJourney -Mode "setup"
+  Invoke-ProductionHTTPContract -Mode "setup"
 
   $postgresContainer = Get-ComposeContainer "postgres"
   & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\backup-postgres.ps1 `
@@ -277,7 +276,7 @@ try {
     $null = Invoke-Compose -Arguments @("up", "--detach", "--no-deps", "--force-recreate", "--wait", $service)
     Assert-HTTPSReady
   }
-  Invoke-HeadedJourney -Mode "restored"
+  Invoke-ProductionHTTPContract -Mode "restored"
   $report.restoredDatabase = $true
 
   $caddyContainer = Get-ComposeContainer "caddy"
@@ -332,4 +331,4 @@ try {
   if ($cleanupFailures.Count -gt 0) { throw "Deployment cleanup failed: $($cleanupFailures -join '; ')" }
 }
 
-Write-Host "Production Compose TLS, headed administrator/member journeys, migration containment, rolling replacement, ordered restart, and restored-database switch passed."
+Write-Host "Production Compose TLS, administrator/member HTTP contracts, migration containment, rolling replacement, ordered restart, and restored-database switch passed."

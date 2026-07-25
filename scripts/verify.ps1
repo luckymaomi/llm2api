@@ -1,6 +1,6 @@
 param(
   [switch] $SkipIntegration,
-  [switch] $SkipBrowser,
+  [switch] $SkipDeployment,
   [switch] $SkipBuildMatrix
 )
 
@@ -37,7 +37,7 @@ Push-Location (Join-Path $PSScriptRoot "..")
 try {
   Clear-LLM2APIEnvironment
   Invoke-Step "Environment" {
-    if ($SkipIntegration -and $SkipBrowser) {
+    if ($SkipIntegration -and $SkipDeployment) {
       & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-environment.ps1 -SkipServices -SkipDockerDaemon
     } else {
       & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-environment.ps1 -SkipServices
@@ -65,20 +65,17 @@ try {
   if (Test-Path .\web\package.json) {
     Invoke-Step "Frontend install integrity" { & $pnpmCommand --dir web install --frozen-lockfile }
     Invoke-Step "Frontend checks" { & $pnpmCommand --dir web run verify }
-    if (-not $SkipBrowser) {
-      Invoke-Step "Real headed Provider browser acceptance" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-browser-real.ps1 }
-    }
   }
 
   Invoke-Step "Compose configuration" { docker compose config --quiet }
   if (-not $SkipIntegration) {
     Invoke-Step "Migration round-trip" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-migrations.ps1 }
-    Invoke-Step "Core gateway flow" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-core.ps1 }
+    Invoke-Step "Frontend/backend HTTP contract and core gateway flow" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-core.ps1 }
     Invoke-Step "Credential rotation and PostgreSQL recovery" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-operations.ps1 }
     Invoke-Step "Prometheus rules and Grafana dashboard" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-observability.ps1 }
     if ($env:OS -eq "Windows_NT") {
       Invoke-Step "Windows SCM production service" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-windows-service.ps1 }
-      if (-not $SkipBrowser) {
+      if (-not $SkipDeployment) {
         Invoke-Step "Production TLS deployment and rolling recovery" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-deployment.ps1 }
         Invoke-Step "Encrypted empty-environment disaster recovery" { & $powerShellCommand -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-disaster-recovery.ps1 }
       }
