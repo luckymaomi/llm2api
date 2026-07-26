@@ -55,7 +55,7 @@ func (a *API) streamResponse(w http.ResponseWriter, r *http.Request, request pro
 		protocol.WriteError(w, requestID, workflowError)
 		return
 	}
-	errorBody, _ := json.Marshal(map[string]any{"code": workflowError.Code, "message": workflowError.Message})
+	errorBody, _ := json.Marshal(protocol.PresentErrorDetail(workflowError))
 	if request.Store {
 		_ = a.responses.Fail(context.WithoutCancel(streamContext), responseRecordID, errorBody)
 	}

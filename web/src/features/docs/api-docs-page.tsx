@@ -356,7 +356,7 @@ console.log(response.choices[0].message.content)`,
       `  -d '{"model":"${model}","stream":true,"messages":[{"role":"user","content":"你好"}]}'`,
     ].join('\n'),
     agent: `{
-  "provider": "openai-compatible",
+  "provider": "llm2api",
   "base_url": "${baseURL}",
   "api_key_env": "LLM2API_API_KEY",
   "models_endpoint": "${baseURL}/models",

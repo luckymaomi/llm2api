@@ -56,6 +56,9 @@ func validateCandidate(candidate Candidate) error {
 	if candidate.ID == "" || candidate.ModelID == "" || candidate.ResourcePoolID == "" {
 		return newError(ErrorInvalidCandidate, "candidate ID, model, and resource pool are required", candidate.ID)
 	}
+	if candidate.Priority < 0 || candidate.Priority > 1000 || candidate.Weight < 0 || candidate.Weight > 1000 {
+		return newError(ErrorInvalidCandidate, "candidate priority and weight are outside supported bounds", candidate.ID)
+	}
 	seen := make(map[Capability]struct{}, len(candidate.Capabilities))
 	for _, capability := range candidate.Capabilities {
 		if capability == "" {

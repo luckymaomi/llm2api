@@ -1,6 +1,7 @@
 import { apiClient } from './client'
 import type {
   Credential,
+  CredentialCapacity,
   CredentialBatchInput,
   CredentialBatchResult,
   CredentialModelProbeBatchResult,
@@ -178,13 +179,18 @@ interface ModelWire {
     reasoning_mode?: 'toggle' | 'effort' | 'hybrid' | 'always_on'
     reasoning_always_on?: boolean
     reasoning_default_enabled?: boolean
+    reasoning_config?: boolean
+    reasoning_content?: boolean
     reasoning_preserve?: boolean
     reasoning_efforts?: string[]
     tool_choice_modes_with_reasoning?: string[]
     structured_output: boolean
     json_schema_output?: boolean
+    message_name?: boolean
     prompt_cache_key?: boolean
     safety_identifier?: boolean
+    response_usage?: boolean
+    stream_usage?: boolean
     context_tokens: number
     output_tokens: number
     parameters: {
@@ -275,6 +281,21 @@ interface ResourcePoolWire {
   updated_at: string
 }
 
+interface CredentialCapacityWire {
+  state: 'observed' | 'unavailable'
+  scope: 'gateway_credential' | 'gateway_shared_upstream'
+  observed_at?: string
+  requests_per_minute_limit?: number
+  requests_per_minute_remaining?: number
+  tokens_per_minute_limit?: number
+  tokens_per_minute_remaining?: number
+  daily_token_limit?: number
+  daily_token_remaining?: number
+  daily_token_reset_at?: string
+  concurrency_limit?: number
+  concurrency_in_use?: number
+}
+
 interface CredentialWire {
   id: string
   resource_pool_id: string
@@ -288,20 +309,19 @@ interface CredentialWire {
   status: CredentialStatus
   health_status: CredentialHealthStatus
   upstream_status?: UpstreamStatusWire
-  capacity: {
-    state: 'observed' | 'unavailable'
-    scope: 'gateway_credential'
-    observed_at?: string
-    requests_per_minute_limit?: number
-    requests_per_minute_remaining?: number
-    tokens_per_minute_limit?: number
-    tokens_per_minute_remaining?: number
-    concurrency_limit?: number
-    concurrency_in_use?: number
-  }
+  capacity: CredentialCapacityWire
+  shared_capacity?: CredentialCapacityWire
   rpm_limit?: number
   tpm_limit?: number
   concurrency_limit?: number
+  priority: number
+  weight: number
+  shared_capacity_scope?: string
+  shared_rpm_limit?: number
+  shared_tpm_limit?: number
+  shared_concurrency_limit?: number
+  shared_daily_token_limit?: number
+  shared_daily_reset_minute_utc?: number
   cooldown_until?: string
   consecutive_failures: number
   last_success_at?: string
@@ -477,13 +497,18 @@ function mapModelCapabilities(capabilities: ModelWire['capabilities']): Model['c
     ...(capabilities.reasoning_mode ? { reasoningMode: capabilities.reasoning_mode } : {}),
     reasoningAlwaysOn: capabilities.reasoning_always_on ?? false,
     reasoningDefaultEnabled: capabilities.reasoning_default_enabled ?? false,
+    reasoningConfig: capabilities.reasoning_config ?? false,
+    reasoningContent: capabilities.reasoning_content ?? false,
     reasoningPreserve: capabilities.reasoning_preserve ?? false,
     reasoningEfforts: capabilities.reasoning_efforts ?? [],
     toolChoiceModesWithReasoning: capabilities.tool_choice_modes_with_reasoning ?? [],
     structuredOutput: capabilities.structured_output,
     jsonSchemaOutput: capabilities.json_schema_output ?? false,
+    messageName: capabilities.message_name ?? false,
     promptCacheKey: capabilities.prompt_cache_key ?? false,
     safetyIdentifier: capabilities.safety_identifier ?? false,
+    responseUsage: capabilities.response_usage ?? false,
+    streamUsage: capabilities.stream_usage ?? false,
     contextTokens: capabilities.context_tokens,
     outputTokens: capabilities.output_tokens,
     parameters: {
@@ -529,6 +554,39 @@ function mapNumberParameter(value: ParameterNumberWire) {
   }
 }
 
+function mapCredentialCapacity(capacity: CredentialCapacityWire): CredentialCapacity {
+  return {
+    state: capacity.state,
+    scope: capacity.scope,
+    ...(capacity.observed_at ? { observedAt: capacity.observed_at } : {}),
+    ...(capacity.requests_per_minute_limit !== undefined
+      ? { requestsPerMinuteLimit: capacity.requests_per_minute_limit }
+      : {}),
+    ...(capacity.requests_per_minute_remaining !== undefined
+      ? { requestsPerMinuteRemaining: capacity.requests_per_minute_remaining }
+      : {}),
+    ...(capacity.tokens_per_minute_limit !== undefined
+      ? { tokensPerMinuteLimit: capacity.tokens_per_minute_limit }
+      : {}),
+    ...(capacity.tokens_per_minute_remaining !== undefined
+      ? { tokensPerMinuteRemaining: capacity.tokens_per_minute_remaining }
+      : {}),
+    ...(capacity.daily_token_limit !== undefined
+      ? { dailyTokenLimit: capacity.daily_token_limit }
+      : {}),
+    ...(capacity.daily_token_remaining !== undefined
+      ? { dailyTokenRemaining: capacity.daily_token_remaining }
+      : {}),
+    ...(capacity.daily_token_reset_at ? { dailyTokenResetAt: capacity.daily_token_reset_at } : {}),
+    ...(capacity.concurrency_limit !== undefined
+      ? { concurrencyLimit: capacity.concurrency_limit }
+      : {}),
+    ...(capacity.concurrency_in_use !== undefined
+      ? { concurrencyInUse: capacity.concurrency_in_use }
+      : {}),
+  }
+}
+
 function mapCredential(credential: CredentialWire): Credential {
   return {
     id: credential.id,
@@ -543,26 +601,9 @@ function mapCredential(credential: CredentialWire): Credential {
     status: credential.status,
     healthStatus: credential.health_status,
     capacity: {
-      state: credential.capacity.state,
-      scope: credential.capacity.scope,
-      ...(credential.capacity.observed_at ? { observedAt: credential.capacity.observed_at } : {}),
-      ...(credential.capacity.requests_per_minute_limit !== undefined
-        ? { requestsPerMinuteLimit: credential.capacity.requests_per_minute_limit }
-        : {}),
-      ...(credential.capacity.requests_per_minute_remaining !== undefined
-        ? { requestsPerMinuteRemaining: credential.capacity.requests_per_minute_remaining }
-        : {}),
-      ...(credential.capacity.tokens_per_minute_limit !== undefined
-        ? { tokensPerMinuteLimit: credential.capacity.tokens_per_minute_limit }
-        : {}),
-      ...(credential.capacity.tokens_per_minute_remaining !== undefined
-        ? { tokensPerMinuteRemaining: credential.capacity.tokens_per_minute_remaining }
-        : {}),
-      ...(credential.capacity.concurrency_limit !== undefined
-        ? { concurrencyLimit: credential.capacity.concurrency_limit }
-        : {}),
-      ...(credential.capacity.concurrency_in_use !== undefined
-        ? { concurrencyInUse: credential.capacity.concurrency_in_use }
+      ...mapCredentialCapacity(credential.capacity),
+      ...(credential.shared_capacity
+        ? { sharedCapacity: mapCredentialCapacity(credential.shared_capacity) }
         : {}),
     },
     ...(credential.upstream_status
@@ -572,6 +613,26 @@ function mapCredential(credential: CredentialWire): Credential {
     ...(credential.tpm_limit !== undefined ? { tpmLimit: credential.tpm_limit } : {}),
     ...(credential.concurrency_limit !== undefined
       ? { concurrencyLimit: credential.concurrency_limit }
+      : {}),
+    priority: credential.priority,
+    weight: credential.weight,
+    ...(credential.shared_capacity_scope
+      ? { sharedCapacityScope: credential.shared_capacity_scope }
+      : {}),
+    ...(credential.shared_rpm_limit !== undefined
+      ? { sharedRpmLimit: credential.shared_rpm_limit }
+      : {}),
+    ...(credential.shared_tpm_limit !== undefined
+      ? { sharedTpmLimit: credential.shared_tpm_limit }
+      : {}),
+    ...(credential.shared_concurrency_limit !== undefined
+      ? { sharedConcurrencyLimit: credential.shared_concurrency_limit }
+      : {}),
+    ...(credential.shared_daily_token_limit !== undefined
+      ? { sharedDailyTokenLimit: credential.shared_daily_token_limit }
+      : {}),
+    ...(credential.shared_daily_reset_minute_utc !== undefined
+      ? { sharedDailyResetMinuteUtc: credential.shared_daily_reset_minute_utc }
       : {}),
     ...(credential.cooldown_until ? { cooldownUntil: credential.cooldown_until } : {}),
     consecutiveFailures: credential.consecutive_failures,

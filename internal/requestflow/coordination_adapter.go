@@ -13,9 +13,11 @@ import (
 )
 
 type Capacity struct {
-	RequestsPerMinute int64
-	TokensPerMinute   int64
-	Concurrency       int64
+	RequestsPerMinute   int64
+	TokensPerMinute     int64
+	DailyTokens         int64
+	DailyResetMinuteUTC int32
+	Concurrency         int64
 }
 
 type CoordinationConfig struct {
@@ -172,7 +174,6 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 	if request.ExecutionID == uuid.Nil {
 		return nil, 0, fmt.Errorf("%w: execution id is required", ErrCoordinationFailed)
 	}
-	dimensions := requestDimensions(request)
 	credentialCapacity := a.config.DefaultCredential
 	if request.RPMLimit != nil {
 		credentialCapacity.RequestsPerMinute = int64(*request.RPMLimit)
@@ -183,7 +184,10 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 	if request.Concurrency != nil {
 		credentialCapacity.Concurrency = int64(*request.Concurrency)
 	}
-	capacities := []Capacity{a.config.Global, a.config.ResourcePool, a.config.Model, a.config.Provider, credentialCapacity}
+	dimensions, capacities, err := requestDimensions(request, a.config, credentialCapacity)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%w: shared upstream capacity: %v", ErrCoordinationFailed, err)
+	}
 	concurrencyLimits := make([]coordination.ConcurrencyLimit, len(dimensions), len(dimensions)+1)
 	for index := range dimensions {
 		concurrencyLimits[index] = coordination.ConcurrencyLimit{Dimension: dimensions[index], MaxInFlight: capacities[index].Concurrency}
@@ -202,7 +206,7 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 		return nil, wait, &CapacityError{RetryAt: leaseDecision.RetryAt}
 	}
 
-	rateLimits := make([]coordination.BucketLimit, 0, len(dimensions)*2)
+	rateLimits := make([]coordination.BucketLimit, 0, len(dimensions)*3)
 	tokenRateLimits := make([]coordination.BucketLimit, 0, len(dimensions))
 	for index, dimension := range dimensions {
 		capacity := capacities[index]
@@ -210,6 +214,11 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 		tokenLimit := minuteBucket(dimension, coordination.MetricTokens, capacity.TokensPerMinute, request.EstimatedTokens)
 		rateLimits = append(rateLimits, tokenLimit)
 		tokenRateLimits = append(tokenRateLimits, tokenLimit)
+		if capacity.DailyTokens > 0 {
+			dailyLimit := dailyTokenBucket(dimension, capacity.DailyTokens, capacity.DailyResetMinuteUTC, request.EstimatedTokens)
+			rateLimits = append(rateLimits, dailyLimit)
+			tokenRateLimits = append(tokenRateLimits, dailyLimit)
+		}
 	}
 	rateDecision, err := a.coordinator.AcquireRate(ctx, rateLimits)
 	if err != nil {
@@ -240,26 +249,57 @@ func (a *CoordinationAdapter) InspectCredential(ctx context.Context, input Crede
 	}
 	capacity := a.effectiveCredentialCapacity(input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit)
 	dimension := coordination.Dimension{Scope: coordination.ScopeCredential, SubjectID: input.CredentialID.String()}
-	observation, err := a.coordinator.InspectRate(ctx, []coordination.BucketLimit{
+	local, err := a.inspectCapacity(ctx, dimension, capacity)
+	if err != nil {
+		return CredentialCapacity{}, err
+	}
+	result := CredentialCapacity{CapacityObservation: local}
+	sharedDimension, sharedCapacity, shared, err := sharedUpstreamCapacity(input.ProviderID, input.SharedCapacityScope, input.SharedRPMLimit, input.SharedTPMLimit, input.SharedConcurrencyLimit, input.SharedDailyTokenLimit, input.SharedDailyResetMinuteUTC)
+	if err != nil {
+		return CredentialCapacity{}, fmt.Errorf("%w: inspect shared upstream capacity: %v", ErrCoordinationFailed, err)
+	}
+	if !shared {
+		return result, nil
+	}
+	sharedObservation, err := a.inspectCapacity(ctx, sharedDimension, sharedCapacity)
+	if err != nil {
+		return CredentialCapacity{}, err
+	}
+	result.Shared = &sharedObservation
+	return result, nil
+}
+
+func (a *CoordinationAdapter) inspectCapacity(ctx context.Context, dimension coordination.Dimension, capacity Capacity) (CapacityObservation, error) {
+	rateLimits := []coordination.BucketLimit{
 		minuteBucket(dimension, coordination.MetricRequests, capacity.RequestsPerMinute, 1),
 		minuteBucket(dimension, coordination.MetricTokens, capacity.TokensPerMinute, 1),
-	})
+	}
+	if capacity.DailyTokens > 0 {
+		rateLimits = append(rateLimits, dailyTokenBucket(dimension, capacity.DailyTokens, capacity.DailyResetMinuteUTC, 1))
+	}
+	observation, err := a.coordinator.InspectRate(ctx, rateLimits)
 	if err != nil {
-		return CredentialCapacity{}, fmt.Errorf("%w: inspect credential rates: %v", ErrCoordinationFailed, err)
+		return CapacityObservation{}, fmt.Errorf("%w: inspect gateway rates: %v", ErrCoordinationFailed, err)
 	}
 	leases, err := a.coordinator.CleanupExpiredLeases(ctx, []coordination.ConcurrencyLimit{{Dimension: dimension, MaxInFlight: capacity.Concurrency}})
 	if err != nil {
-		return CredentialCapacity{}, fmt.Errorf("%w: inspect credential concurrency: %v", ErrCoordinationFailed, err)
+		return CapacityObservation{}, fmt.Errorf("%w: inspect gateway concurrency: %v", ErrCoordinationFailed, err)
 	}
-	if len(observation.Buckets) != 2 || len(leases.InUse) != 1 {
-		return CredentialCapacity{}, fmt.Errorf("%w: inspect credential returned incomplete state", ErrCoordinationFailed)
+	if len(observation.Buckets) != len(rateLimits) || len(leases.InUse) != 1 {
+		return CapacityObservation{}, fmt.Errorf("%w: inspect gateway capacity returned incomplete state", ErrCoordinationFailed)
 	}
-	return CredentialCapacity{
+	result := CapacityObservation{
 		ObservedAt:             observation.ObservedAt,
 		RequestsPerMinuteLimit: capacity.RequestsPerMinute, RequestsPerMinuteRemain: observation.Buckets[0].RemainingTokens,
 		TokensPerMinuteLimit: capacity.TokensPerMinute, TokensPerMinuteRemain: observation.Buckets[1].RemainingTokens,
 		ConcurrencyLimit: capacity.Concurrency, ConcurrencyInUse: leases.InUse[0].InUse,
-	}, nil
+	}
+	if capacity.DailyTokens > 0 {
+		result.DailyTokenLimit, result.DailyTokenRemain = capacity.DailyTokens, observation.Buckets[2].RemainingTokens
+		reset := nextDailyReset(observation.ObservedAt, capacity.DailyResetMinuteUTC)
+		result.DailyTokenResetAt = &reset
+	}
+	return result, nil
 }
 
 func (a *CoordinationAdapter) effectiveCredentialCapacity(rpm *int32, tpm *int64, concurrency *int32) Capacity {
@@ -290,14 +330,46 @@ func admissionGateError(err error) error {
 	return fmt.Errorf("%w: %v", ErrCoordinationFailed, err)
 }
 
-func requestDimensions(request LeaseRequest) []coordination.Dimension {
-	return []coordination.Dimension{
+func requestDimensions(request LeaseRequest, config CoordinationConfig, credentialCapacity Capacity) ([]coordination.Dimension, []Capacity, error) {
+	dimensions := []coordination.Dimension{
 		coordination.GlobalDimension(),
 		{Scope: coordination.ScopeResourcePool, SubjectID: request.ResourcePoolID.String()},
 		{Scope: coordination.ScopeModel, SubjectID: request.ModelID.String()},
 		{Scope: coordination.ScopeProvider, SubjectID: request.ProviderID.String()},
 		{Scope: coordination.ScopeCredential, SubjectID: request.CredentialID.String()},
 	}
+	capacities := []Capacity{config.Global, config.ResourcePool, config.Model, config.Provider, credentialCapacity}
+	sharedDimension, sharedCapacity, shared, err := sharedUpstreamCapacity(request.ProviderID, request.SharedCapacityScope, request.SharedRPMLimit, request.SharedTPMLimit, request.SharedConcurrency, request.SharedDailyTokenLimit, request.SharedDailyResetMinuteUTC)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !shared {
+		return dimensions, capacities, nil
+	}
+	dimensions = append(dimensions, sharedDimension)
+	capacities = append(capacities, sharedCapacity)
+	return dimensions, capacities, nil
+}
+
+func sharedUpstreamCapacity(providerID uuid.UUID, scope *string, rpm *int32, tpm *int64, concurrency *int32, dailyTokens *int64, dailyResetMinuteUTC *int32) (coordination.Dimension, Capacity, bool, error) {
+	if scope == nil {
+		if rpm != nil || tpm != nil || concurrency != nil || dailyTokens != nil || dailyResetMinuteUTC != nil {
+			return coordination.Dimension{}, Capacity{}, false, errors.New("shared upstream limits require a scope")
+		}
+		return coordination.Dimension{}, Capacity{}, false, nil
+	}
+	if providerID == uuid.Nil || *scope == "" || rpm == nil || tpm == nil || concurrency == nil ||
+		*rpm < 1 || *tpm < 1 || *concurrency < 1 {
+		return coordination.Dimension{}, Capacity{}, false, errors.New("shared upstream scope requires a provider and positive RPM, TPM, and concurrency limits")
+	}
+	if (dailyTokens == nil) != (dailyResetMinuteUTC == nil) || (dailyTokens != nil && (*dailyTokens < 1 || *dailyResetMinuteUTC < 0 || *dailyResetMinuteUTC >= 1440)) {
+		return coordination.Dimension{}, Capacity{}, false, errors.New("shared upstream daily token quota requires a positive limit and UTC reset minute")
+	}
+	capacity := Capacity{RequestsPerMinute: int64(*rpm), TokensPerMinute: *tpm, Concurrency: int64(*concurrency)}
+	if dailyTokens != nil {
+		capacity.DailyTokens, capacity.DailyResetMinuteUTC = *dailyTokens, *dailyResetMinuteUTC
+	}
+	return coordination.Dimension{Scope: coordination.ScopeSharedUpstream, SubjectID: providerID.String() + ":" + *scope}, capacity, true, nil
 }
 
 func minuteBucket(dimension coordination.Dimension, metric coordination.BucketMetric, capacity, requested int64) coordination.BucketLimit {
@@ -305,6 +377,19 @@ func minuteBucket(dimension coordination.Dimension, metric coordination.BucketMe
 		Dimension: dimension, Metric: metric, CapacityTokens: capacity, RefillTokens: capacity,
 		RefillInterval: time.Minute, RequestedTokens: requested,
 	}
+}
+
+func dailyTokenBucket(dimension coordination.Dimension, capacity int64, resetMinuteUTC int32, requested int64) coordination.BucketLimit {
+	return coordination.BucketLimit{Dimension: dimension, Metric: coordination.MetricDailyTokens, CapacityTokens: capacity, RequestedTokens: requested,
+		FixedWindow: 24 * time.Hour, FixedWindowOffset: time.Duration(resetMinuteUTC) * time.Minute}
+}
+
+func nextDailyReset(observedAt time.Time, resetMinuteUTC int32) time.Time {
+	day := time.Date(observedAt.UTC().Year(), observedAt.UTC().Month(), observedAt.UTC().Day(), 0, 0, 0, 0, time.UTC).Add(time.Duration(resetMinuteUTC) * time.Minute)
+	if !day.After(observedAt) {
+		return day.AddDate(0, 0, 1)
+	}
+	return day
 }
 
 type renewingLease struct {

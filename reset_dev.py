@@ -31,10 +31,10 @@ def main() -> int:
     print("不会删除源码、.env、Key 文件或其他 Docker 项目；完成后不会自动启动。")
     if not args.yes:
         try:
-            confirmation = input("确认从零开始请输入 RESET：").strip()
+            confirmation = input("确认从零开始请输入 0：").strip()
         except EOFError:
             confirmation = ""
-        if confirmation != "RESET":
+        if confirmation != "0":
             print("输入不匹配，未做任何更改。")
             return 1
 

@@ -121,8 +121,8 @@ WHERE pool_model.resource_pool_id = sqlc.arg(resource_pool_id)
 ORDER BY model.public_name, model.id;
 
 -- name: CreateCredential :one
-INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret, secret_fingerprint, rpm_limit, tpm_limit, concurrency_limit)
-VALUES (sqlc.arg(id), sqlc.arg(resource_pool_id), sqlc.arg(name), sqlc.arg(encrypted_secret), sqlc.arg(secret_fingerprint), sqlc.narg(rpm_limit), sqlc.narg(tpm_limit), sqlc.narg(concurrency_limit))
+INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret, secret_fingerprint, rpm_limit, tpm_limit, concurrency_limit, priority, weight, shared_capacity_scope_id)
+VALUES (sqlc.arg(id), sqlc.arg(resource_pool_id), sqlc.arg(name), sqlc.arg(encrypted_secret), sqlc.arg(secret_fingerprint), sqlc.narg(rpm_limit), sqlc.narg(tpm_limit), sqlc.narg(concurrency_limit), sqlc.arg(priority), sqlc.arg(weight), sqlc.narg(shared_capacity_scope_id))
 RETURNING *;
 
 -- name: ClaimCredentialMutation :one
@@ -142,12 +142,28 @@ WHERE id = sqlc.arg(id) RETURNING *;
 -- name: GetCredentialForUpdate :one
 SELECT * FROM provider_credentials WHERE id = sqlc.arg(id) FOR UPDATE;
 
+-- This is the sole owner of one official upstream account/project limit.
+-- The caller holds the affected credential row lock before changing a scope.
+-- name: UpsertSharedCapacityScope :one
+INSERT INTO upstream_capacity_scopes (provider_id, name, rpm_limit, tpm_limit, concurrency_limit, daily_token_limit, daily_reset_minute_utc)
+SELECT pool.provider_id, sqlc.arg(scope_name), sqlc.arg(rpm_limit), sqlc.arg(tpm_limit), sqlc.arg(concurrency_limit), sqlc.narg(daily_token_limit), sqlc.narg(daily_reset_minute_utc)
+FROM resource_pools pool
+WHERE pool.id = sqlc.arg(resource_pool_id)
+ON CONFLICT (provider_id, name) DO UPDATE
+SET rpm_limit = excluded.rpm_limit, tpm_limit = excluded.tpm_limit,
+    concurrency_limit = excluded.concurrency_limit,
+    daily_token_limit = excluded.daily_token_limit, daily_reset_minute_utc = excluded.daily_reset_minute_utc,
+    updated_at = GREATEST(clock_timestamp(), upstream_capacity_scopes.updated_at + interval '1 microsecond')
+RETURNING id;
+
 -- name: UpdateCredential :one
 UPDATE provider_credentials
 SET name = sqlc.arg(name),
     encrypted_secret = CASE WHEN sqlc.arg(replace_secret)::boolean THEN sqlc.arg(encrypted_secret) ELSE encrypted_secret END,
 	secret_fingerprint = CASE WHEN sqlc.arg(replace_secret)::boolean THEN sqlc.arg(secret_fingerprint) ELSE secret_fingerprint END,
     rpm_limit = sqlc.narg(rpm_limit), tpm_limit = sqlc.narg(tpm_limit), concurrency_limit = sqlc.narg(concurrency_limit),
+    priority = sqlc.arg(priority), weight = sqlc.arg(weight),
+    shared_capacity_scope_id = sqlc.narg(shared_capacity_scope_id),
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE id = sqlc.arg(id) AND status <> 'retired' AND updated_at = sqlc.arg(expected_updated_at)
 RETURNING *;
@@ -220,18 +236,26 @@ RETURNING health_generation;
 
 -- name: GetCredential :one
 SELECT credential.*, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
-       provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url
+       provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url,
+       shared_scope.name AS shared_capacity_scope, shared_scope.rpm_limit AS shared_rpm_limit,
+       shared_scope.tpm_limit AS shared_tpm_limit, shared_scope.concurrency_limit AS shared_concurrency_limit,
+       shared_scope.daily_token_limit AS shared_daily_token_limit, shared_scope.daily_reset_minute_utc AS shared_daily_reset_minute_utc
 FROM provider_credentials credential
 JOIN resource_pools pool ON pool.id = credential.resource_pool_id
 JOIN providers provider ON provider.id = pool.provider_id
+LEFT JOIN upstream_capacity_scopes shared_scope ON shared_scope.id = credential.shared_capacity_scope_id
 WHERE credential.id = sqlc.arg(id);
 
 -- name: GetCredentialBySecretFingerprint :one
 SELECT credential.*, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
-       provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url
+       provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url,
+       shared_scope.name AS shared_capacity_scope, shared_scope.rpm_limit AS shared_rpm_limit,
+       shared_scope.tpm_limit AS shared_tpm_limit, shared_scope.concurrency_limit AS shared_concurrency_limit,
+       shared_scope.daily_token_limit AS shared_daily_token_limit, shared_scope.daily_reset_minute_utc AS shared_daily_reset_minute_utc
 FROM provider_credentials credential
 JOIN resource_pools pool ON pool.id = credential.resource_pool_id
 JOIN providers provider ON provider.id = pool.provider_id
+LEFT JOIN upstream_capacity_scopes shared_scope ON shared_scope.id = credential.shared_capacity_scope_id
 WHERE credential.secret_fingerprint = sqlc.arg(secret_fingerprint);
 
 -- name: GetEncryptedCredential :one
@@ -240,12 +264,16 @@ SELECT encrypted_secret FROM provider_credentials WHERE id = sqlc.arg(id) AND st
 -- name: ListCredentials :many
 SELECT credential.*, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
        provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url,
+       shared_scope.name AS shared_capacity_scope, shared_scope.rpm_limit AS shared_rpm_limit,
+       shared_scope.tpm_limit AS shared_tpm_limit, shared_scope.concurrency_limit AS shared_concurrency_limit,
+       shared_scope.daily_token_limit AS shared_daily_token_limit, shared_scope.daily_reset_minute_utc AS shared_daily_reset_minute_utc,
        upstream_status.observation AS upstream_status_observation,
        recent.terminal_count, recent.completed_count, recent.last_checked_unix_seconds,
        recent.first_byte_p95_ms, recent.total_latency_p95_ms
 FROM provider_credentials credential
 JOIN resource_pools pool ON pool.id = credential.resource_pool_id
 JOIN providers provider ON provider.id = pool.provider_id
+LEFT JOIN upstream_capacity_scopes shared_scope ON shared_scope.id = credential.shared_capacity_scope_id
 LEFT JOIN credential_upstream_observations upstream_status ON upstream_status.credential_id = credential.id
 LEFT JOIN LATERAL (
   SELECT count(*) FILTER (WHERE attempt.status IN ('completed', 'failed', 'uncertain')) AS terminal_count,
@@ -299,13 +327,18 @@ WHERE model.public_name = sqlc.arg(public_name);
 -- name: ListResourcePoolCandidates :many
 SELECT credential.id,
        credential.rpm_limit, credential.tpm_limit, credential.concurrency_limit,
+       credential.priority, credential.weight,
+       shared_scope.name AS shared_capacity_scope, shared_scope.rpm_limit AS shared_rpm_limit,
+       shared_scope.tpm_limit AS shared_tpm_limit, shared_scope.concurrency_limit AS shared_concurrency_limit,
+       shared_scope.daily_token_limit AS shared_daily_token_limit, shared_scope.daily_reset_minute_utc AS shared_daily_reset_minute_utc,
        credential.consecutive_failures, credential.last_success_at, credential.cooldown_until,
        credential.health_status, credential.health_generation
 FROM provider_credentials credential
 JOIN credential_models binding ON binding.credential_id = credential.id
 JOIN resource_pools pool ON pool.id = credential.resource_pool_id
+LEFT JOIN upstream_capacity_scopes shared_scope ON shared_scope.id = credential.shared_capacity_scope_id
 WHERE credential.resource_pool_id = sqlc.arg(resource_pool_id) AND binding.model_id = sqlc.arg(model_id)
   AND pool.status = 'active' AND credential.status = 'active'
   AND (credential.health_status = 'healthy'
        OR (credential.health_status = 'cooling' AND credential.cooldown_until <= now()))
-ORDER BY credential.last_success_at NULLS FIRST, credential.id;
+ORDER BY credential.priority, credential.last_success_at NULLS FIRST, credential.id;

@@ -90,6 +90,10 @@ func ParseResponsesRequest(body io.Reader, requestID string) (ResponsesRequest, 
 		RequestID: requestID, Model: wire.Model, Messages: messages, Stream: wire.Stream,
 		MaxOutputTokens: wire.MaxOutputTokens, Temperature: wire.Temperature, TopP: wire.TopP,
 	}
+	if wire.Stream {
+		includeUsage := true
+		request.StreamUsage = &includeUsage
+	}
 	if err := validateSampling(request); err != nil {
 		return ResponsesRequest{}, err
 	}

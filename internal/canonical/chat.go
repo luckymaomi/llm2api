@@ -54,6 +54,7 @@ type ChatRequest struct {
 	ToolChoice        *ToolChoice
 	ParallelToolCalls *bool
 	Stream            bool
+	StreamUsage       *bool
 	MaxOutputTokens   *int64
 	N                 *int64
 	Temperature       *float64

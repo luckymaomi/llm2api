@@ -18,6 +18,7 @@ type chatRequest struct {
 	ToolChoice        json.RawMessage  `json:"tool_choice,omitempty"`
 	ParallelToolCalls *bool            `json:"parallel_tool_calls,omitempty"`
 	Stream            bool             `json:"stream,omitempty"`
+	StreamOptions     *streamOptions   `json:"stream_options,omitempty"`
 	MaxTokens         *int64           `json:"max_tokens,omitempty"`
 	MaxOutputTokens   *int64           `json:"max_completion_tokens,omitempty"`
 	N                 *int64           `json:"n,omitempty"`
@@ -86,6 +87,10 @@ type thinkingRequest struct {
 	Keep          string `json:"keep,omitempty"`
 }
 
+type streamOptions struct {
+	IncludeUsage *bool `json:"include_usage,omitempty"`
+}
+
 func ParseChatRequest(body io.Reader, requestID string) (canonical.ChatRequest, *canonical.Error) {
 	decoder := json.NewDecoder(io.LimitReader(body, 8<<20))
 	decoder.DisallowUnknownFields()
@@ -110,6 +115,12 @@ func ParseChatRequest(body io.Reader, requestID string) (canonical.ChatRequest, 
 		ParallelToolCalls: wire.ParallelToolCalls,
 		PromptCacheKey:    wire.PromptCacheKey,
 		SafetyIdentifier:  wire.SafetyIdentifier,
+	}
+	if wire.StreamOptions != nil {
+		if !wire.Stream {
+			return canonical.ChatRequest{}, invalid("stream_options_without_stream", "stream_options requires stream=true", "stream_options", nil)
+		}
+		request.StreamUsage = wire.StreamOptions.IncludeUsage
 	}
 	request.MaxOutputTokens = wire.MaxOutputTokens
 	if request.MaxOutputTokens == nil {

@@ -134,7 +134,7 @@ func (s *Service) streamAttempt(ctx context.Context, run workflowRun, candidate 
 			if parseError != nil {
 				return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, asCanonical(parseError, "malformed_provider_stream"))
 			}
-			if streamError := s.emitEvents(ctx, run.claim, attemptID, response.StatusCode, &state, events, sink); streamError != nil {
+			if streamError := s.emitEvents(ctx, run, attemptID, response.StatusCode, &state, events, sink); streamError != nil {
 				return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, streamError)
 			}
 		}
@@ -150,7 +150,7 @@ func (s *Service) streamAttempt(ctx context.Context, run workflowRun, candidate 
 	if err != nil {
 		return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, asCanonical(err, "malformed_provider_stream"))
 	}
-	if streamError := s.emitEvents(ctx, run.claim, attemptID, response.StatusCode, &state, closingEvents, sink); streamError != nil {
+	if streamError := s.emitEvents(ctx, run, attemptID, response.StatusCode, &state, closingEvents, sink); streamError != nil {
 		return s.finishBrokenStream(ctx, run, candidate, attemptID, circuitPermit, state, streamError)
 	}
 	if !state.done {
@@ -189,8 +189,10 @@ type streamState struct {
 	doneEvent    canonical.StreamEvent
 }
 
-func (s *Service) emitEvents(ctx context.Context, claim execution.Claim, attemptID uuid.UUID, status int, state *streamState, events []canonical.StreamEvent, sink StreamSink) *canonical.Error {
+func (s *Service) emitEvents(ctx context.Context, run workflowRun, attemptID uuid.UUID, status int, state *streamState, events []canonical.StreamEvent, sink StreamSink) *canonical.Error {
 	for _, event := range events {
+		event.CompletionID = publicCompletionID(run.accepted.RequestID)
+		event.Model = run.model.PublicName
 		if event.Type == canonical.StreamError {
 			if event.Error != nil {
 				return event.Error
@@ -199,7 +201,7 @@ func (s *Service) emitEvents(ctx context.Context, claim execution.Claim, attempt
 		}
 		if !state.committed {
 			now := s.clock.Now().UTC()
-			if err := s.repository.MarkExecutionStreaming(ctx, claim, attemptID, AttemptUpdate{Status: "streaming", HTTPStatus: &status, FirstByteAt: &now}); err != nil {
+			if err := s.repository.MarkExecutionStreaming(ctx, run.claim, attemptID, AttemptUpdate{Status: "streaming", HTTPStatus: &status, FirstByteAt: &now}); err != nil {
 				return storageError("stream_commit_failed", err)
 			}
 			state.firstByteAt = &now
@@ -221,7 +223,10 @@ func (s *Service) emitEvents(ctx context.Context, claim execution.Claim, attempt
 			state.doneEvent = event
 			continue
 		}
-		if err := sink(claim.RequestID, event); err != nil {
+		if event.Type == canonical.StreamUsage && (run.request.StreamUsage == nil || !*run.request.StreamUsage) {
+			continue
+		}
+		if err := sink(run.claim.RequestID, event); err != nil {
 			return &canonical.Error{Kind: canonical.ErrorStreamInterrupted, Code: "client_stream_interrupted", Message: "client stopped receiving the stream", Cause: err}
 		}
 	}

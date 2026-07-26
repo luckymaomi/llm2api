@@ -64,7 +64,7 @@ func PresentResponseFailed(responseID, model string, createdAt int64, request Re
 	result := responseBase(responseID, model, request, "failed")
 	result["created_at"] = createdAt
 	result["completed_at"] = nil
-	result["error"] = map[string]any{"code": providerError.Code, "message": providerError.Message}
+	result["error"] = PresentErrorDetail(providerError)
 	return result
 }
 

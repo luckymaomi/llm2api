@@ -193,20 +193,23 @@ func (q *Queries) CompleteResourcePoolMutation(ctx context.Context, arg Complete
 }
 
 const createCredential = `-- name: CreateCredential :one
-INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret, secret_fingerprint, rpm_limit, tpm_limit, concurrency_limit)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
+INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret, secret_fingerprint, rpm_limit, tpm_limit, concurrency_limit, priority, weight, shared_capacity_scope_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, priority, weight, shared_capacity_scope_id, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
 `
 
 type CreateCredentialParams struct {
-	ID                uuid.UUID `json:"id"`
-	ResourcePoolID    uuid.UUID `json:"resource_pool_id"`
-	Name              string    `json:"name"`
-	EncryptedSecret   []byte    `json:"encrypted_secret"`
-	SecretFingerprint string    `json:"secret_fingerprint"`
-	RpmLimit          *int32    `json:"rpm_limit"`
-	TpmLimit          *int64    `json:"tpm_limit"`
-	ConcurrencyLimit  *int32    `json:"concurrency_limit"`
+	ID                    uuid.UUID  `json:"id"`
+	ResourcePoolID        uuid.UUID  `json:"resource_pool_id"`
+	Name                  string     `json:"name"`
+	EncryptedSecret       []byte     `json:"encrypted_secret"`
+	SecretFingerprint     string     `json:"secret_fingerprint"`
+	RpmLimit              *int32     `json:"rpm_limit"`
+	TpmLimit              *int64     `json:"tpm_limit"`
+	ConcurrencyLimit      *int32     `json:"concurrency_limit"`
+	Priority              int32      `json:"priority"`
+	Weight                int32      `json:"weight"`
+	SharedCapacityScopeID *uuid.UUID `json:"shared_capacity_scope_id"`
 }
 
 func (q *Queries) CreateCredential(ctx context.Context, arg CreateCredentialParams) (ProviderCredential, error) {
@@ -219,6 +222,9 @@ func (q *Queries) CreateCredential(ctx context.Context, arg CreateCredentialPara
 		arg.RpmLimit,
 		arg.TpmLimit,
 		arg.ConcurrencyLimit,
+		arg.Priority,
+		arg.Weight,
+		arg.SharedCapacityScopeID,
 	)
 	var i ProviderCredential
 	err := row.Scan(
@@ -233,6 +239,9 @@ func (q *Queries) CreateCredential(ctx context.Context, arg CreateCredentialPara
 		&i.RpmLimit,
 		&i.TpmLimit,
 		&i.ConcurrencyLimit,
+		&i.Priority,
+		&i.Weight,
+		&i.SharedCapacityScopeID,
 		&i.CooldownUntil,
 		&i.ConsecutiveFailures,
 		&i.LastSuccessAt,
@@ -286,44 +295,57 @@ func (q *Queries) DeleteCredentialModelBindings(ctx context.Context, credentialI
 }
 
 const getCredential = `-- name: GetCredential :one
-SELECT credential.id, credential.resource_pool_id, credential.name, credential.encrypted_secret, credential.secret_fingerprint, credential.status, credential.health_status, credential.health_generation, credential.rpm_limit, credential.tpm_limit, credential.concurrency_limit, credential.cooldown_until, credential.consecutive_failures, credential.last_success_at, credential.last_error_kind, credential.last_probe_at, credential.last_probe_latency_ms, credential.last_probe_kind, credential.last_probe_status, credential.last_probe_error_kind, credential.retired_at, credential.created_at, credential.updated_at, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
-       provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url
+SELECT credential.id, credential.resource_pool_id, credential.name, credential.encrypted_secret, credential.secret_fingerprint, credential.status, credential.health_status, credential.health_generation, credential.rpm_limit, credential.tpm_limit, credential.concurrency_limit, credential.priority, credential.weight, credential.shared_capacity_scope_id, credential.cooldown_until, credential.consecutive_failures, credential.last_success_at, credential.last_error_kind, credential.last_probe_at, credential.last_probe_latency_ms, credential.last_probe_kind, credential.last_probe_status, credential.last_probe_error_kind, credential.retired_at, credential.created_at, credential.updated_at, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
+       provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url,
+       shared_scope.name AS shared_capacity_scope, shared_scope.rpm_limit AS shared_rpm_limit,
+       shared_scope.tpm_limit AS shared_tpm_limit, shared_scope.concurrency_limit AS shared_concurrency_limit,
+       shared_scope.daily_token_limit AS shared_daily_token_limit, shared_scope.daily_reset_minute_utc AS shared_daily_reset_minute_utc
 FROM provider_credentials credential
 JOIN resource_pools pool ON pool.id = credential.resource_pool_id
 JOIN providers provider ON provider.id = pool.provider_id
+LEFT JOIN upstream_capacity_scopes shared_scope ON shared_scope.id = credential.shared_capacity_scope_id
 WHERE credential.id = $1
 `
 
 type GetCredentialRow struct {
-	ID                  uuid.UUID              `json:"id"`
-	ResourcePoolID      uuid.UUID              `json:"resource_pool_id"`
-	Name                string                 `json:"name"`
-	EncryptedSecret     []byte                 `json:"encrypted_secret"`
-	SecretFingerprint   string                 `json:"secret_fingerprint"`
-	Status              CredentialStatus       `json:"status"`
-	HealthStatus        CredentialHealthStatus `json:"health_status"`
-	HealthGeneration    int64                  `json:"health_generation"`
-	RpmLimit            *int32                 `json:"rpm_limit"`
-	TpmLimit            *int64                 `json:"tpm_limit"`
-	ConcurrencyLimit    *int32                 `json:"concurrency_limit"`
-	CooldownUntil       pgtype.Timestamptz     `json:"cooldown_until"`
-	ConsecutiveFailures int32                  `json:"consecutive_failures"`
-	LastSuccessAt       pgtype.Timestamptz     `json:"last_success_at"`
-	LastErrorKind       *string                `json:"last_error_kind"`
-	LastProbeAt         pgtype.Timestamptz     `json:"last_probe_at"`
-	LastProbeLatencyMs  *int64                 `json:"last_probe_latency_ms"`
-	LastProbeKind       *string                `json:"last_probe_kind"`
-	LastProbeStatus     *string                `json:"last_probe_status"`
-	LastProbeErrorKind  *string                `json:"last_probe_error_kind"`
-	RetiredAt           pgtype.Timestamptz     `json:"retired_at"`
-	CreatedAt           pgtype.Timestamptz     `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz     `json:"updated_at"`
-	ProviderID          uuid.UUID              `json:"provider_id"`
-	ResourcePoolName    string                 `json:"resource_pool_name"`
-	ResourcePoolSlug    string                 `json:"resource_pool_slug"`
-	ProviderName        string                 `json:"provider_name"`
-	ProviderKind        string                 `json:"provider_kind"`
-	ProviderBaseUrl     string                 `json:"provider_base_url"`
+	ID                        uuid.UUID              `json:"id"`
+	ResourcePoolID            uuid.UUID              `json:"resource_pool_id"`
+	Name                      string                 `json:"name"`
+	EncryptedSecret           []byte                 `json:"encrypted_secret"`
+	SecretFingerprint         string                 `json:"secret_fingerprint"`
+	Status                    CredentialStatus       `json:"status"`
+	HealthStatus              CredentialHealthStatus `json:"health_status"`
+	HealthGeneration          int64                  `json:"health_generation"`
+	RpmLimit                  *int32                 `json:"rpm_limit"`
+	TpmLimit                  *int64                 `json:"tpm_limit"`
+	ConcurrencyLimit          *int32                 `json:"concurrency_limit"`
+	Priority                  int32                  `json:"priority"`
+	Weight                    int32                  `json:"weight"`
+	SharedCapacityScopeID     *uuid.UUID             `json:"shared_capacity_scope_id"`
+	CooldownUntil             pgtype.Timestamptz     `json:"cooldown_until"`
+	ConsecutiveFailures       int32                  `json:"consecutive_failures"`
+	LastSuccessAt             pgtype.Timestamptz     `json:"last_success_at"`
+	LastErrorKind             *string                `json:"last_error_kind"`
+	LastProbeAt               pgtype.Timestamptz     `json:"last_probe_at"`
+	LastProbeLatencyMs        *int64                 `json:"last_probe_latency_ms"`
+	LastProbeKind             *string                `json:"last_probe_kind"`
+	LastProbeStatus           *string                `json:"last_probe_status"`
+	LastProbeErrorKind        *string                `json:"last_probe_error_kind"`
+	RetiredAt                 pgtype.Timestamptz     `json:"retired_at"`
+	CreatedAt                 pgtype.Timestamptz     `json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz     `json:"updated_at"`
+	ProviderID                uuid.UUID              `json:"provider_id"`
+	ResourcePoolName          string                 `json:"resource_pool_name"`
+	ResourcePoolSlug          string                 `json:"resource_pool_slug"`
+	ProviderName              string                 `json:"provider_name"`
+	ProviderKind              string                 `json:"provider_kind"`
+	ProviderBaseUrl           string                 `json:"provider_base_url"`
+	SharedCapacityScope       *string                `json:"shared_capacity_scope"`
+	SharedRpmLimit            *int32                 `json:"shared_rpm_limit"`
+	SharedTpmLimit            *int64                 `json:"shared_tpm_limit"`
+	SharedConcurrencyLimit    *int32                 `json:"shared_concurrency_limit"`
+	SharedDailyTokenLimit     *int64                 `json:"shared_daily_token_limit"`
+	SharedDailyResetMinuteUtc *int32                 `json:"shared_daily_reset_minute_utc"`
 }
 
 func (q *Queries) GetCredential(ctx context.Context, id uuid.UUID) (GetCredentialRow, error) {
@@ -341,6 +363,9 @@ func (q *Queries) GetCredential(ctx context.Context, id uuid.UUID) (GetCredentia
 		&i.RpmLimit,
 		&i.TpmLimit,
 		&i.ConcurrencyLimit,
+		&i.Priority,
+		&i.Weight,
+		&i.SharedCapacityScopeID,
 		&i.CooldownUntil,
 		&i.ConsecutiveFailures,
 		&i.LastSuccessAt,
@@ -359,49 +384,68 @@ func (q *Queries) GetCredential(ctx context.Context, id uuid.UUID) (GetCredentia
 		&i.ProviderName,
 		&i.ProviderKind,
 		&i.ProviderBaseUrl,
+		&i.SharedCapacityScope,
+		&i.SharedRpmLimit,
+		&i.SharedTpmLimit,
+		&i.SharedConcurrencyLimit,
+		&i.SharedDailyTokenLimit,
+		&i.SharedDailyResetMinuteUtc,
 	)
 	return i, err
 }
 
 const getCredentialBySecretFingerprint = `-- name: GetCredentialBySecretFingerprint :one
-SELECT credential.id, credential.resource_pool_id, credential.name, credential.encrypted_secret, credential.secret_fingerprint, credential.status, credential.health_status, credential.health_generation, credential.rpm_limit, credential.tpm_limit, credential.concurrency_limit, credential.cooldown_until, credential.consecutive_failures, credential.last_success_at, credential.last_error_kind, credential.last_probe_at, credential.last_probe_latency_ms, credential.last_probe_kind, credential.last_probe_status, credential.last_probe_error_kind, credential.retired_at, credential.created_at, credential.updated_at, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
-       provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url
+SELECT credential.id, credential.resource_pool_id, credential.name, credential.encrypted_secret, credential.secret_fingerprint, credential.status, credential.health_status, credential.health_generation, credential.rpm_limit, credential.tpm_limit, credential.concurrency_limit, credential.priority, credential.weight, credential.shared_capacity_scope_id, credential.cooldown_until, credential.consecutive_failures, credential.last_success_at, credential.last_error_kind, credential.last_probe_at, credential.last_probe_latency_ms, credential.last_probe_kind, credential.last_probe_status, credential.last_probe_error_kind, credential.retired_at, credential.created_at, credential.updated_at, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
+       provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url,
+       shared_scope.name AS shared_capacity_scope, shared_scope.rpm_limit AS shared_rpm_limit,
+       shared_scope.tpm_limit AS shared_tpm_limit, shared_scope.concurrency_limit AS shared_concurrency_limit,
+       shared_scope.daily_token_limit AS shared_daily_token_limit, shared_scope.daily_reset_minute_utc AS shared_daily_reset_minute_utc
 FROM provider_credentials credential
 JOIN resource_pools pool ON pool.id = credential.resource_pool_id
 JOIN providers provider ON provider.id = pool.provider_id
+LEFT JOIN upstream_capacity_scopes shared_scope ON shared_scope.id = credential.shared_capacity_scope_id
 WHERE credential.secret_fingerprint = $1
 `
 
 type GetCredentialBySecretFingerprintRow struct {
-	ID                  uuid.UUID              `json:"id"`
-	ResourcePoolID      uuid.UUID              `json:"resource_pool_id"`
-	Name                string                 `json:"name"`
-	EncryptedSecret     []byte                 `json:"encrypted_secret"`
-	SecretFingerprint   string                 `json:"secret_fingerprint"`
-	Status              CredentialStatus       `json:"status"`
-	HealthStatus        CredentialHealthStatus `json:"health_status"`
-	HealthGeneration    int64                  `json:"health_generation"`
-	RpmLimit            *int32                 `json:"rpm_limit"`
-	TpmLimit            *int64                 `json:"tpm_limit"`
-	ConcurrencyLimit    *int32                 `json:"concurrency_limit"`
-	CooldownUntil       pgtype.Timestamptz     `json:"cooldown_until"`
-	ConsecutiveFailures int32                  `json:"consecutive_failures"`
-	LastSuccessAt       pgtype.Timestamptz     `json:"last_success_at"`
-	LastErrorKind       *string                `json:"last_error_kind"`
-	LastProbeAt         pgtype.Timestamptz     `json:"last_probe_at"`
-	LastProbeLatencyMs  *int64                 `json:"last_probe_latency_ms"`
-	LastProbeKind       *string                `json:"last_probe_kind"`
-	LastProbeStatus     *string                `json:"last_probe_status"`
-	LastProbeErrorKind  *string                `json:"last_probe_error_kind"`
-	RetiredAt           pgtype.Timestamptz     `json:"retired_at"`
-	CreatedAt           pgtype.Timestamptz     `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz     `json:"updated_at"`
-	ProviderID          uuid.UUID              `json:"provider_id"`
-	ResourcePoolName    string                 `json:"resource_pool_name"`
-	ResourcePoolSlug    string                 `json:"resource_pool_slug"`
-	ProviderName        string                 `json:"provider_name"`
-	ProviderKind        string                 `json:"provider_kind"`
-	ProviderBaseUrl     string                 `json:"provider_base_url"`
+	ID                        uuid.UUID              `json:"id"`
+	ResourcePoolID            uuid.UUID              `json:"resource_pool_id"`
+	Name                      string                 `json:"name"`
+	EncryptedSecret           []byte                 `json:"encrypted_secret"`
+	SecretFingerprint         string                 `json:"secret_fingerprint"`
+	Status                    CredentialStatus       `json:"status"`
+	HealthStatus              CredentialHealthStatus `json:"health_status"`
+	HealthGeneration          int64                  `json:"health_generation"`
+	RpmLimit                  *int32                 `json:"rpm_limit"`
+	TpmLimit                  *int64                 `json:"tpm_limit"`
+	ConcurrencyLimit          *int32                 `json:"concurrency_limit"`
+	Priority                  int32                  `json:"priority"`
+	Weight                    int32                  `json:"weight"`
+	SharedCapacityScopeID     *uuid.UUID             `json:"shared_capacity_scope_id"`
+	CooldownUntil             pgtype.Timestamptz     `json:"cooldown_until"`
+	ConsecutiveFailures       int32                  `json:"consecutive_failures"`
+	LastSuccessAt             pgtype.Timestamptz     `json:"last_success_at"`
+	LastErrorKind             *string                `json:"last_error_kind"`
+	LastProbeAt               pgtype.Timestamptz     `json:"last_probe_at"`
+	LastProbeLatencyMs        *int64                 `json:"last_probe_latency_ms"`
+	LastProbeKind             *string                `json:"last_probe_kind"`
+	LastProbeStatus           *string                `json:"last_probe_status"`
+	LastProbeErrorKind        *string                `json:"last_probe_error_kind"`
+	RetiredAt                 pgtype.Timestamptz     `json:"retired_at"`
+	CreatedAt                 pgtype.Timestamptz     `json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz     `json:"updated_at"`
+	ProviderID                uuid.UUID              `json:"provider_id"`
+	ResourcePoolName          string                 `json:"resource_pool_name"`
+	ResourcePoolSlug          string                 `json:"resource_pool_slug"`
+	ProviderName              string                 `json:"provider_name"`
+	ProviderKind              string                 `json:"provider_kind"`
+	ProviderBaseUrl           string                 `json:"provider_base_url"`
+	SharedCapacityScope       *string                `json:"shared_capacity_scope"`
+	SharedRpmLimit            *int32                 `json:"shared_rpm_limit"`
+	SharedTpmLimit            *int64                 `json:"shared_tpm_limit"`
+	SharedConcurrencyLimit    *int32                 `json:"shared_concurrency_limit"`
+	SharedDailyTokenLimit     *int64                 `json:"shared_daily_token_limit"`
+	SharedDailyResetMinuteUtc *int32                 `json:"shared_daily_reset_minute_utc"`
 }
 
 func (q *Queries) GetCredentialBySecretFingerprint(ctx context.Context, secretFingerprint string) (GetCredentialBySecretFingerprintRow, error) {
@@ -419,6 +463,9 @@ func (q *Queries) GetCredentialBySecretFingerprint(ctx context.Context, secretFi
 		&i.RpmLimit,
 		&i.TpmLimit,
 		&i.ConcurrencyLimit,
+		&i.Priority,
+		&i.Weight,
+		&i.SharedCapacityScopeID,
 		&i.CooldownUntil,
 		&i.ConsecutiveFailures,
 		&i.LastSuccessAt,
@@ -437,12 +484,18 @@ func (q *Queries) GetCredentialBySecretFingerprint(ctx context.Context, secretFi
 		&i.ProviderName,
 		&i.ProviderKind,
 		&i.ProviderBaseUrl,
+		&i.SharedCapacityScope,
+		&i.SharedRpmLimit,
+		&i.SharedTpmLimit,
+		&i.SharedConcurrencyLimit,
+		&i.SharedDailyTokenLimit,
+		&i.SharedDailyResetMinuteUtc,
 	)
 	return i, err
 }
 
 const getCredentialForUpdate = `-- name: GetCredentialForUpdate :one
-SELECT id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at FROM provider_credentials WHERE id = $1 FOR UPDATE
+SELECT id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, priority, weight, shared_capacity_scope_id, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at FROM provider_credentials WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetCredentialForUpdate(ctx context.Context, id uuid.UUID) (ProviderCredential, error) {
@@ -460,6 +513,9 @@ func (q *Queries) GetCredentialForUpdate(ctx context.Context, id uuid.UUID) (Pro
 		&i.RpmLimit,
 		&i.TpmLimit,
 		&i.ConcurrencyLimit,
+		&i.Priority,
+		&i.Weight,
+		&i.SharedCapacityScopeID,
 		&i.CooldownUntil,
 		&i.ConsecutiveFailures,
 		&i.LastSuccessAt,
@@ -821,14 +877,18 @@ func (q *Queries) ListCredentialModelBindings(ctx context.Context, credentialID 
 }
 
 const listCredentials = `-- name: ListCredentials :many
-SELECT credential.id, credential.resource_pool_id, credential.name, credential.encrypted_secret, credential.secret_fingerprint, credential.status, credential.health_status, credential.health_generation, credential.rpm_limit, credential.tpm_limit, credential.concurrency_limit, credential.cooldown_until, credential.consecutive_failures, credential.last_success_at, credential.last_error_kind, credential.last_probe_at, credential.last_probe_latency_ms, credential.last_probe_kind, credential.last_probe_status, credential.last_probe_error_kind, credential.retired_at, credential.created_at, credential.updated_at, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
+SELECT credential.id, credential.resource_pool_id, credential.name, credential.encrypted_secret, credential.secret_fingerprint, credential.status, credential.health_status, credential.health_generation, credential.rpm_limit, credential.tpm_limit, credential.concurrency_limit, credential.priority, credential.weight, credential.shared_capacity_scope_id, credential.cooldown_until, credential.consecutive_failures, credential.last_success_at, credential.last_error_kind, credential.last_probe_at, credential.last_probe_latency_ms, credential.last_probe_kind, credential.last_probe_status, credential.last_probe_error_kind, credential.retired_at, credential.created_at, credential.updated_at, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
        provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url,
+       shared_scope.name AS shared_capacity_scope, shared_scope.rpm_limit AS shared_rpm_limit,
+       shared_scope.tpm_limit AS shared_tpm_limit, shared_scope.concurrency_limit AS shared_concurrency_limit,
+       shared_scope.daily_token_limit AS shared_daily_token_limit, shared_scope.daily_reset_minute_utc AS shared_daily_reset_minute_utc,
        upstream_status.observation AS upstream_status_observation,
        recent.terminal_count, recent.completed_count, recent.last_checked_unix_seconds,
        recent.first_byte_p95_ms, recent.total_latency_p95_ms
 FROM provider_credentials credential
 JOIN resource_pools pool ON pool.id = credential.resource_pool_id
 JOIN providers provider ON provider.id = pool.provider_id
+LEFT JOIN upstream_capacity_scopes shared_scope ON shared_scope.id = credential.shared_capacity_scope_id
 LEFT JOIN credential_upstream_observations upstream_status ON upstream_status.credential_id = credential.id
 LEFT JOIN LATERAL (
   SELECT count(*) FILTER (WHERE attempt.status IN ('completed', 'failed', 'uncertain')) AS terminal_count,
@@ -860,6 +920,9 @@ type ListCredentialsRow struct {
 	RpmLimit                  *int32                 `json:"rpm_limit"`
 	TpmLimit                  *int64                 `json:"tpm_limit"`
 	ConcurrencyLimit          *int32                 `json:"concurrency_limit"`
+	Priority                  int32                  `json:"priority"`
+	Weight                    int32                  `json:"weight"`
+	SharedCapacityScopeID     *uuid.UUID             `json:"shared_capacity_scope_id"`
 	CooldownUntil             pgtype.Timestamptz     `json:"cooldown_until"`
 	ConsecutiveFailures       int32                  `json:"consecutive_failures"`
 	LastSuccessAt             pgtype.Timestamptz     `json:"last_success_at"`
@@ -878,6 +941,12 @@ type ListCredentialsRow struct {
 	ProviderName              string                 `json:"provider_name"`
 	ProviderKind              string                 `json:"provider_kind"`
 	ProviderBaseUrl           string                 `json:"provider_base_url"`
+	SharedCapacityScope       *string                `json:"shared_capacity_scope"`
+	SharedRpmLimit            *int32                 `json:"shared_rpm_limit"`
+	SharedTpmLimit            *int64                 `json:"shared_tpm_limit"`
+	SharedConcurrencyLimit    *int32                 `json:"shared_concurrency_limit"`
+	SharedDailyTokenLimit     *int64                 `json:"shared_daily_token_limit"`
+	SharedDailyResetMinuteUtc *int32                 `json:"shared_daily_reset_minute_utc"`
 	UpstreamStatusObservation []byte                 `json:"upstream_status_observation"`
 	TerminalCount             int64                  `json:"terminal_count"`
 	CompletedCount            int64                  `json:"completed_count"`
@@ -907,6 +976,9 @@ func (q *Queries) ListCredentials(ctx context.Context, includeRetired bool) ([]L
 			&i.RpmLimit,
 			&i.TpmLimit,
 			&i.ConcurrencyLimit,
+			&i.Priority,
+			&i.Weight,
+			&i.SharedCapacityScopeID,
 			&i.CooldownUntil,
 			&i.ConsecutiveFailures,
 			&i.LastSuccessAt,
@@ -925,6 +997,12 @@ func (q *Queries) ListCredentials(ctx context.Context, includeRetired bool) ([]L
 			&i.ProviderName,
 			&i.ProviderKind,
 			&i.ProviderBaseUrl,
+			&i.SharedCapacityScope,
+			&i.SharedRpmLimit,
+			&i.SharedTpmLimit,
+			&i.SharedConcurrencyLimit,
+			&i.SharedDailyTokenLimit,
+			&i.SharedDailyResetMinuteUtc,
 			&i.UpstreamStatusObservation,
 			&i.TerminalCount,
 			&i.CompletedCount,
@@ -1052,16 +1130,21 @@ func (q *Queries) ListProviders(ctx context.Context) ([]ListProvidersRow, error)
 const listResourcePoolCandidates = `-- name: ListResourcePoolCandidates :many
 SELECT credential.id,
        credential.rpm_limit, credential.tpm_limit, credential.concurrency_limit,
+       credential.priority, credential.weight,
+       shared_scope.name AS shared_capacity_scope, shared_scope.rpm_limit AS shared_rpm_limit,
+       shared_scope.tpm_limit AS shared_tpm_limit, shared_scope.concurrency_limit AS shared_concurrency_limit,
+       shared_scope.daily_token_limit AS shared_daily_token_limit, shared_scope.daily_reset_minute_utc AS shared_daily_reset_minute_utc,
        credential.consecutive_failures, credential.last_success_at, credential.cooldown_until,
        credential.health_status, credential.health_generation
 FROM provider_credentials credential
 JOIN credential_models binding ON binding.credential_id = credential.id
 JOIN resource_pools pool ON pool.id = credential.resource_pool_id
+LEFT JOIN upstream_capacity_scopes shared_scope ON shared_scope.id = credential.shared_capacity_scope_id
 WHERE credential.resource_pool_id = $1 AND binding.model_id = $2
   AND pool.status = 'active' AND credential.status = 'active'
   AND (credential.health_status = 'healthy'
        OR (credential.health_status = 'cooling' AND credential.cooldown_until <= now()))
-ORDER BY credential.last_success_at NULLS FIRST, credential.id
+ORDER BY credential.priority, credential.last_success_at NULLS FIRST, credential.id
 `
 
 type ListResourcePoolCandidatesParams struct {
@@ -1070,15 +1153,23 @@ type ListResourcePoolCandidatesParams struct {
 }
 
 type ListResourcePoolCandidatesRow struct {
-	ID                  uuid.UUID              `json:"id"`
-	RpmLimit            *int32                 `json:"rpm_limit"`
-	TpmLimit            *int64                 `json:"tpm_limit"`
-	ConcurrencyLimit    *int32                 `json:"concurrency_limit"`
-	ConsecutiveFailures int32                  `json:"consecutive_failures"`
-	LastSuccessAt       pgtype.Timestamptz     `json:"last_success_at"`
-	CooldownUntil       pgtype.Timestamptz     `json:"cooldown_until"`
-	HealthStatus        CredentialHealthStatus `json:"health_status"`
-	HealthGeneration    int64                  `json:"health_generation"`
+	ID                        uuid.UUID              `json:"id"`
+	RpmLimit                  *int32                 `json:"rpm_limit"`
+	TpmLimit                  *int64                 `json:"tpm_limit"`
+	ConcurrencyLimit          *int32                 `json:"concurrency_limit"`
+	Priority                  int32                  `json:"priority"`
+	Weight                    int32                  `json:"weight"`
+	SharedCapacityScope       *string                `json:"shared_capacity_scope"`
+	SharedRpmLimit            *int32                 `json:"shared_rpm_limit"`
+	SharedTpmLimit            *int64                 `json:"shared_tpm_limit"`
+	SharedConcurrencyLimit    *int32                 `json:"shared_concurrency_limit"`
+	SharedDailyTokenLimit     *int64                 `json:"shared_daily_token_limit"`
+	SharedDailyResetMinuteUtc *int32                 `json:"shared_daily_reset_minute_utc"`
+	ConsecutiveFailures       int32                  `json:"consecutive_failures"`
+	LastSuccessAt             pgtype.Timestamptz     `json:"last_success_at"`
+	CooldownUntil             pgtype.Timestamptz     `json:"cooldown_until"`
+	HealthStatus              CredentialHealthStatus `json:"health_status"`
+	HealthGeneration          int64                  `json:"health_generation"`
 }
 
 func (q *Queries) ListResourcePoolCandidates(ctx context.Context, arg ListResourcePoolCandidatesParams) ([]ListResourcePoolCandidatesRow, error) {
@@ -1095,6 +1186,14 @@ func (q *Queries) ListResourcePoolCandidates(ctx context.Context, arg ListResour
 			&i.RpmLimit,
 			&i.TpmLimit,
 			&i.ConcurrencyLimit,
+			&i.Priority,
+			&i.Weight,
+			&i.SharedCapacityScope,
+			&i.SharedRpmLimit,
+			&i.SharedTpmLimit,
+			&i.SharedConcurrencyLimit,
+			&i.SharedDailyTokenLimit,
+			&i.SharedDailyResetMinuteUtc,
 			&i.ConsecutiveFailures,
 			&i.LastSuccessAt,
 			&i.CooldownUntil,
@@ -1250,7 +1349,7 @@ SET last_probe_at = $1, last_probe_latency_ms = $2,
     last_probe_kind = $3, last_probe_status = $4,
     last_probe_error_kind = $5,
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
-WHERE id = $6 AND status <> 'retired' RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
+WHERE id = $6 AND status <> 'retired' RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, priority, weight, shared_capacity_scope_id, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
 `
 
 type RecordCredentialProbeParams struct {
@@ -1284,6 +1383,9 @@ func (q *Queries) RecordCredentialProbe(ctx context.Context, arg RecordCredentia
 		&i.RpmLimit,
 		&i.TpmLimit,
 		&i.ConcurrencyLimit,
+		&i.Priority,
+		&i.Weight,
+		&i.SharedCapacityScopeID,
 		&i.CooldownUntil,
 		&i.ConsecutiveFailures,
 		&i.LastSuccessAt,
@@ -1397,7 +1499,7 @@ UPDATE provider_credentials
 SET status = 'retired', health_status = 'repair_required', encrypted_secret = $1, cooldown_until = NULL,
     retired_at = now(), updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE id = $2 AND status <> 'retired' AND updated_at = $3
-RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
+RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, priority, weight, shared_capacity_scope_id, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
 `
 
 type RetireCredentialParams struct {
@@ -1421,6 +1523,9 @@ func (q *Queries) RetireCredential(ctx context.Context, arg RetireCredentialPara
 		&i.RpmLimit,
 		&i.TpmLimit,
 		&i.ConcurrencyLimit,
+		&i.Priority,
+		&i.Weight,
+		&i.SharedCapacityScopeID,
 		&i.CooldownUntil,
 		&i.ConsecutiveFailures,
 		&i.LastSuccessAt,
@@ -1443,7 +1548,7 @@ SET status = $1,
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE id = $2 AND status <> 'retired' AND $1::credential_status <> 'retired'
   AND updated_at = $3
-RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
+RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, priority, weight, shared_capacity_scope_id, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
 `
 
 type SetCredentialStatusParams struct {
@@ -1467,6 +1572,9 @@ func (q *Queries) SetCredentialStatus(ctx context.Context, arg SetCredentialStat
 		&i.RpmLimit,
 		&i.TpmLimit,
 		&i.ConcurrencyLimit,
+		&i.Priority,
+		&i.Weight,
+		&i.SharedCapacityScopeID,
 		&i.CooldownUntil,
 		&i.ConsecutiveFailures,
 		&i.LastSuccessAt,
@@ -1520,21 +1628,26 @@ SET name = $1,
     encrypted_secret = CASE WHEN $2::boolean THEN $3 ELSE encrypted_secret END,
 	secret_fingerprint = CASE WHEN $2::boolean THEN $4 ELSE secret_fingerprint END,
     rpm_limit = $5, tpm_limit = $6, concurrency_limit = $7,
+    priority = $8, weight = $9,
+    shared_capacity_scope_id = $10,
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
-WHERE id = $8 AND status <> 'retired' AND updated_at = $9
-RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
+WHERE id = $11 AND status <> 'retired' AND updated_at = $12
+RETURNING id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status, health_status, health_generation, rpm_limit, tpm_limit, concurrency_limit, priority, weight, shared_capacity_scope_id, cooldown_until, consecutive_failures, last_success_at, last_error_kind, last_probe_at, last_probe_latency_ms, last_probe_kind, last_probe_status, last_probe_error_kind, retired_at, created_at, updated_at
 `
 
 type UpdateCredentialParams struct {
-	Name              string             `json:"name"`
-	ReplaceSecret     bool               `json:"replace_secret"`
-	EncryptedSecret   []byte             `json:"encrypted_secret"`
-	SecretFingerprint string             `json:"secret_fingerprint"`
-	RpmLimit          *int32             `json:"rpm_limit"`
-	TpmLimit          *int64             `json:"tpm_limit"`
-	ConcurrencyLimit  *int32             `json:"concurrency_limit"`
-	ID                uuid.UUID          `json:"id"`
-	ExpectedUpdatedAt pgtype.Timestamptz `json:"expected_updated_at"`
+	Name                  string             `json:"name"`
+	ReplaceSecret         bool               `json:"replace_secret"`
+	EncryptedSecret       []byte             `json:"encrypted_secret"`
+	SecretFingerprint     string             `json:"secret_fingerprint"`
+	RpmLimit              *int32             `json:"rpm_limit"`
+	TpmLimit              *int64             `json:"tpm_limit"`
+	ConcurrencyLimit      *int32             `json:"concurrency_limit"`
+	Priority              int32              `json:"priority"`
+	Weight                int32              `json:"weight"`
+	SharedCapacityScopeID *uuid.UUID         `json:"shared_capacity_scope_id"`
+	ID                    uuid.UUID          `json:"id"`
+	ExpectedUpdatedAt     pgtype.Timestamptz `json:"expected_updated_at"`
 }
 
 func (q *Queries) UpdateCredential(ctx context.Context, arg UpdateCredentialParams) (ProviderCredential, error) {
@@ -1546,6 +1659,9 @@ func (q *Queries) UpdateCredential(ctx context.Context, arg UpdateCredentialPara
 		arg.RpmLimit,
 		arg.TpmLimit,
 		arg.ConcurrencyLimit,
+		arg.Priority,
+		arg.Weight,
+		arg.SharedCapacityScopeID,
 		arg.ID,
 		arg.ExpectedUpdatedAt,
 	)
@@ -1562,6 +1678,9 @@ func (q *Queries) UpdateCredential(ctx context.Context, arg UpdateCredentialPara
 		&i.RpmLimit,
 		&i.TpmLimit,
 		&i.ConcurrencyLimit,
+		&i.Priority,
+		&i.Weight,
+		&i.SharedCapacityScopeID,
 		&i.CooldownUntil,
 		&i.ConsecutiveFailures,
 		&i.LastSuccessAt,
@@ -1710,4 +1829,44 @@ func (q *Queries) UpsertProviderProjection(ctx context.Context, arg UpsertProvid
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertSharedCapacityScope = `-- name: UpsertSharedCapacityScope :one
+INSERT INTO upstream_capacity_scopes (provider_id, name, rpm_limit, tpm_limit, concurrency_limit, daily_token_limit, daily_reset_minute_utc)
+SELECT pool.provider_id, $1, $2, $3, $4, $5, $6
+FROM resource_pools pool
+WHERE pool.id = $7
+ON CONFLICT (provider_id, name) DO UPDATE
+SET rpm_limit = excluded.rpm_limit, tpm_limit = excluded.tpm_limit,
+    concurrency_limit = excluded.concurrency_limit,
+    daily_token_limit = excluded.daily_token_limit, daily_reset_minute_utc = excluded.daily_reset_minute_utc,
+    updated_at = GREATEST(clock_timestamp(), upstream_capacity_scopes.updated_at + interval '1 microsecond')
+RETURNING id
+`
+
+type UpsertSharedCapacityScopeParams struct {
+	ScopeName           string    `json:"scope_name"`
+	RpmLimit            int32     `json:"rpm_limit"`
+	TpmLimit            int64     `json:"tpm_limit"`
+	ConcurrencyLimit    int32     `json:"concurrency_limit"`
+	DailyTokenLimit     *int64    `json:"daily_token_limit"`
+	DailyResetMinuteUtc *int32    `json:"daily_reset_minute_utc"`
+	ResourcePoolID      uuid.UUID `json:"resource_pool_id"`
+}
+
+// This is the sole owner of one official upstream account/project limit.
+// The caller holds the affected credential row lock before changing a scope.
+func (q *Queries) UpsertSharedCapacityScope(ctx context.Context, arg UpsertSharedCapacityScopeParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertSharedCapacityScope,
+		arg.ScopeName,
+		arg.RpmLimit,
+		arg.TpmLimit,
+		arg.ConcurrencyLimit,
+		arg.DailyTokenLimit,
+		arg.DailyResetMinuteUtc,
+		arg.ResourcePoolID,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }

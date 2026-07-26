@@ -28,7 +28,7 @@ func TestStreamUsesTheNextSamePoolKeyBeforeCommitting(t *testing.T) {
 		model: Model{
 			ID: modelID, PublicName: "public-model", UpstreamName: "upstream-model", ProviderID: uuid.New(),
 			ProviderKind: providers.KindSiliconFlow, ProviderBaseURL: "https://provider.example/v1",
-			Capabilities: registry.ModelCapabilities{Chat: true, Streaming: true, ContextTokens: 8192, OutputTokens: 2048, Parameters: providers.ParameterCapabilities{
+			Capabilities: registry.ModelCapabilities{Chat: true, Streaming: true, StreamUsage: true, ContextTokens: 8192, OutputTokens: 2048, Parameters: providers.ParameterCapabilities{
 				MaxOutputTokens: providers.IntegerParameterLimit{Supported: true, Minimum: &minimumOutputTokens},
 			}},
 		},
@@ -52,7 +52,7 @@ func TestStreamUsesTheNextSamePoolKeyBeforeCommitting(t *testing.T) {
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 				Body: io.NopCloser(strings.NewReader(
-					"data: {\"id\":\"stream-1\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: {\"id\":\"stream-1\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n" +
 						"data: [DONE]\n\n",
 				)),
 			}, nil
@@ -88,11 +88,12 @@ func TestStreamUsesTheNextSamePoolKeyBeforeCommitting(t *testing.T) {
 		t.Fatal(err)
 	}
 	maxTokens := int64(32)
+	includeUsage := true
 	events := make([]canonical.StreamEvent, 0, 4)
 	providerError := service.Stream(context.Background(), ChatCommand{
 		Principal: identity.GatewayPrincipal{UserID: uuid.New(), KeyID: uuid.New()},
 		Request: canonical.ChatRequest{
-			Model: "public-model", Stream: true, MaxOutputTokens: &maxTokens,
+			Model: "public-model", Stream: true, StreamUsage: &includeUsage, MaxOutputTokens: &maxTokens,
 			Messages: []canonical.Message{{Role: canonical.RoleUser, Content: canonical.TextContent("hi")}},
 		},
 		RequestDigest: []byte("same-pool-stream-failover"),
@@ -120,7 +121,24 @@ func TestStreamUsesTheNextSamePoolKeyBeforeCommitting(t *testing.T) {
 	if len(events) == 0 || events[len(events)-1].Type != canonical.StreamDone {
 		t.Fatalf("stream events = %#v", events)
 	}
-	if len(accounting.completedUsage) != 1 {
+	for _, event := range events {
+		if event.Model != "public-model" || event.CompletionID == "stream-1" || !strings.HasPrefix(event.CompletionID, "chatcmpl_") {
+			t.Fatalf("public stream identity = id %q model %q", event.CompletionID, event.Model)
+		}
+	}
+	if !containsStreamEvent(events, canonical.StreamUsage) {
+		t.Fatalf("requested stream usage was not emitted: %#v", events)
+	}
+	if len(accounting.completedUsage) != 1 || accounting.completedUsage[0].InputTokens != 2 || accounting.completedUsage[0].OutputTokens != 1 {
 		t.Fatalf("completed usage = %#v", accounting.completedUsage)
 	}
+}
+
+func containsStreamEvent(events []canonical.StreamEvent, eventType canonical.StreamEventType) bool {
+	for _, event := range events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
 }

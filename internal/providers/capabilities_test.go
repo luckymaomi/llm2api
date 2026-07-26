@@ -10,11 +10,11 @@ func TestProviderCapabilitiesDescribeExecutableContracts(t *testing.T) {
 	t.Parallel()
 
 	zhipu := NewZhipu().Capabilities()
-	if !zhipu.Chat || !zhipu.Models || !zhipu.Streaming || !zhipu.Tools || !zhipu.ToolStreaming || !zhipu.ReasoningReplay || !zhipu.ResponseRequestID {
+	if !zhipu.Chat || !zhipu.Models || !zhipu.Streaming || !zhipu.Tools || !zhipu.ToolStreaming || !zhipu.ReasoningReplay || !zhipu.ResponseUsage || !zhipu.StreamUsage || !zhipu.ResponseRequestID {
 		t.Fatalf("Zhipu capabilities = %#v", zhipu)
 	}
 	agnes := NewAgnes().Capabilities()
-	if !agnes.Chat || !agnes.Models || !agnes.Streaming || !agnes.Tools || !agnes.ReasoningToggle {
+	if !agnes.Chat || !agnes.Models || !agnes.Streaming || !agnes.Tools || !agnes.ReasoningToggle || !agnes.ResponseUsage || !agnes.StreamUsage {
 		t.Fatalf("Agnes capabilities = %#v", agnes)
 	}
 	kimi := NewKimi().Capabilities()

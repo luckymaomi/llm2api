@@ -164,6 +164,23 @@ END;
 $$;
 -- +goose StatementEnd
 
+-- A single official upstream account or project can have several API Keys.
+-- Its shared capacity belongs to this record, never to a duplicated Key field.
+CREATE TABLE upstream_capacity_scopes (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider_id uuid NOT NULL REFERENCES providers(id),
+    name text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 120),
+    rpm_limit integer NOT NULL CHECK (rpm_limit > 0),
+    tpm_limit bigint NOT NULL CHECK (tpm_limit > 0),
+    concurrency_limit integer NOT NULL CHECK (concurrency_limit > 0),
+    daily_token_limit bigint CHECK (daily_token_limit IS NULL OR daily_token_limit > 0),
+    daily_reset_minute_utc integer CHECK (daily_reset_minute_utc IS NULL OR daily_reset_minute_utc BETWEEN 0 AND 1439),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK ((daily_token_limit IS NULL) = (daily_reset_minute_utc IS NULL)),
+    UNIQUE (provider_id, name)
+);
+
 CREATE TABLE provider_credentials (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     resource_pool_id uuid NOT NULL REFERENCES resource_pools(id),
@@ -176,6 +193,9 @@ CREATE TABLE provider_credentials (
     rpm_limit integer CHECK (rpm_limit IS NULL OR rpm_limit > 0),
     tpm_limit bigint CHECK (tpm_limit IS NULL OR tpm_limit > 0),
     concurrency_limit integer CHECK (concurrency_limit IS NULL OR concurrency_limit > 0),
+    priority integer NOT NULL DEFAULT 100 CHECK (priority BETWEEN 1 AND 1000),
+    weight integer NOT NULL DEFAULT 1 CHECK (weight BETWEEN 1 AND 1000),
+    shared_capacity_scope_id uuid REFERENCES upstream_capacity_scopes(id),
     cooldown_until timestamptz,
     consecutive_failures integer NOT NULL DEFAULT 0,
     last_success_at timestamptz,
@@ -419,7 +439,7 @@ CREATE INDEX sessions_active_digest_idx ON sessions (token_digest) WHERE revoked
 CREATE INDEX gateway_keys_active_digest_idx ON gateway_keys (secret_digest) WHERE deleted_at IS NULL;
 CREATE INDEX gateway_key_models_model_idx ON gateway_key_models (model_id, gateway_key_id);
 CREATE INDEX resource_pools_provider_status_idx ON resource_pools (provider_id, status, name);
-CREATE INDEX provider_credentials_eligible_idx ON provider_credentials (resource_pool_id, status, health_status, cooldown_until);
+CREATE INDEX provider_credentials_eligible_idx ON provider_credentials (resource_pool_id, status, health_status, cooldown_until, priority, id);
 CREATE INDEX subscriptions_applicable_idx ON subscriptions (user_id, status, starts_at, expires_at);
 CREATE INDEX service_plan_versions_plan_idx ON service_plan_versions (service_plan_id, version DESC);
 CREATE INDEX service_plan_routes_pool_idx ON service_plan_version_routes (resource_pool_id, model_id);

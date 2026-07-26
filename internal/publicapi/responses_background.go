@@ -141,7 +141,8 @@ func (a *API) executeBackgroundResponse(parent context.Context, heartbeatInterva
 		} else if workflowError.Code == "request_canceled" || executionCanceled {
 			status = responseowner.StatusCanceled
 		}
-		a.terminateBackgroundResponse(claim, acceptedRequestID, status, workflowError.Code, workflowError.Message)
+		publicError := protocol.PresentErrorDetail(workflowError)
+		a.terminateBackgroundResponse(claim, acceptedRequestID, status, publicError["code"].(string), publicError["message"].(string))
 		return
 	}
 	terminalContext, terminalCancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -90,7 +90,7 @@ func validateDimension(dimension Dimension) error {
 		if dimension.SubjectID != "" {
 			return fmt.Errorf("%w: global dimension cannot have a subject ID", ErrInvalidInput)
 		}
-	case ScopeResourcePool, ScopeModel, ScopeProvider, ScopeCredential:
+	case ScopeResourcePool, ScopeModel, ScopeProvider, ScopeCredential, ScopeSharedUpstream:
 		if strings.TrimSpace(dimension.SubjectID) == "" {
 			return fmt.Errorf("%w: %s dimension requires a subject ID", ErrInvalidInput, dimension.Scope)
 		}

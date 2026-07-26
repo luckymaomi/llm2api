@@ -77,7 +77,9 @@ func (r *RequestRepository) ListResourcePoolCandidates(ctx context.Context, reso
 	for _, row := range rows {
 		candidates = append(candidates, requestflow.Candidate{
 			ID: row.ID, RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit,
-			ConcurrencyLimit:    row.ConcurrencyLimit,
+			ConcurrencyLimit: row.ConcurrencyLimit, Priority: row.Priority, Weight: row.Weight,
+			SharedCapacityScope: row.SharedCapacityScope, SharedRPMLimit: row.SharedRpmLimit, SharedTPMLimit: row.SharedTpmLimit, SharedConcurrencyLimit: row.SharedConcurrencyLimit,
+			SharedDailyTokenLimit: row.SharedDailyTokenLimit, SharedDailyResetMinuteUTC: row.SharedDailyResetMinuteUtc,
 			ConsecutiveFailures: row.ConsecutiveFailures, LastSuccessAt: timePointer(row.LastSuccessAt), CooldownUntil: timePointer(row.CooldownUntil), HealthGeneration: row.HealthGeneration,
 		})
 	}

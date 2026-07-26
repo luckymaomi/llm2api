@@ -190,7 +190,14 @@ func (s *Service) CreateCredential(ctx context.Context, actor identity.Principal
 	input.ID = uuid.New()
 	input.Name = strings.TrimSpace(input.Name)
 	secret = strings.TrimSpace(secret)
-	if input.ResourcePoolID == uuid.Nil || len(secret) < 8 || len(secret) > 8192 || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit) {
+	if input.Priority == 0 {
+		input.Priority = 100
+	}
+	if input.Weight == 0 {
+		input.Weight = 1
+	}
+	input.SharedCapacityScope = normalizeSharedCapacityScope(input.SharedCapacityScope)
+	if input.ResourcePoolID == uuid.Nil || len(secret) < 8 || len(secret) > 8192 || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, input.Priority, input.Weight, input.SharedCapacityScope, input.SharedRPMLimit, input.SharedTPMLimit, input.SharedConcurrencyLimit, input.SharedDailyTokenLimit, input.SharedDailyResetMinuteUTC) {
 		return Credential{}, ErrInvalidInput
 	}
 	secretFingerprint, err := s.credentialFingerprint(secret)
@@ -250,7 +257,7 @@ func (s *Service) ImportCredentials(ctx context.Context, actor identity.Principa
 		seen[secretFingerprint] = struct{}{}
 		childRequest := request
 		childRequest.IdempotencyKey = uuid.NewSHA1(request.IdempotencyKey, []byte(fmt.Sprintf("credential-line:%d", index+1)))
-		created, err := s.CreateCredential(ctx, actor, NewCredential{ResourcePoolID: resourcePoolID, Name: item.Name, RPMLimit: rpmLimit, TPMLimit: tpmLimit, ConcurrencyLimit: concurrencyLimit}, item.Secret, childRequest)
+		created, err := s.CreateCredential(ctx, actor, NewCredential{ResourcePoolID: resourcePoolID, Name: item.Name, RPMLimit: rpmLimit, TPMLimit: tpmLimit, ConcurrencyLimit: concurrencyLimit, Priority: 100, Weight: 1}, item.Secret, childRequest)
 		if err != nil {
 			if errors.Is(err, ErrCredentialAlreadyManaged) {
 				result.Status, result.ErrorKind = "duplicate", "credential_already_managed"
@@ -286,7 +293,8 @@ func (s *Service) UpdateCredential(ctx context.Context, actor identity.Principal
 	}
 	secret = strings.TrimSpace(secret)
 	input.Name, input.ReplaceSecret, input.ExpectedUpdatedAt = strings.TrimSpace(input.Name), secret != "", input.ExpectedUpdatedAt.UTC()
-	if input.ID == uuid.Nil || input.ExpectedUpdatedAt.IsZero() || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit) || input.ReplaceSecret && (len(secret) < 8 || len(secret) > 8192) {
+	input.SharedCapacityScope = normalizeSharedCapacityScope(input.SharedCapacityScope)
+	if input.ID == uuid.Nil || input.ExpectedUpdatedAt.IsZero() || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, input.Priority, input.Weight, input.SharedCapacityScope, input.SharedRPMLimit, input.SharedTPMLimit, input.SharedConcurrencyLimit, input.SharedDailyTokenLimit, input.SharedDailyResetMinuteUTC) || input.ReplaceSecret && (len(secret) < 8 || len(secret) > 8192) {
 		return Credential{}, ErrInvalidInput
 	}
 	var err error
@@ -351,7 +359,10 @@ func (s *Service) RefreshCredentialModels(ctx context.Context, actor identity.Pr
 	}
 	change := CredentialChange{
 		ID: id, Name: current.Name, RPMLimit: current.RPMLimit, TPMLimit: current.TPMLimit,
-		ConcurrencyLimit: current.ConcurrencyLimit, ReplaceModels: true, DiscoveredModels: models,
+		ConcurrencyLimit: current.ConcurrencyLimit, Priority: current.Priority, Weight: current.Weight,
+		SharedCapacityScope: current.SharedCapacityScope, SharedRPMLimit: current.SharedRPMLimit, SharedTPMLimit: current.SharedTPMLimit, SharedConcurrencyLimit: current.SharedConcurrencyLimit,
+		SharedDailyTokenLimit: current.SharedDailyTokenLimit, SharedDailyResetMinuteUTC: current.SharedDailyResetMinuteUTC,
+		ReplaceModels: true, DiscoveredModels: models,
 		Discovery: execution, ExpectedUpdatedAt: expectedUpdatedAt.UTC(),
 	}
 	mutation, err := credentialUpdateMutation(request, change)
@@ -600,9 +611,31 @@ func (s *Service) credentialFingerprint(secret string) (string, error) {
 	return security.DigestToken("provider-credential\x00"+secret, s.credentialFingerprintPepper)
 }
 
-func validCredentialFields(name string, rpmLimit *int32, tpmLimit *int64, concurrencyLimit *int32) bool {
+func validCredentialFields(name string, rpmLimit *int32, tpmLimit *int64, concurrencyLimit *int32, priority, weight int32, sharedScope *string, sharedRPM *int32, sharedTPM *int64, sharedConcurrency *int32, sharedDailyTokens *int64, sharedDailyResetMinuteUTC *int32) bool {
 	return name != "" && utf8.RuneCountInString(name) <= 120 &&
-		(rpmLimit == nil || *rpmLimit > 0) && (tpmLimit == nil || *tpmLimit > 0) && (concurrencyLimit == nil || *concurrencyLimit > 0)
+		(rpmLimit == nil || *rpmLimit > 0) && (tpmLimit == nil || *tpmLimit > 0) && (concurrencyLimit == nil || *concurrencyLimit > 0) &&
+		priority >= 1 && priority <= 1000 && weight >= 1 && weight <= 1000 && validSharedCapacity(sharedScope, sharedRPM, sharedTPM, sharedConcurrency, sharedDailyTokens, sharedDailyResetMinuteUTC)
+}
+
+func normalizeSharedCapacityScope(scope *string) *string {
+	if scope == nil {
+		return nil
+	}
+	value := strings.TrimSpace(*scope)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func validSharedCapacity(scope *string, rpm *int32, tpm *int64, concurrency *int32, dailyTokens *int64, dailyResetMinuteUTC *int32) bool {
+	if scope == nil {
+		return rpm == nil && tpm == nil && concurrency == nil && dailyTokens == nil && dailyResetMinuteUTC == nil
+	}
+	if utf8.RuneCountInString(*scope) > 120 || rpm == nil || *rpm < 1 || tpm == nil || *tpm < 1 || concurrency == nil || *concurrency < 1 {
+		return false
+	}
+	return (dailyTokens == nil && dailyResetMinuteUTC == nil) || (dailyTokens != nil && *dailyTokens > 0 && dailyResetMinuteUTC != nil && *dailyResetMinuteUTC >= 0 && *dailyResetMinuteUTC < 1440)
 }
 
 func CredentialEncryptionContext(id uuid.UUID) []byte {

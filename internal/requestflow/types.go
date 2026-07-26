@@ -39,14 +39,22 @@ type Model struct {
 }
 
 type Candidate struct {
-	ID                  uuid.UUID
-	RPMLimit            *int32
-	TPMLimit            *int64
-	ConcurrencyLimit    *int32
-	ConsecutiveFailures int32
-	LastSuccessAt       *time.Time
-	CooldownUntil       *time.Time
-	HealthGeneration    int64
+	ID                        uuid.UUID
+	RPMLimit                  *int32
+	TPMLimit                  *int64
+	ConcurrencyLimit          *int32
+	Priority                  int32
+	Weight                    int32
+	SharedCapacityScope       *string
+	SharedRPMLimit            *int32
+	SharedTPMLimit            *int64
+	SharedConcurrencyLimit    *int32
+	SharedDailyTokenLimit     *int64
+	SharedDailyResetMinuteUTC *int32
+	ConsecutiveFailures       int32
+	LastSuccessAt             *time.Time
+	CooldownUntil             *time.Time
+	HealthGeneration          int64
 }
 
 type AttemptUpdate struct {
@@ -156,16 +164,22 @@ type SecretResolver interface {
 }
 
 type LeaseRequest struct {
-	RequestID       uuid.UUID
-	ExecutionID     uuid.UUID
-	ModelID         uuid.UUID
-	ProviderID      uuid.UUID
-	CredentialID    uuid.UUID
-	ResourcePoolID  uuid.UUID
-	EstimatedTokens int64
-	RPMLimit        *int32
-	TPMLimit        *int64
-	Concurrency     *int32
+	RequestID                 uuid.UUID
+	ExecutionID               uuid.UUID
+	ModelID                   uuid.UUID
+	ProviderID                uuid.UUID
+	CredentialID              uuid.UUID
+	ResourcePoolID            uuid.UUID
+	EstimatedTokens           int64
+	RPMLimit                  *int32
+	TPMLimit                  *int64
+	Concurrency               *int32
+	SharedCapacityScope       *string
+	SharedRPMLimit            *int32
+	SharedTPMLimit            *int64
+	SharedConcurrency         *int32
+	SharedDailyTokenLimit     *int64
+	SharedDailyResetMinuteUTC *int32
 }
 
 type Lease interface {
@@ -182,22 +196,39 @@ type Coordinator interface {
 // gateway limits needed to inspect one upstream API key. It never contains the
 // upstream secret or an upstream balance.
 type CredentialCapacityInput struct {
-	CredentialID     uuid.UUID
-	RPMLimit         *int32
-	TPMLimit         *int64
-	ConcurrencyLimit *int32
+	CredentialID              uuid.UUID
+	ProviderID                uuid.UUID
+	RPMLimit                  *int32
+	TPMLimit                  *int64
+	ConcurrencyLimit          *int32
+	SharedCapacityScope       *string
+	SharedRPMLimit            *int32
+	SharedTPMLimit            *int64
+	SharedConcurrencyLimit    *int32
+	SharedDailyTokenLimit     *int64
+	SharedDailyResetMinuteUTC *int32
 }
 
-// CredentialCapacity is the current key-scoped gateway admission state. It is
-// not a Provider account balance: Provider limits can be shared across keys.
-type CredentialCapacity struct {
+// CapacityObservation is the admission state recorded by the gateway limiter.
+// It is not an official Provider account balance.
+type CapacityObservation struct {
 	ObservedAt              time.Time
 	RequestsPerMinuteLimit  int64
 	RequestsPerMinuteRemain int64
 	TokensPerMinuteLimit    int64
 	TokensPerMinuteRemain   int64
+	DailyTokenLimit         int64
+	DailyTokenRemain        int64
+	DailyTokenResetAt       *time.Time
 	ConcurrencyLimit        int64
 	ConcurrencyInUse        int64
+}
+
+// CredentialCapacity projects the Key-local admission state and, when the
+// Key belongs to one, the single shared upstream account/project state.
+type CredentialCapacity struct {
+	CapacityObservation
+	Shared *CapacityObservation
 }
 
 type CredentialCapacityInspector interface {

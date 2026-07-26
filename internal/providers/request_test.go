@@ -40,6 +40,7 @@ func TestZhipuBuildsPreservedToolStreamRequest(t *testing.T) {
 		"thinking":{"type":"enabled","clear_thinking":false},
 		"reasoning_effort":"max",
 		"tool_stream":true,
+		"stream_options":{"include_usage":true},
 		"request_id":"gateway-request-7"
 	}`)
 }
@@ -67,6 +68,7 @@ func TestAgnesBuildsThinkingToolRequest(t *testing.T) {
 		"model":"agnes-2.0-flash",
 		"messages":[{"role":"user","content":"Find the build status"}],
 		"stream":true,
+		"stream_options":{"include_usage":true},
 		"tools":[{"type":"function","function":{"name":"get_build","parameters":{"type":"object","properties":{"id":{"type":"string"}}}}}],
 		"chat_template_kwargs":{"enable_thinking":true}
 	}`)

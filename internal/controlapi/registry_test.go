@@ -7,11 +7,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/luckymaomi/llm2api/internal/identity"
 	"github.com/luckymaomi/llm2api/internal/providers"
 	"github.com/luckymaomi/llm2api/internal/registry"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
 )
 
 type providerListRegistry struct {
@@ -114,6 +116,58 @@ func TestCredentialListAlwaysProjectsGatewayCapacityState(t *testing.T) {
 	}
 	if len(payload.Data) != 1 || payload.Data[0].Capacity.State != "unavailable" || payload.Data[0].Capacity.Scope != "gateway_credential" {
 		t.Fatalf("credential capacity wire = %#v", payload.Data)
+	}
+}
+
+type fixedCredentialCapacityInspector struct {
+	capacity requestflow.CredentialCapacity
+}
+
+func (i fixedCredentialCapacityInspector) InspectCredential(context.Context, requestflow.CredentialCapacityInput) (requestflow.CredentialCapacity, error) {
+	return i.capacity, nil
+}
+
+func TestCredentialListProjectsSharedDailyCapacityWithoutCallingItAnUpstreamBalance(t *testing.T) {
+	observedAt := time.Date(2026, 7, 26, 7, 0, 0, 0, time.UTC)
+	resetAt := time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC)
+	shared := requestflow.CapacityObservation{
+		ObservedAt: observedAt, RequestsPerMinuteLimit: 60, RequestsPerMinuteRemain: 50,
+		TokensPerMinuteLimit: 120_000, TokensPerMinuteRemain: 90_000,
+		DailyTokenLimit: 5_000_000, DailyTokenRemain: 4_500_000, DailyTokenResetAt: &resetAt,
+		ConcurrencyLimit: 4, ConcurrencyInUse: 1,
+	}
+	api := &API{
+		registry: providerListRegistry{credentials: []registry.Credential{{
+			ID: uuid.New(), ProviderID: uuid.New(), Name: "Kimi account A", Status: registry.CredentialActive,
+			HealthStatus: registry.CredentialHealthy, ModelBindings: []registry.CredentialModelBinding{},
+		}}},
+		credentialCapacity: fixedCredentialCapacityInspector{capacity: requestflow.CredentialCapacity{
+			CapacityObservation: requestflow.CapacityObservation{ObservedAt: observedAt}, Shared: &shared,
+		}},
+	}
+
+	response := httptest.NewRecorder()
+	api.listCredentials(response, httptest.NewRequest(http.MethodGet, "/control/credentials", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("credential list status = %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			SharedCapacity struct {
+				Scope             string    `json:"scope"`
+				DailyTokenLimit   int64     `json:"daily_token_limit"`
+				DailyTokenRemain  int64     `json:"daily_token_remaining"`
+				DailyTokenResetAt time.Time `json:"daily_token_reset_at"`
+			} `json:"shared_capacity"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode shared credential capacity: %v", err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].SharedCapacity.Scope != "gateway_shared_upstream" ||
+		payload.Data[0].SharedCapacity.DailyTokenLimit != 5_000_000 || payload.Data[0].SharedCapacity.DailyTokenRemain != 4_500_000 ||
+		!payload.Data[0].SharedCapacity.DailyTokenResetAt.Equal(resetAt) {
+		t.Fatalf("shared credential capacity wire = %#v", payload.Data)
 	}
 }
 

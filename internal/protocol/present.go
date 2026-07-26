@@ -10,6 +10,8 @@ import (
 	"github.com/luckymaomi/llm2api/internal/canonical"
 )
 
+const PublicProvider = "llm2api"
+
 type ErrorEnvelope struct {
 	Error struct {
 		Message    string `json:"message"`
@@ -93,14 +95,7 @@ func WriteError(w http.ResponseWriter, requestID string, providerError *canonica
 	if status < 400 || status > 599 {
 		status = statusForError(providerError.Kind)
 	}
-	envelope := ErrorEnvelope{RequestID: requestID}
-	envelope.Error.Message = providerError.Message
-	envelope.Error.Type = string(providerError.Kind)
-	envelope.Error.Param = providerError.Parameter
-	envelope.Error.Code = providerError.Code
-	envelope.Error.Model = providerError.Model
-	envelope.Error.Provider = providerError.Provider
-	envelope.Error.Capability = providerError.Capability
+	envelope := PresentError(requestID, providerError)
 	w.Header().Set("Content-Type", "application/json")
 	if providerError.RetryAfter != nil {
 		if providerError.RetryAfter.DelaySeconds != nil {
@@ -111,6 +106,60 @@ func WriteError(w http.ResponseWriter, requestID string, providerError *canonica
 	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(envelope)
+}
+
+func PresentError(requestID string, providerError *canonical.Error) ErrorEnvelope {
+	envelope := ErrorEnvelope{RequestID: requestID}
+	envelope.Error.Message = providerError.Message
+	envelope.Error.Type = string(providerError.Kind)
+	envelope.Error.Param = providerError.Parameter
+	envelope.Error.Code = providerError.Code
+	envelope.Error.Model = providerError.Model
+	envelope.Error.Provider = PublicProvider
+	envelope.Error.Capability = providerError.Capability
+	if providerError.Provider != "" && providerError.Capability == "" {
+		envelope.Error.Code, envelope.Error.Message = publicUpstreamError(providerError.Kind)
+	}
+	return envelope
+}
+
+func PresentErrorDetail(providerError *canonical.Error) map[string]any {
+	envelope := PresentError("", providerError)
+	return map[string]any{
+		"code": envelope.Error.Code, "message": envelope.Error.Message,
+		"type": envelope.Error.Type, "param": envelope.Error.Param,
+		"model": envelope.Error.Model, "provider": envelope.Error.Provider,
+		"capability": envelope.Error.Capability,
+	}
+}
+
+func publicUpstreamError(kind canonical.ErrorKind) (string, string) {
+	switch kind {
+	case canonical.ErrorAuthentication:
+		return "model_authentication_failed", "the selected model is temporarily unavailable"
+	case canonical.ErrorPermission:
+		return "model_access_denied", "the selected model is not currently accessible"
+	case canonical.ErrorQuota:
+		return "model_capacity_exhausted", "the selected model has no available upstream capacity"
+	case canonical.ErrorRateLimit:
+		return "model_rate_limited", "the selected model is temporarily rate limited"
+	case canonical.ErrorInvalidRequest:
+		return "model_request_rejected", "the selected model rejected the request"
+	case canonical.ErrorUnsupportedCapability:
+		return "model_capability_unsupported", "the selected model cannot represent the requested capability"
+	case canonical.ErrorProviderConfiguration:
+		return "model_service_unavailable", "the selected model is temporarily unavailable"
+	case canonical.ErrorProviderTemporary:
+		return "model_service_temporarily_unavailable", "the selected model service is temporarily unavailable"
+	case canonical.ErrorProviderPermanent:
+		return "model_request_failed", "the selected model could not complete the request"
+	case canonical.ErrorStreamInterrupted:
+		return "model_stream_interrupted", "the model stream was interrupted"
+	case canonical.ErrorUncertain:
+		return "model_outcome_uncertain", "the model request outcome is uncertain"
+	default:
+		return "model_request_failed", "the selected model request failed"
+	}
 }
 
 func presentMessage(message canonical.Message) map[string]any {

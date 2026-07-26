@@ -61,11 +61,12 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 
 ## 3. 公共 API 与 Provider 合同
 
-- 公共合同为 OpenAI-compatible `GET /v1/models`、`POST /v1/chat/completions` 和 `POST /v1/responses`。
+- 公共合同为 OpenAI-compatible `GET /v1/models`、`POST /v1/chat/completions` 和 `POST /v1/responses`。任意外部 Agent 只把 `llm2api` 视为唯一 Provider；真实 Provider、资源池、上游 API Key、候选与切换原因只属于网关内部事实，不进入公共模型、错误、响应或文档。
 - Chat Completions 与 Responses 支持非流式、流式、工具调用、reasoning 和 usage；无法无损表达的能力在发送前明确拒绝。
 - Public API 拥有客户端 wire，Canonical Model 拥有内部语义，Provider Adapter 或明确 policy 拥有厂商差异。
 - 当前专用 adapter 为 Agnes、智谱 GLM、硅基流动和 Kimi；上游 wire 差异只保留在各自 adapter 内。
-- `GET /v1/models` 为每个已授权模型返回稳定、机器可读的 capabilities：chat、stream、工具/选择/严格 schema/并行或流式工具、thinking/reasoning、图片/视频、JSON 输出、扩展字段、token 限制及 `parameters`。`parameters` 为每项公开请求参数给出支持状态、范围、固定值及与 thinking 相关的条件；请求字段只在目标模型能无损表达时转发，否则返回带 model、provider、capability 与原因的结构化 4xx。
+- `GET /v1/models` 只返回当前下游 API 密钥经活动成员、活动订阅和不可变套餐版本授权的模型；`owned_by` 恒为 `llm2api`。每个模型返回稳定、机器可读的 capabilities：Chat Completions、可映射的 Responses、stream、工具/选择/严格 schema/并行或流式工具、thinking/reasoning 配置与内容、图片/视频、JSON 输出、消息扩展、非流/流式 usage、token 限制及 `parameters`。`parameters` 为每项公开采样参数给出支持状态、范围、固定值及与 thinking 相关的条件；请求字段只在目标模型能无损表达时转发，否则在发送前返回带公开 model、固定 provider=`llm2api`、capability 与原因的结构化 4xx。
+- 公共成功响应使用网关生成的 ID 和客户端请求的公开模型名；公共上游失败只返回稳定、可恢复的 LLM2API 错误，不回显真实 Provider 的原始错误码或正文。内部 request、attempt、审计和管理员观测仍保留脱敏后的真实路由事实用于排障。
 - Provider kind、展示名称、builder、权威合同 URL、快照日期、现场验证日期、模型能力目录与 wire 能力由 `internal/providers` 唯一拥有；每把上游 API Key 当前可见的模型 ID 由成功的 `/models` 探测快照唯一拥有，控制 API、资源池和 UI 只投影这些事实。
 - 模型、能力、错误和限额是易变外部事实；修改前依据官方资料和隔离 wire 复核。无法权威查询的余额保持未知，不伪造剩余额度。
 
@@ -95,7 +96,7 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 
 - 上游 API Key 属于一个资源池。服务端通过该 Key 的 `/models` 响应保存最新成功的模型快照；同池合格 Key 只会参与自己已声明支持的模型的公平选择。
 - 管理员通过唯一的“添加上游 API Key”入口逐行粘贴凭据：一行创建一条，多行批量创建，可使用 `名称,上游 API Key` 或只粘贴 Key。结果逐项返回 created/skipped/rejected，绝不回显 secret；已有 Key 可以替换 secret、编辑名称和限额、轻量探测、深度测试、启用、停用和退役。探测失败保留上一次成功快照。
-- 每条上游 API Key 还可由管理员手动获取上游状态。网关容量、上游健康/冷却和上游官方观测是不同事实：前者由 Valkey 协调，健康由 registry 拥有，官方观测必须携带 state、scope、source、observed_at 与可读原因。没有正式读取端点或调用失败时为 unknown/unavailable，禁止以本地桶、Key 数量或一次连通性伪造余额、剩余额度或重置时间。
+- 每条上游 API Key 还可由管理员手动获取上游状态。网关容量、上游健康/冷却和上游官方观测是不同事实：前者由 Valkey 协调，健康由 registry 拥有，官方观测必须携带 state、scope、source、observed_at 与可读原因。属于同一官方账号或项目的 Key 引用同一个共享容量范围；该范围唯一持有 RPM、TPM、并发和可选 TPD/UTC 重置时刻。没有正式读取端点或调用失败时为 unknown/unavailable，禁止以本地桶、Key 数量或一次连通性伪造余额、剩余额度或重置时间。
 - Kimi 余额端点返回账户级 CNY 可用/代金券/现金余额；Kimi 的 RPM、TPM、并发和 TPD 也受账户累计充值权益约束，多把 Key 不得相加。任何 Kimi “免费模型”资格只由当时授权 Key 的 `/v1/models` 或明确官方公布的模型 ID 证明。
 - secret 使用版本化 AEAD 加密保存，只在发送边界按需解密。退役会清除调度资格但保留历史脱敏引用。
 - 状态至少区分 active、cooling、disabled、retired。探测记录稳定结果类别、延迟、模型和 Request ID；传输阶段明确区分 `dns_resolution_failed`、`outbound_address_blocked`、`upstream_connection_failed`、`tls_handshake_failed`、`provider_transport_failed` 与 `probe_timeout_or_canceled`，响应不返回上游正文、secret 或敏感 header。
@@ -103,7 +104,7 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 ### 调度与隔离
 
 - 请求只在订阅版本授权的资源池内选择候选；资源池不可用、冷却或耗尽时返回可理解状态，不自动跨池消费其他资源。
-- 硬过滤顺序为成员/Key/订阅/模型/资源池资格、启停、凭据状态、模型绑定、冷却和本次已尝试凭据；合格 Key 以同级公平机制选择，单 Key 容量不足时在发送前尝试同池下一把。
+- 硬过滤顺序为成员/Key/订阅/模型/资源池资格、启停、凭据状态、模型绑定、冷却和本次已尝试凭据；合格 Key 先选择管理员 priority 最小的一组，再按同级 weight 比例选择。单 Key 或账号/项目共享 RPM、TPM、TPD、并发容量不足时，在发送前尝试同池下一把；共享范围已耗尽时，关联 Key 不会因数量增加而获得额外容量。
 - admission 只维护系统安全队列和全局容量，不设置成员或下游 API 密钥的业务并发上限；资源池、模型、Provider 和上游 API Key 的真实容量通过 Valkey 跨实例协调。
 - 只在已知安全发送边界有限重试。上游副作用未知、响应已提交或流已开始时不得换 Key 或资源池盲目重放。
 

@@ -5,11 +5,12 @@ import "time"
 type Scope string
 
 const (
-	ScopeGlobal       Scope = "global"
-	ScopeResourcePool Scope = "resource_pool"
-	ScopeModel        Scope = "model"
-	ScopeProvider     Scope = "provider"
-	ScopeCredential   Scope = "credential"
+	ScopeGlobal         Scope = "global"
+	ScopeResourcePool   Scope = "resource_pool"
+	ScopeModel          Scope = "model"
+	ScopeProvider       Scope = "provider"
+	ScopeCredential     Scope = "credential"
+	ScopeSharedUpstream Scope = "shared_upstream"
 )
 
 // Dimension identifies a coordination scope. SubjectID should be an internal,
@@ -26,18 +27,22 @@ func GlobalDimension() Dimension {
 type BucketMetric string
 
 const (
-	MetricRequests BucketMetric = "requests"
-	MetricTokens   BucketMetric = "tokens"
+	MetricRequests    BucketMetric = "requests"
+	MetricTokens      BucketMetric = "tokens"
+	MetricDailyTokens BucketMetric = "daily_tokens"
 )
 
-// BucketLimit describes one continuously refilling token bucket.
+// BucketLimit describes either a continuously refilling token bucket or a
+// fixed-window quota. A non-zero FixedWindow selects the latter.
 type BucketLimit struct {
-	Dimension       Dimension
-	Metric          BucketMetric
-	CapacityTokens  int64
-	RefillTokens    int64
-	RefillInterval  time.Duration
-	RequestedTokens int64
+	Dimension         Dimension
+	Metric            BucketMetric
+	CapacityTokens    int64
+	RefillTokens      int64
+	RefillInterval    time.Duration
+	RequestedTokens   int64
+	FixedWindow       time.Duration
+	FixedWindowOffset time.Duration
 }
 
 type BucketState struct {

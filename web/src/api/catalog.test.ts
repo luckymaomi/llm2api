@@ -39,6 +39,8 @@ describe('Provider capability catalog contract', () => {
                     tools: true,
                     reasoning: true,
                     structured_output: true,
+                    response_usage: true,
+                    stream_usage: true,
                     context_tokens: 256000,
                     output_tokens: 32768,
                     parameters: {
@@ -80,6 +82,8 @@ describe('Provider capability catalog contract', () => {
         status: 'verified',
       },
     })
+    expect(provider.models[0]?.capabilities.responseUsage).toBe(true)
+    expect(provider.models[0]?.capabilities.streamUsage).toBe(true)
     expect(provider.models[0]?.capabilities.parameters.temperature.exactValues).toEqual([0.6, 1])
   })
 
@@ -100,7 +104,27 @@ describe('Provider capability catalog contract', () => {
               name: 'Kimi account A',
               status: 'active',
               health_status: 'healthy',
-              capacity: { state: 'unavailable', scope: 'gateway_credential' },
+              capacity: { state: 'observed', scope: 'gateway_credential' },
+              shared_capacity: {
+                state: 'observed',
+                scope: 'gateway_shared_upstream',
+                observed_at: '2026-07-26T07:00:00Z',
+                requests_per_minute_limit: 60,
+                requests_per_minute_remaining: 50,
+                tokens_per_minute_limit: 120000,
+                tokens_per_minute_remaining: 90000,
+                daily_token_limit: 5000000,
+                daily_token_remaining: 4500000,
+                daily_token_reset_at: '2026-07-27T00:00:00Z',
+                concurrency_limit: 4,
+                concurrency_in_use: 1,
+              },
+              shared_capacity_scope: 'kimi-account-a',
+              shared_rpm_limit: 60,
+              shared_tpm_limit: 120000,
+              shared_concurrency_limit: 4,
+              shared_daily_token_limit: 5000000,
+              shared_daily_reset_minute_utc: 0,
               consecutive_failures: 0,
               created_at: '2026-07-26T00:00:00Z',
               updated_at: '2026-07-26T00:00:00Z',
@@ -113,7 +137,22 @@ describe('Provider capability catalog contract', () => {
 
     const credentials = await catalogApi.credentials()
     expect(credentials).toHaveLength(1)
-    expect(credentials[0]?.capacity).toEqual({ state: 'unavailable', scope: 'gateway_credential' })
+    expect(credentials[0]).toMatchObject({
+      sharedCapacityScope: 'kimi-account-a',
+      sharedDailyTokenLimit: 5000000,
+      sharedDailyResetMinuteUtc: 0,
+      capacity: {
+        state: 'observed',
+        scope: 'gateway_credential',
+        sharedCapacity: {
+          state: 'observed',
+          scope: 'gateway_shared_upstream',
+          dailyTokenLimit: 5000000,
+          dailyTokenRemaining: 4500000,
+          dailyTokenResetAt: '2026-07-27T00:00:00Z',
+        },
+      },
+    })
   })
 
   it('decodes the created credential returned by the full batch-import action', async () => {

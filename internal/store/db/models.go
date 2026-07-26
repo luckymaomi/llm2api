@@ -601,29 +601,32 @@ type Provider struct {
 }
 
 type ProviderCredential struct {
-	ID                  uuid.UUID              `json:"id"`
-	ResourcePoolID      uuid.UUID              `json:"resource_pool_id"`
-	Name                string                 `json:"name"`
-	EncryptedSecret     []byte                 `json:"encrypted_secret"`
-	SecretFingerprint   string                 `json:"secret_fingerprint"`
-	Status              CredentialStatus       `json:"status"`
-	HealthStatus        CredentialHealthStatus `json:"health_status"`
-	HealthGeneration    int64                  `json:"health_generation"`
-	RpmLimit            *int32                 `json:"rpm_limit"`
-	TpmLimit            *int64                 `json:"tpm_limit"`
-	ConcurrencyLimit    *int32                 `json:"concurrency_limit"`
-	CooldownUntil       pgtype.Timestamptz     `json:"cooldown_until"`
-	ConsecutiveFailures int32                  `json:"consecutive_failures"`
-	LastSuccessAt       pgtype.Timestamptz     `json:"last_success_at"`
-	LastErrorKind       *string                `json:"last_error_kind"`
-	LastProbeAt         pgtype.Timestamptz     `json:"last_probe_at"`
-	LastProbeLatencyMs  *int64                 `json:"last_probe_latency_ms"`
-	LastProbeKind       *string                `json:"last_probe_kind"`
-	LastProbeStatus     *string                `json:"last_probe_status"`
-	LastProbeErrorKind  *string                `json:"last_probe_error_kind"`
-	RetiredAt           pgtype.Timestamptz     `json:"retired_at"`
-	CreatedAt           pgtype.Timestamptz     `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz     `json:"updated_at"`
+	ID                    uuid.UUID              `json:"id"`
+	ResourcePoolID        uuid.UUID              `json:"resource_pool_id"`
+	Name                  string                 `json:"name"`
+	EncryptedSecret       []byte                 `json:"encrypted_secret"`
+	SecretFingerprint     string                 `json:"secret_fingerprint"`
+	Status                CredentialStatus       `json:"status"`
+	HealthStatus          CredentialHealthStatus `json:"health_status"`
+	HealthGeneration      int64                  `json:"health_generation"`
+	RpmLimit              *int32                 `json:"rpm_limit"`
+	TpmLimit              *int64                 `json:"tpm_limit"`
+	ConcurrencyLimit      *int32                 `json:"concurrency_limit"`
+	Priority              int32                  `json:"priority"`
+	Weight                int32                  `json:"weight"`
+	SharedCapacityScopeID *uuid.UUID             `json:"shared_capacity_scope_id"`
+	CooldownUntil         pgtype.Timestamptz     `json:"cooldown_until"`
+	ConsecutiveFailures   int32                  `json:"consecutive_failures"`
+	LastSuccessAt         pgtype.Timestamptz     `json:"last_success_at"`
+	LastErrorKind         *string                `json:"last_error_kind"`
+	LastProbeAt           pgtype.Timestamptz     `json:"last_probe_at"`
+	LastProbeLatencyMs    *int64                 `json:"last_probe_latency_ms"`
+	LastProbeKind         *string                `json:"last_probe_kind"`
+	LastProbeStatus       *string                `json:"last_probe_status"`
+	LastProbeErrorKind    *string                `json:"last_probe_error_kind"`
+	RetiredAt             pgtype.Timestamptz     `json:"retired_at"`
+	CreatedAt             pgtype.Timestamptz     `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz     `json:"updated_at"`
 }
 
 type Request struct {
@@ -815,6 +818,19 @@ type SystemState struct {
 	Singleton      bool               `json:"singleton"`
 	BootstrappedAt pgtype.Timestamptz `json:"bootstrapped_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type UpstreamCapacityScope struct {
+	ID                  uuid.UUID          `json:"id"`
+	ProviderID          uuid.UUID          `json:"provider_id"`
+	Name                string             `json:"name"`
+	RpmLimit            int32              `json:"rpm_limit"`
+	TpmLimit            int64              `json:"tpm_limit"`
+	ConcurrencyLimit    int32              `json:"concurrency_limit"`
+	DailyTokenLimit     *int64             `json:"daily_token_limit"`
+	DailyResetMinuteUtc *int32             `json:"daily_reset_minute_utc"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

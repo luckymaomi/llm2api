@@ -1,218 +1,131 @@
-# 真实网关地址与额度可观测性调研
+# LLM2API 单一外部 Provider 与 Kitty 端到端接入
 
 ## 需求文档
 
-- 用户与场景：管理员从控制台复制 OpenAI-compatible 配置给 Kitty 等客户端；同时需要判断每条合法上游 API Key 是否已经用尽可用额度。
-- 要解决的问题：开发控制台运行在 5173，而 Gateway 运行在 8080；当前控制台以浏览器地址生成 Base URL，会把 5173 错写为 Gateway 地址。
-- 当前阶段范围：交付真实公共 Gateway 地址；同时交付已配置 RPM/TPM/并发的实时容量投影、Provider usage 的安全回补，以及 Key 级别的上游额度证据展示。不接入未被官方文档授权的余额/订阅查询，不读取 secret，也不调用真实 Provider。
-- 可验收完成标准：本地 `start_dev.py` 默认启动后，控制台、替换 API 密钥配置、`/llms.txt` 和 `/openapi.json` 一致给出 `http://127.0.0.1:8080/v1`；变更 Gateway 端口或配置的公共 Origin 后，四处随之更新；每条上游 API Key 可看到网关实际追踪的 RPM/TPM/并发余量、上游健康/冷却/额度拒绝证据及其含义；Provider 已报告的实际 Token 小于预留值时，余量被幂等回补。
+- 用户与场景：受控成员和任意外部 Agent 只把 LLM2API 视为唯一 Provider，使用一个 Base URL、一把下游 API 密钥和套餐授权的模型；管理员在网关内部维护真实 Provider、资源池与上游 API Key。
+- 要解决的问题：网关虽已具备 canonical model、Provider adapter、资源池调度和套餐资格链，但公共 `/v1/models` 与错误曾暴露真实 Provider，能力目录也未投影全部已持久化能力；Kitty 此前没有只依赖 LLM2API 公共合同的 Provider profile。
+- 当前阶段范围：收紧 LLM2API 公共身份边界，补全机器可读能力合同及其请求/响应闭环，证明套餐驱动的内部路由与 Provider 转换；随后在 Kitty 保留原生 Agnes、智谱等独立 Provider 的同时，新增唯一通用 `llm2api` Provider adapter，并以临时下游 API 密钥真实调用 Agnes。
+- 可验收完成标准：
+  - 公共 API、公共错误、SDK 可见响应和 API 文档只声明 `llm2api`，不泄露真实 Provider、资源池、上游 API Key 或内部候选。
+  - `GET /v1/models` 只返回当前下游 API 密钥经活动成员、活动订阅和不可变套餐版本授权的模型，并完整描述客户端需要的模型能力与参数限制。
+  - `POST /v1/chat/completions` 对每项公开且已声明支持的能力无损进入 canonical model，再由实际 Provider adapter 转成上游 wire；不支持或无法无损表达的字段在上游发送前结构化拒绝，不能静默丢弃。
+  - 内部仍按套餐授权资源池、priority、weight、局部与共享容量、冷却和熔断选择合法上游 API Key；外部 Agent 不参与也不知道该选择。
+  - Kitty 只配置 `KITTY_PROVIDER=llm2api`、网关 Base URL、下游 API 密钥和模型；LLM2API 模式下以 `/v1/models` 为模型发现和能力 owner，不在 Kitty 内为中转后的 Agnes、智谱或其他上游模型增加静态特判。
+  - LLM2API 确定性验证、统一核心旅程、真实 Provider 验收、Kitty 完整验证以及 Kitty -> LLM2API -> Agnes 真实主旅程均通过。
 
 ## 当前事实
 
-- 已确认 `start_dev.py` 默认 Gateway 端口为 8080、控制台端口为 5173；当前机器两端口均在监听。
-- `web/src/features/docs/api-docs-page.tsx` 与 `web/src/features/access/key-replacement-dialog.tsx` 用 `window.location.origin` 生成 API Base URL，开发模式错误地得到 5173。
-- Vite 只将 `/api` 与 `/v1` 代理到 Gateway；5173 是开发控制台，不是客户端应依赖的 Gateway 入口。
-- `internal/httpserver/documentation.go` 从请求 Host 构造 `/llms.txt` 和 OpenAPI 的 server URL，尚未使用显式公共地址事实。
-- 当前配置只有监听地址 `LLM2API_HTTP_ADDRESS`，没有可对外调用的公共 Origin；当前工作区无未提交改动、没有现有 `plan.md`。
-- 上游额度通常按账户、项目或权益结算而非单条 API Key；当前仓库只实现 RPM/TPM/并发本地预留、凭据冷却和错误分类，未持久化上游周期额度、余额或重置事实。
-- 已确认 Agnes 同类型 Key 共享额度池；SiliconFlow 按账户和模型结算；智谱按用户权益及模型结算。三个事实都否定了将多个 Key 的额度简单相加。
-- 已确认当前 Rate bucket 在 admission 时按 `EstimatedTokens` 扣减，但成功响应得到 Provider usage 后没有回补；路由仍为随机等价轮转，控制台不展示 credential 的 health status。
+- 已确认的源码、数据、配置、测试和运行事实：
+  - 公共入口已有 `GET /v1/models`、`POST /v1/chat/completions` 和可映射的 `POST /v1/responses`；HTTP 请求先解析到 `internal/canonical`，再进入鉴权、套餐资格、admission、路由和 Provider adapter。
+  - Provider catalog 当前拥有 Agnes、Kimi、硅基流动和智谱的精确模型能力；adapter 已分别处理 thinking/reasoning、工具、流式 usage、图片/视频、结构化输出及模型特有参数。
+  - 调度已具备资源池硬隔离、管理员 priority、同级 weight、Key 局部容量、账户/项目共享 RPM/TPM/并发/TPD、冷却、熔断、有界重试和未知副作用保护。
+  - `/v1/models` 当前把真实 `ProviderSlug` 写入 `owned_by`；公共结构化错误拥有 `provider` 字段，部分路径会写入真实 Provider。
+  - 持久模型能力已有 `reasoning_config`、`reasoning_content`、`message_name` 和 `stream_usage`，但当前公共模型能力投影没有完整暴露这些字段。
+  - Kitty 原先只认识 Agnes、Google、DeepSeek、智谱和通用 OpenAI-compatible profile；通用 profile 无法证明 LLM2API 动态授权模型，因此本次保留 Kitty 原生 Agnes、智谱等独立 Provider，并新增通用 `llm2api` profile。LLM2API 模式下模型存在性和能力来自 LLM2API `/v1/models`，Kitty 不复制上游模型特判。
+- 已核验的外部合同：
+  - Portkey Gateway `main`（2026-07-26 调查，MIT）证明一个网关入口、虚拟凭据和内部多 Provider 路由可作为外部 Agent 的单一服务面；只研究机制，不复制源码。
+  - LiteLLM 当前公开仓库（2026-07-26 调查）展示统一 OpenAI 入口和内部 deployment 路由；其自定义 Provider 发现仍可能要求客户端提供 Provider 前缀，这种内部身份泄漏明确不采用。
+- 未知项及其验证方式：公共错误、响应 header、Responses 续接和 OpenAPI 是否还有 Provider 泄漏，使用结构化源码调查与真实 HTTP 合同验证；所有模型能力是否逐项贯通，使用 catalog 驱动的合同矩阵和真实 Provider canary 验证。
+- 工作区已有改动与保护边界：当前 LLM2API 工作区已有本任务前序的能力持久化、priority/weight、共享容量、TPD、前端和文档改动，全部保留并在同一终局下验收；不提交、不推送、不部署。Kitty 初始工作区为 clean，修改只在 LLM2API 公共合同稳定后开始。
 
 ## 失败证据
 
-- 控制台“接口文档”显示 `http://127.0.0.1:5173/v1`，其 cURL、Agent 配置与模型列表示例因而将直连客户端指向错误的入口。
+- 失败仍存在时可观察的产品结果：
+  - 带有效下游 API 密钥调用 `/v1/models` 会得到 `owned_by=<真实 provider_slug>`，外部 Agent 能识别内部 Provider。
+  - 某些公共 4xx/5xx 响应中的 `error.provider` 会返回真实 Provider。
+  - 外部 Agent 无法从 `/v1/models` 判断 reasoning 配置/内容回放、消息名称和流式 usage 的完整支持状态。
+  - Kitty 配置 `KITTY_PROVIDER=llm2api` 会因未知 Provider 失败；改用 `openai-compatible` 又会降级模型能力。
+- 可重复的测试、命令或日志证据：`internal/publicapi/api_test.go` 当前明确期待 `"owned_by":"zhipu"`；`internal/publicapi/models.go` 使用 `model.ProviderSlug`；Kitty `src/provider/catalog.ts` 不含 `llm2api` profile。
 
 ## 最终目标
 
-- `config.HTTP.PublicOrigin` 是 Gateway 公共 Origin 的唯一 owner；所有对外 API 地址由它派生。
-- 开发环境默认从确定的 loopback 监听地址得到公共 Origin；生产环境要求显式、合法的公共 Origin，不能将 bind address、浏览器 Origin 或请求 Host 猜作公开地址。
-- 控制台通过只读控制 API 获得公开 API Base URL、Agent 索引和 OpenAPI URL；无法读取时给出明确失败状态，不产生假地址。
-- 机器可读文档以同一配置生成 URL。下游 API Key、上游 secret、请求正文和真实 Provider 调用均不进入此切片。
-- 协调层拥有网关已配置容量的实时余量；registry 拥有上游凭据健康、冷却、最后成功和错误种类。控制 API 仅组合二者为只读投影，不能把它持久化为第二套额度事实。
-- 仅当 Provider 已返回实际 usage，且实际 token 小于先前预留时，协调层按 execution ID 幂等回补差额；未知、估算、流中断和上游结果未知不回补。
+- 当前阶段完成后的生产级终局：
+  - 外部数据流固定为 `Agent -> LLM2API 公共协议 -> 下游 API 密钥 -> 活动成员/订阅/套餐版本 -> 授权模型/资源池 -> 合格上游 API Key -> Provider adapter -> canonical 响应 -> Agent`。
+  - 管理面和内部观测保留真实 Provider 与资源事实；公共面只暴露 LLM2API 身份、授权模型、能力、用量、稳定错误与请求 ID。
+  - Kitty 的 LLM2API profile 只发送 LLM2API canonical 公共字段；`/v1/models` 负责授权、可用性探测和动态模型能力，Kitty catalog 只保存 LLM2API Provider 的公共接线事实，不保存 Agnes、智谱等中转模型的静态能力。
+- 必须保持的不变量：每项事实只有一个 owner；Provider 差异不进入公共 handler、Kitty 或调度；套餐未授权资源池绝不候选；已提交或部分流不盲目重放；secret 不回显、不记录、不进入审计或测试日志。
 
 ## 不做范围
 
-- 不在本切片接入上游余额、订阅配额或任何未经官方 API 授权的查询方式。
-- 不为了保持 5173 可调用而保留错误的客户端文档或代理依赖。
-- 不修改资源池隔离、路由/调度策略、账本或成员 API Key 合同。
-- 不把 Key 数量当成独立上游额度，也不为没有官方数值 telemetry 的 Provider 编造剩余数值或重置时间。
+- 不把真实 Provider 名称、Provider 前缀、资源池 ID、上游 API Key 或候选列表作为公共路由参数。
+- 不增加 Provider 原始请求 passthrough、任意扩展 JSON 或未知字段透传；只有 canonical model 明确拥有且能力目录声明的字段可以发送。
+- 不把当前 Provider 未验证的音频、Embedding、Rerank 等能力伪装为支持；能力扩展必须先进入 catalog、canonical、adapter、测试和文档。
+- 不建立 LLM2API 与旧 Kitty Provider 配置的兼容别名、双 adapter 或模型名推断。
+- 不在本任务执行 commit、push、部署或生产数据变更。
 
 ## 设计
 
 ### 事实 Owner
 
-- 配置：`config.HTTP.PublicOrigin` 及 `LLM2API_PUBLIC_ORIGIN` 拥有真实公共 Origin；`LLM2API_HTTP_ADDRESS` 仅拥有监听地址。
-- 公共投影：HTTP 文档与 OpenAPI 从 `PublicOrigin` 派生 `/v1`、`/llms.txt`、`/openapi.json`；控制台从 OpenAPI 的 server 读取这些地址，不从浏览器 Origin 推断。
-- 协调：Valkey rate/lease bucket 是有效网关容量 owner；新增只读快照和幂等 token 回补操作。
-- 凭据健康：registry 的 `health_status`、`cooldown_until` 和 `last_error_kind` 是上游可用性与额度拒绝证据 owner。
-- 前端：只展示 OpenAPI、协调快照与 registry 返回的事实，不保存或推断第二套地址、余额或健康事实。
+- 公共协议：`internal/protocol` 拥有唯一 LLM2API OpenAI-compatible wire；`internal/publicapi` 只投影 `llm2api` 服务身份。
+- 状态与持久化：Provider catalog 拥有验证能力，registry 持久化其完整投影，套餐版本与订阅拥有模型/资源池资格，账本拥有额度和 usage。
+- 外部接线：Kitty `src/provider` 中唯一 `llm2api` profile 拥有网关 wire；`/v1/models` 证明授权与可用性，Kitty catalog 只保存客户端发送所需的公共模型合同，不复制资源池、上游 Key 或内部 Provider 路由。
+- 错误与恢复：canonical error kind 决定公共错误和安全重试；公共 presenter 清除内部 Provider 身份；上游失败、冷却、熔断和候选切换仍由 LLM2API requestflow 拥有。
+- 展示与可观测性：外部只看 LLM2API、模型、能力、请求和 usage；管理员控制台、内部指标和审计继续看真实 Provider/资源池/Key 脱敏事实。
 
 ### 数据与控制流
 
-- 启动时加载并验证公共 Origin：只接受 HTTP/HTTPS、带 Host、无用户信息、查询、片段或路径的 Origin。
-- 开发脚本以实际 `GatewayPort` 设置监听地址与公共 Origin；非 loopback 或生产部署由部署配置显式提供。
-- 控制台读取 OpenAPI server 后才渲染可复制调用配置和 Agent 文档链接。
-- `/llms.txt` 与 `/openapi.json` 直接使用同一投影，而非入站 Host。
-- requestflow 对成功、Provider usage 已知的尝试回补多预留的 token；凭据容量快照从相同的 HMAC 隔离 Valkey key 读取，不扣减 token。
-- 控制 API 读取凭据静态/健康事实后组合容量快照；协调设施不可用时返回“网关容量暂不可观测”，不得把它表示为上游余额用尽。
+- 请求进入、状态提交、外部副作用、结果结算和用户输出：公共 wire 严格解析到 canonical；资格与 admission 成功后持久接受；路由从套餐授权资源池内选 Key；adapter 生成实际上游 wire；响应规范化、usage 结算后只用公共 LLM2API 合同返回。
+- 事务、并发、幂等、重试和 uncertain 边界：继续复用当前请求接受、Valkey 原子容量、执行 claim、attempt 和 usage owner；未发送可安全换 Key，已提交/部分流/未知副作用不自动重放；重复请求依赖幂等键返回同一事实或稳定冲突。
 
-### 错误与安全
+### 安全与数据
 
-- 无法配置公共 Origin 时启动失败，防止文档生成不可调用地址。
-- 控制台读取失败时显示请求错误并禁用复制/跳转，不回退到 `window.location.origin`。
-- 公开地址不包含 secret；控制 API 不回显监听内部地址或其他运行配置。
-- Key 页将 `healthy`、`cooling`、`repair_required` 与 API Key 的启用状态分开显示；`quota` 错误仅表示上游拒绝且具体余额未知，除非未来接入官方数值 telemetry。
+- 下游 API 密钥只鉴权 LLM2API；上游 API Key 只在 adapter 发送边界短暂解密使用。公共 body、header、错误、模型目录、日志和 Kitty 配置不包含真实 Provider 凭据或内部路由身份。
+- `key.txt` 只由隔离真实 Provider 验收在进程内读取，不输出、不提交、不复制到 Kitty；Kitty 使用临时生成的下游 API 密钥，验收结束后撤销或删除隔离状态。
+
+### 关键取舍
+
+- 采用方案及证据：稳定 LLM2API 服务身份 + 每模型动态能力目录 + canonical 严格协议 + 内部 adapter/资源池路由，能同时满足能力完整性和内部身份隔离。
+- 被拒绝方案及原因：Kitty 使用 Agnes adapter 但把 URL 指向网关会泄漏内部 Provider 语义；通用 OpenAI-compatible profile 会降级能力；Provider 原始字段透传会破坏唯一公共合同和发送前校验。
 
 ## 生产级切片
 
-- [x] 公共 Gateway Origin 配置、启动验证和开发脚本同步。
-- [x] 只读地址投影、机器文档和 OpenAPI 使用唯一 owner。
-- [x] 协调容量快照和 Provider-usage token 回补具备幂等、失败关闭和恢复边界。
-- [x] 控制 API 组合凭据健康与容量投影；控制台接口文档、新 API Key 配置和 Key 列表处理加载/失败。
-- [ ] 定向配置、HTTP 合同、协调与前端构建验证；同步 README 运行事实。
+- [x] 切片 1：公共 LLM2API 身份、完整模型能力目录、公共错误脱敏与 OpenAPI/文档形成一致合同。
+- [x] 切片 2：catalog 驱动地证明每个已声明 Chat 能力从公共 wire 到 canonical、Provider wire、canonical 响应和 usage 均无静默丢失，恶劣路径保持原有恢复边界。
+- [x] 切片 3：Kitty 保留原生 Agnes、智谱等独立 Provider，新增唯一通用 `llm2api` adapter、动态模型能力发现、配置/UI/文档和安全重试闭环；LLM2API 模式不保存内部 Provider 或上游模型特判。
+- [x] 切片 4：真实 PostgreSQL/Valkey/Gateway/生产前端核心旅程以及 Kitty -> LLM2API -> 内部实际 Provider 真实验收闭环；验收断言只使用 LLM2API 公共事实。
 
 ## 实施任务
 
-- [x] 完成端口、代理、文档来源和现有调度语义调查。
-- [x] 完成四 Provider 官方额度可观测性矩阵与现有差距调查。
-- [x] 实现公共 Gateway Origin 的配置 owner。
-- [x] 实现 OpenAPI/机器文档投影和开发代理。
-- [x] 实现协调 token 回补与凭据容量快照。
-- [x] 组合健康与容量投影，重建控制台文档、新 API Key 配置和 Key 列表状态。
-- [ ] 运行定向测试、Go 构建、前端类型检查和生产构建。
+- [x] 完成当前公共协议、canonical、Provider adapter、资源池调度和 Kitty Provider owner 的全局核心语义调查
+- [x] 固化真实 Provider 身份泄漏、能力目录缺项和 Kitty 未接入的失败证据
+- [x] 收紧所有公共模型、错误、响应、header、Responses 和 OpenAPI 的 LLM2API 单一身份合同
+- [x] 补全 `/v1/models` 能力投影并建立 catalog 驱动的持久能力重建合同矩阵
+- [x] 建立 catalog 驱动的公共协议到 Provider wire、响应与 usage 合同矩阵
+- [x] 复核并修复所有已声明能力的请求接受、发送、响应、流式、usage 与拒绝路径
+- [x] 同步 LLM2API 管理端、README、spec、RELEASE 和 API 文档
+- [x] 保留 Kitty 原生 Agnes、智谱等独立 Provider；新增唯一通用 LLM2API adapter。LLM2API 模式下以 `/v1/models` 为模型能力 owner，不在 Kitty 内为中转后的 Agnes 等模型增加静态特判。
+- [x] 让 Kitty 配置、请求、重试、工具流选择和运行时模型限制只消费 LLM2API 公共模型合同
+- [x] 运行 LLM2API 与 Kitty 定向测试、完整验证、统一核心旅程和真实端到端验收
+- [x] 检查两仓库差异、公共响应与 Kitty 输出的内部 Provider 泄漏、敏感信息和临时密钥清理
 
 ## 恶劣路径矩阵
 
-| 边界 | 失败状态 | 恢复 owner | 验证证据 |
-| --- | --- | --- | --- |
-| 公共 Origin 缺失或非法 | 启动拒绝 | 配置 owner 修正后重启 | 配置定向测试 |
-| 控制台地址投影读取失败 | 不显示可复制的猜测地址 | API 重试 | 前端构建与真实 HTTP 合同 |
-| Gateway 与控制台端口不同 | 全部文档仍给出 Gateway 地址 | 配置派生 | HTTP 文档合同测试 |
-| 反向代理 Host 不可信 | 不采用入站 Host 生成公共 API 地址 | 显式公共 Origin | HTTP 文档合同测试 |
-| Provider usage 小于预留 | 仅已完成且 usage 为 Provider 的请求回补差额 | execution ID 幂等标识 | coordination/requestflow 测试 |
-| usage 未知或流中断 | 不回补，保持保守预留 | 现有 request/attempt 恢复 | requestflow 恶劣路径测试 |
-| Valkey 不可用 | 容量快照明确为不可观测，不影响凭据健康事实 | 协调 owner 恢复后重读 | control API/coordination 测试 |
+| 边界 | 接受/提交事实 | 失败状态 | 恢复 owner | 重放与幂等 | 验证证据 |
+| --- | --- | --- | --- | --- | --- |
+| 重复请求/重复操作 | 请求接受与幂等指纹持久化 | 同键异体稳定冲突 | execution/request owner | 同键同体返回既有事实，不重复扣费 | 统一核心 HTTP 旅程 |
+| 客户端断连/取消 | admission 或 attempt 状态已知 | canceled、uncertain 或 stream_interrupted | requestflow/execution | 未发送可释放；已提交不盲重放 | 流式断连与取消测试 |
+| 上游超时、429、5xx | attempt 与容量租约已记录 | cooldown、rate_limit、provider_temporary | health/routing/requestflow | 仅安全边界内同池接管 | Provider 与故障测试 |
+| 部分流/未知副作用 | 首个已提交事件标记边界 | stream_interrupted/uncertain | requestflow + usage | 禁止换 Key 重放，usage 按可观察事实结算 | 畸形流、部分流测试 |
+| 并发额度竞争 | Key 局部与共享容量原子获取 | admission_capacity_exhausted | coordination | 原子退款/结算且幂等 | PostgreSQL/Valkey 并发测试 |
+| 进程强杀/主机重启 | request/attempt/claim 持久化 | stale running/uncertain | recovery worker | claim fencing，重复恢复幂等 | core restart recovery |
+| 存储或协调设施故障 | 无法证明接受时失败关闭 | storage/admission unavailable | store/coordination | 不绕过额度或资格 | core fail-closed |
+| 资源写入或套餐发布竞态 | 事务提交后唯一事实生效 | optimistic conflict | registry/subscription owner | 幂等写入，不双轨读取 | 控制面 HTTP 合同 |
+| 公共身份泄漏 | 仅提交 `llm2api` 身份 | 公共响应不得出现内部 Provider | public presenter | N/A | models/errors/OpenAPI 真实 HTTP 合同 |
 
 ## 验证计划
 
-- 配置：开发默认、显式非默认端口、生产缺失/非法 Origin。
-- HTTP：控制地址投影、`/llms.txt`、`/openapi.json` 的 URL 一致性。
-- 协调：快照不扣减、已知 usage 的一次回补和重复回补幂等、未知 usage 不回补。
-- 前端：类型检查与生产构建；owner 在桌面浏览器确认复制配置、容量和上游证据显示。
-- 额度调研：仅使用官方文档与脱敏代码路径，未执行真实 Provider 请求。
+- 定向检查：`go test` 覆盖 protocol、publicapi、providers、requestflow、registry、routing、coordination；Kitty 覆盖 provider catalog/adapter/config 与真实 host turn。
+- 完整验证：LLM2API `go test ./...`、`go build ./...`、`web pnpm.cmd run verify`、`git diff --check`；Kitty `npm.cmd run verify`。
+- 竞态/并发验证：LLM2API coordination、routing、usage 和执行恢复的现有并发测试；必要时运行 `go test -race` 的定向包。
+- 目标平台构建：Windows PowerShell、Go/sqlc、Node/pnpm/npm；统一入口 `python .\start_test.py daily` 与 `core`。
+- 隔离的真实 Provider 验收：`powershell -ExecutionPolicy Bypass -File .\scripts\test-provider-real.ps1 -KittyRepository ..\kitty -AgnesPoolOnly` 从 `key.txt` 结构化提取候选并用 Agnes 官方 `/models` 逐把确认，创建临时下游 API 密钥，再从 Kitty 走 LLM2API 调用 `agnes-2.0-flash`，验证 `/models`、thinking、流式 usage、多轮对话、非流式工具调用和完整 Agent turn。
+- 安全与敏感信息检查：检查 git diff、公共响应和日志不含 key、真实 Provider/internal route 泄漏；验收后清理临时下游密钥和隔离状态。
 
 ## 收口
 
-- 已运行：`go build ./...`、`pnpm.cmd run typecheck`、`pnpm.cmd run build`，均在改动前通过。
-- 未验证：真实 Provider 额度接口；不属于当前文档地址切片。
-- commit/push/部署：未执行，等待完整实现与 owner 授权。
-
-## 范围扩展：Provider 能力合同（2026-07-26）
-
-### 新增目标
-
-- Provider 目录只保留 Agnes、智谱 GLM、硅基流动和 Kimi；已删除 Gemini 及其他不在范围内 Provider 的实现、catalog、配置、事实文档与测试引用。
-- 模型能力矩阵成为唯一事实：模型实际可用的 chat、stream、tools、tool_choice、parallel tool calls、流式 tool calls、thinking/reasoning、vision、structured output 和限制由经过验证的 Provider 定义/元数据提供。
-- `/v1/models` 公开稳定、机器可读的 capabilities；`/v1/chat/completions` 按模型而不是模型名称前缀校验并保真转发。上游不支持时返回有 `model`、`provider`、`capability` 和原因的结构化 4xx。
-
-### 现有事实与边界
-
-- 当前 canonical 和 adapter 已有工具、流式工具调用、图片、reasoning 与 JSON output 的部分内部语义，但 `GET /v1/models` 只投影 OpenAI 最小模型字段，部分 public decoder 仍只接受窄字段集合。
-- 旧 Provider 的 catalog、预设、测试、事实文档与真实 Provider 测试脚本已断裂式删除，不保留兼容别名、失效 catalog 记录或迁移桥接。
-- `/v1/models` 已有持久模型能力对象；它将扩展为公共 API DTO 的唯一输入，不能在 handler 里按 `agnes-*`/`glm-*` 名称判断。
-- 不读取 `.env`、不调用真实 Provider、也不将上游未文档化余额或能力标为已支持。
-
-### 执行顺序
-
-- [x] 调研 Agnes、智谱、硅基流动与 Kimi 的官方模型/API 合同，核验现有 adapter 的每项能力与 wire 差距。
-- [x] 删除旧 Provider 的 catalog、adapter、测试、脚本和事实文档；重建四 Provider 的 capability matrix 与持久模型基线。
-- [x] 扩展公开 `/v1/models` 合同与 OpenAPI，使其返回稳定 capabilities/limits。
-- [x] 由统一 capability validator 处理请求字段与结构化不支持错误；各 adapter 只负责各自 wire 映射。
-- [ ] 补齐各 Provider 的静态 wire、流式工具调用、reasoning、图片/结构化输出（若其官方合同支持）和公共 4xx 合同测试。
-- [ ] 完成 Gateway 地址、容量快照和已知 usage 回补切片，并运行定向 Go/前端验证。
-
-## 执行清单：保真能力与额度利用（2026-07-26）
-
-### 0. 事实与边界
-
-- [x] 核验三家现有 Provider 的官方能力合同；未证实的能力默认不声明、不转发。
-- [x] 核验 Kimi 官方协议、模型发现、余额端点和账户级并发/RPM/TPM/TPD 限速事实。
-- [ ] 从 Kimi 官方 `/v1/models` 授权结果或明确官方模型 ID 确认可调用的免费聊天模型；在未确认前不把任一付费模型伪标为免费。
-
-### 1. 能力合同与公共协议
-
-- [x] 以 Provider/上游模型 profile 建立唯一 capability matrix，移除模型名前缀和泛 Provider 推断。
-- [x] `GET /v1/models` 公开稳定的 chat、stream、工具、tool choice、严格 schema、并行/流式工具、reasoning、图像、结构化输出和 token 限制。
-- [x] 扩展 capability matrix 与公共请求为每个实际模型可验证的高级参数/限制（例如 Kimi `thinking.keep`/Partial Mode/多模态与 SiliconFlow `thinking_budget`、`n`、`top_k`），并将每一个已声明字段无损映射到其上游 wire。
-- [x] 将模型 capability 表投影到控制台模型/资源池工作流，让管理员能在添加上游 API Key 前看见全部支持、限制及证据来源。
-- [ ] 补充端到端 HTTP 合同：三家既有 Provider 与 Kimi 的模型发现、非流工具、流式工具、reasoning、视觉/结构化输出和不支持能力 4xx；不以真实 secret 或真实调用替代隔离 wire 测试。
-
-### 2. Kimi Provider
-
-- [x] 实现 `kimi` 独立 adapter、错误分类、模型探测元数据、官方 `api.moonshot.cn/v1` 预设和安全请求 wire；不复用“泛 OpenAI Provider”名义。
-- [x] 将每个正式注册的 Kimi 模型的思考/推理档位、保留思考、多步工具、流式工具、图片/视频输入、JSON/Partial Mode 和上下文限制写入同一矩阵。
-- [x] 基于官方余额端点接入只读、脱敏账户余额证据；无法读取时状态为 unknown，不把 Key 数量或本地桶伪装成余额。
-- [ ] 将账户级 Kimi RPM/TPM/并发/TPD 设为共享 scope，保障所有合法 Key 的调度不超限，并在控制台标明共享关系与最后观测时间。
-
-### 3. 额度利用与可观测性
-
-- [x] 增加 Valkey rate bucket 的只读观测与幂等退款原语。
-- [x] 在成功且 authoritative usage 小于预留时，将 token 差额按每次租约 idempotency marker 回补；未知/估算/中断不回补。
-- [x] 为每条上游 API Key 投影 key-scoped 网关 RPM/TPM/并发剩余、凭据健康/冷却、额度拒绝证据与观测时间；协调不可用时明确标为 unavailable。
-- [ ] 在控制台显示“网关可调度余量”“上游账户/项目共享限制”“上游精确余额/未知”三种不同事实，禁止单一伪余额。
-- [ ] 基于额度拒绝、冷却和成功 usage 复核调度：同资源池内优先合格 Key、精确消耗实际 token、不可跨资源池借用额度。
-
-### 3.1 手动获取上游状态
-
-- [x] 在“上游资源池 / 上游 API Key”管理工作流提供管理员手动“获取上游状态”动作；动作需 CSRF、服务端管理员权限、短超时与审计，不读取或回显 secret，不做后台自动刷新。
-- [ ] Provider adapter 以厂商正式端点或已返回的官方限流响应头为唯一数据源，返回带 `scope`、`observed_at`、`evidence` 的结构化观测；Kimi 余额与账户级限流、以及其他厂商能够官方读取的事实分别建模。
-- [x] 每个上游 API Key 页面同时展示：当前启用/冷却/修复状态、网关 credential 维度的 RPM/TPM/并发、上游官方可获取的账户/项目/Key 观测、最近额度拒绝；未公开或请求失败必须显示 `unknown`/`unavailable` 和原因，不能伪造“已榨干”或“剩余”。
-- [x] 为 Provider 能力目录和上游 API Key 容量投影建立前后端 HTTP 合同测试：后端固定 snake_case 输出，前端逐字段映射并验证深层参数/容量字段；不以页面运行时容错掩盖字段漂移。
-- [ ] 将共享范围明确投影到资源池：同账户或项目的 Kimi RPM/TPM/并发/TPD 不因导入多条 Key 而相加；仅在管理员填写或官方观测到可验证上限后纳入共享调度桶。
-- [ ] 补齐人工获取的成功、未知、429、超时、权限拒绝和 secret 脱敏 HTTP 合同；控制台只投影 API 返回事实，操作完成后显示观测时间和证据来源。
-
-### 4. 交付验收
-
-- [ ] 完成三 Provider + Kimi 的 catalog/adapter/公共合同/额度单测与短集成测试；覆盖重试、重复回补、断流和 coordinator 不可用。
-- [ ] 完成前端类型检查和生产构建；人工确认桌面控制台的模型能力表、Key 容量状态、错误和空状态不重算事实。
-- [ ] 更新 README、接口文档、真实 Provider 验收脚本和版本事实；`5173` 只描述控制台，客户端 Base URL 仅来自配置的 Gateway public origin。
-
-## 范围扩展：上游 API Key 事实重建（2026-07-26）
-
-### 失败证据
-
-- 管理台曾允许同一上游 secret 被多次导入，形成重复的可调度凭据；批量导入只在单次请求内按明文去重，数据库没有凭据身份唯一约束，跨请求和并发写入均可重复。
-- “探测全部 Key”由浏览器分别发起请求、再用本地 Promise 状态汇总；页面顶部的成功/失败数因而可与每条凭据已持久化的探测结果不一致。
-- 凭据状态操作复用无目标对象的通用确认弹窗，管理员无法在提交前确认实际要变更的上游 API Key、目标状态和调度影响。
-
-### 最终目标与唯一 Owner
-
-- `registry` 拥有上游 secret 的不可逆 HMAC 身份和全局唯一性；secret 不回显、不记录到审计、不作为普通 SHA-256 值持久化。一个实际 secret 在 Gateway 中最多对应一条凭据，包含已退役记录。
-- PostgreSQL 的 `provider_credentials.secret_fingerprint` 唯一约束是并发下最终裁决；服务层在调用上游模型发现前先检查相同身份，避免已知重复 Key 的无意义探测。
-- `registry` 拥有一次人工批量模型探测的每条结果与汇总；控制 API 只投影该结果，前端不再并发拼接或重算成功/失败数字。
-- 凭据状态变更仍由 `registry` 的状态机拥有；控制台仅以同一 `CredentialOperation` 状态投影目标凭据、目标状态、提交中、错误和完成后的最新事实。
-
-### 断裂式实现清单
-
-- [ ] 新增专用凭据身份 pepper、HMAC 指纹和基线 schema 唯一约束；删除无持久唯一性的导入语义。
-- [ ] 重建创建、替换和批量导入链路：一次导入中的重复与既有记录均返回明确 `duplicate` 结果，绝不创建第二条凭据。
-- [ ] 重建服务端批量模型探测合同；删除浏览器 `Promise.allSettled` 汇总逻辑。
-- [ ] 重建凭据启用、停用与退役操作弹窗为以目标 `CredentialOperation` 为中心的界面。
-- [ ] 扩展隔离核心 HTTP 验收：导入 -> 去重 -> 模型发现 -> 批量探测 -> 状态变更 -> 候选资格；验证数据库唯一约束和控制 API 投影一致。
-- [ ] 运行 sqlc 生成、定向 Go/前端检查、PowerShell 核心脚本语法检查和 `python .\\start_test.py core` 隔离 HTTP 主旅程。
-
-## 范围扩展：控制台统一性与 Linux Docker 验收（2026-07-26）
-
-### 视觉基线与安全边界
-
-- `ResourcePoolsPage` 是控制台密集表格的视觉基线：表头、内容、状态与操作列按字段语义采用稳定的居中/左对齐规则，圆角、边框、行高和间距只使用共享 token。
-- 下游 API 密钥保存认证所需的不可逆 `secret_digest`，同时以现有信封主密钥加密保存可恢复副本；列表只投影前缀与状态。明文只能由密钥拥有者或管理员在受 CSRF 保护的单条“显示并复制”操作中按需解密，绝不写入列表、日志或审计详情。
-
-### 执行清单
-
-- [x] 审计 CSS token、共享 DataTable/Dialog 与所有控制台表格的对齐声明，确认回归是上游 API Key 页的页面元数据而非第二套样式系统。
-- [ ] 以资源池页为基线重建上游 API Key 页的整行表格对齐与状态块节奏，保留身份/表单语义所需的左对齐。
-- [ ] 补齐生产 Compose 与 Windows 服务的 `LLM2API_PUBLIC_ORIGIN`，使其与公开 Gateway 地址同源。
-- [ ] 在 Docker Linux 中运行生产 TLS、双 Gateway、迁移、滚动替换、恢复和灾备验收；从真实失败逐项修复，禁止以 Windows 静态检查代替。
-- [ ] 重建下游 API 密钥为“加密可恢复、单条按需显示并复制”：创建、替换和重复查看同一事实，列表与审计始终不含明文。
+- 完成事实：LLM2API 公共身份、能力目录、逐模型内部 adapter、池内调度、确定性验证、Kitty 通用 `llm2api` 接入和真实 Kitty -> LLM2API -> Agnes 主旅程均已闭环。Kitty 保留原生 Agnes、智谱等独立 Provider；LLM2API 模式只消费 `/v1/models` 动态模型与能力，不保存中转上游模型静态特判。
+- 实际命令与结果：LLM2API `python .\start_test.py daily` 通过，日志为 `.build\test-logs\20260726T110545706824Z-daily.log`；Kitty `npm.cmd run verify` 在 `4.0.13` 通过；`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-provider-real.ps1 -KittyRepository ..\kitty -AgnesPoolOnly` 通过，真实请求经临时下游 API 密钥完成 `/models`、动态能力、stream smoke、多轮、上下文压力、后台、Playwright 浏览器、修复任务与 LLM2API 账本核对，最终记录 `requests=50`、`distinctUpstreamKeys=3`、`authoritativeTokens=276649`。两仓库 `git diff --check` 通过。
+- 未验证项：控制台桌面视觉仍需 owner 人工验收；未运行 LLM2API `full/capacity/release/everything` 长档。
+- 剩余风险：Provider 外部合同持续变化；只能对 catalog 已验证并由 `/v1/models` 声明的能力承诺无损转发。真实密钥已用于本机隔离验收但曾在对话中暴露，建议 owner 另行轮换。
+- commit/push/部署状态：owner 已授权本次 Kitty 升级 npm 版本、推送并发布；LLM2API 推送但不发布 npm。

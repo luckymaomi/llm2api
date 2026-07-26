@@ -127,12 +127,20 @@ func (a *API) setResourcePoolStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type credentialInput struct {
-	Name              string    `json:"name"`
-	Secret            string    `json:"secret"`
-	RPMLimit          *int32    `json:"rpmLimit"`
-	TPMLimit          *int64    `json:"tpmLimit"`
-	ConcurrencyLimit  *int32    `json:"concurrencyLimit"`
-	ExpectedUpdatedAt time.Time `json:"expectedUpdatedAt"`
+	Name                      string    `json:"name"`
+	Secret                    string    `json:"secret"`
+	RPMLimit                  *int32    `json:"rpmLimit"`
+	TPMLimit                  *int64    `json:"tpmLimit"`
+	ConcurrencyLimit          *int32    `json:"concurrencyLimit"`
+	Priority                  int32     `json:"priority"`
+	Weight                    int32     `json:"weight"`
+	SharedCapacityScope       *string   `json:"sharedCapacityScope"`
+	SharedRPMLimit            *int32    `json:"sharedRpmLimit"`
+	SharedTPMLimit            *int64    `json:"sharedTpmLimit"`
+	SharedConcurrencyLimit    *int32    `json:"sharedConcurrencyLimit"`
+	SharedDailyTokenLimit     *int64    `json:"sharedDailyTokenLimit"`
+	SharedDailyResetMinuteUTC *int32    `json:"sharedDailyResetMinuteUtc"`
+	ExpectedUpdatedAt         time.Time `json:"expectedUpdatedAt"`
 }
 
 type credentialCapacityView struct {
@@ -143,13 +151,17 @@ type credentialCapacityView struct {
 	RequestsPerMinuteRemain int64      `json:"requests_per_minute_remaining,omitempty"`
 	TokensPerMinuteLimit    int64      `json:"tokens_per_minute_limit,omitempty"`
 	TokensPerMinuteRemain   int64      `json:"tokens_per_minute_remaining,omitempty"`
+	DailyTokenLimit         int64      `json:"daily_token_limit,omitempty"`
+	DailyTokenRemain        int64      `json:"daily_token_remaining,omitempty"`
+	DailyTokenResetAt       *time.Time `json:"daily_token_reset_at,omitempty"`
 	ConcurrencyLimit        int64      `json:"concurrency_limit,omitempty"`
 	ConcurrencyInUse        int64      `json:"concurrency_in_use,omitempty"`
 }
 
 type credentialView struct {
 	registry.Credential
-	Capacity credentialCapacityView `json:"capacity"`
+	Capacity       credentialCapacityView  `json:"capacity"`
+	SharedCapacity *credentialCapacityView `json:"shared_capacity,omitempty"`
 }
 
 type credentialBatchResultView struct {
@@ -245,7 +257,7 @@ func (a *API) updateCredential(w http.ResponseWriter, r *http.Request) {
 		input.Secret = ""
 		return
 	}
-	item, err := a.registry.UpdateCredential(r.Context(), principalFromContext(r.Context()), registry.CredentialChange{ID: id, Name: input.Name, RPMLimit: input.RPMLimit, TPMLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit, ExpectedUpdatedAt: input.ExpectedUpdatedAt}, input.Secret, mutation)
+	item, err := a.registry.UpdateCredential(r.Context(), principalFromContext(r.Context()), registry.CredentialChange{ID: id, Name: input.Name, RPMLimit: input.RPMLimit, TPMLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit, Priority: input.Priority, Weight: input.Weight, SharedCapacityScope: input.SharedCapacityScope, SharedRPMLimit: input.SharedRPMLimit, SharedTPMLimit: input.SharedTPMLimit, SharedConcurrencyLimit: input.SharedConcurrencyLimit, SharedDailyTokenLimit: input.SharedDailyTokenLimit, SharedDailyResetMinuteUTC: input.SharedDailyResetMinuteUTC, ExpectedUpdatedAt: input.ExpectedUpdatedAt}, input.Secret, mutation)
 	input.Secret = ""
 	if err != nil {
 		a.writeRegistryError(w, r, err)
@@ -411,19 +423,32 @@ func (a *API) presentCredential(ctx context.Context, credential registry.Credent
 		return view
 	}
 	capacity, err := a.credentialCapacity.InspectCredential(ctx, requestflow.CredentialCapacityInput{
-		CredentialID: credential.ID, RPMLimit: credential.RPMLimit, TPMLimit: credential.TPMLimit, ConcurrencyLimit: credential.ConcurrencyLimit,
+		CredentialID: credential.ID, ProviderID: credential.ProviderID,
+		RPMLimit: credential.RPMLimit, TPMLimit: credential.TPMLimit, ConcurrencyLimit: credential.ConcurrencyLimit,
+		SharedCapacityScope: credential.SharedCapacityScope, SharedRPMLimit: credential.SharedRPMLimit,
+		SharedTPMLimit: credential.SharedTPMLimit, SharedConcurrencyLimit: credential.SharedConcurrencyLimit,
+		SharedDailyTokenLimit: credential.SharedDailyTokenLimit, SharedDailyResetMinuteUTC: credential.SharedDailyResetMinuteUTC,
 	})
 	if err != nil {
 		return view
 	}
-	observedAt := capacity.ObservedAt
-	view.Capacity = credentialCapacityView{
-		State: "observed", Scope: "gateway_credential", ObservedAt: &observedAt,
-		RequestsPerMinuteLimit: capacity.RequestsPerMinuteLimit, RequestsPerMinuteRemain: capacity.RequestsPerMinuteRemain,
-		TokensPerMinuteLimit: capacity.TokensPerMinuteLimit, TokensPerMinuteRemain: capacity.TokensPerMinuteRemain,
-		ConcurrencyLimit: capacity.ConcurrencyLimit, ConcurrencyInUse: capacity.ConcurrencyInUse,
+	view.Capacity = presentCapacityObservation("gateway_credential", capacity.CapacityObservation)
+	if capacity.Shared != nil {
+		shared := presentCapacityObservation("gateway_shared_upstream", *capacity.Shared)
+		view.SharedCapacity = &shared
 	}
 	return view
+}
+
+func presentCapacityObservation(scope string, capacity requestflow.CapacityObservation) credentialCapacityView {
+	observedAt := capacity.ObservedAt
+	return credentialCapacityView{
+		State: "observed", Scope: scope, ObservedAt: &observedAt,
+		RequestsPerMinuteLimit: capacity.RequestsPerMinuteLimit, RequestsPerMinuteRemain: capacity.RequestsPerMinuteRemain,
+		TokensPerMinuteLimit: capacity.TokensPerMinuteLimit, TokensPerMinuteRemain: capacity.TokensPerMinuteRemain,
+		DailyTokenLimit: capacity.DailyTokenLimit, DailyTokenRemain: capacity.DailyTokenRemain, DailyTokenResetAt: capacity.DailyTokenResetAt,
+		ConcurrencyLimit: capacity.ConcurrencyLimit, ConcurrencyInUse: capacity.ConcurrencyInUse,
+	}
 }
 
 func registryMutationRequest(w http.ResponseWriter, r *http.Request) (registry.MutationRequest, bool) {

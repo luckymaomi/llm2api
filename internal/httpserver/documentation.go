@@ -2,6 +2,8 @@ package httpserver
 
 import (
 	"net/http"
+
+	"github.com/luckymaomi/llm2api/internal/protocol"
 )
 
 type routeRegistrar interface {
@@ -20,8 +22,9 @@ func serveAgentDocumentation(publicOrigin string) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("# LLM2API\n\n" +
-			"LLM2API is an OpenAI-compatible API gateway.\n\n" +
+			"LLM2API is the only Provider exposed by this OpenAI-compatible API gateway. Internal upstream Providers, resource pools, and credentials are never part of the client contract.\n\n" +
 			"## Connection\n\n" +
+			"- Provider: " + protocol.PublicProvider + "\n" +
 			"- Base URL: " + baseURL + "\n" +
 			"- Authentication: Authorization: Bearer $LLM2API_API_KEY\n" +
 			"- Discover the models available to this key with GET " + baseURL + "/models before sending a request.\n\n" +
@@ -46,7 +49,8 @@ func serveOpenAPI(publicOrigin string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		WriteJSON(w, http.StatusOK, map[string]any{
-			"openapi": "3.1.0",
+			"openapi":    "3.1.0",
+			"x-provider": protocol.PublicProvider,
 			"info": map[string]string{
 				"title":       "LLM2API",
 				"version":     "1.0.0",
@@ -76,17 +80,18 @@ func serveOpenAPI(publicOrigin string) http.HandlerFunc {
 						},
 					},
 					"ModelCapabilities": map[string]any{
-						"type": "object", "required": []string{"chat_completions", "streaming", "tools", "reasoning", "vision", "structured_output", "extensions", "limits", "parameters"},
+						"type": "object", "required": []string{"chat_completions", "responses", "streaming", "tools", "reasoning", "vision", "structured_output", "extensions", "usage", "limits", "parameters"},
 						"properties": map[string]any{
-							"chat_completions": map[string]string{"type": "boolean"}, "streaming": map[string]string{"type": "boolean"},
+							"chat_completions": map[string]string{"type": "boolean"}, "responses": map[string]string{"type": "boolean"}, "streaming": map[string]string{"type": "boolean"},
 							"tools": map[string]any{"type": "object", "properties": map[string]any{
 								"function_calling": map[string]string{"type": "boolean"}, "tool_choice": map[string]any{"type": "array", "items": map[string]string{"type": "string"}},
 								"strict_schema": map[string]string{"type": "boolean"}, "parallel_tool_calls": map[string]string{"type": "boolean"}, "streaming_tool_calls": map[string]string{"type": "boolean"},
 							}},
-							"reasoning":         map[string]any{"type": "object", "properties": map[string]any{"enabled": map[string]string{"type": "boolean"}, "mode": map[string]string{"type": "string"}, "always_on": map[string]string{"type": "boolean"}, "default_enabled": map[string]string{"type": "boolean"}, "preserve": map[string]string{"type": "boolean"}, "efforts": map[string]any{"type": "array", "items": map[string]string{"type": "string"}}, "tool_choice_modes_when_enabled": map[string]any{"type": "array", "items": map[string]string{"type": "string"}}}},
+							"reasoning":         map[string]any{"type": "object", "properties": map[string]any{"enabled": map[string]string{"type": "boolean"}, "mode": map[string]string{"type": "string"}, "always_on": map[string]string{"type": "boolean"}, "default_enabled": map[string]string{"type": "boolean"}, "configurable": map[string]string{"type": "boolean"}, "content": map[string]string{"type": "boolean"}, "preserve": map[string]string{"type": "boolean"}, "efforts": map[string]any{"type": "array", "items": map[string]string{"type": "string"}}, "tool_choice_modes_when_enabled": map[string]any{"type": "array", "items": map[string]string{"type": "string"}}}},
 							"vision":            map[string]any{"type": "object", "properties": map[string]any{"image_url": map[string]string{"type": "boolean"}, "video_url": map[string]string{"type": "boolean"}}},
 							"structured_output": map[string]any{"type": "object", "properties": map[string]any{"json_object": map[string]string{"type": "boolean"}, "json_schema": map[string]string{"type": "boolean"}}},
-							"extensions":        map[string]any{"type": "object", "properties": map[string]any{"partial_mode": map[string]string{"type": "boolean"}, "prompt_cache_key": map[string]string{"type": "boolean"}, "safety_identifier": map[string]string{"type": "boolean"}}},
+							"extensions":        map[string]any{"type": "object", "properties": map[string]any{"partial_mode": map[string]string{"type": "boolean"}, "message_name": map[string]string{"type": "boolean"}, "prompt_cache_key": map[string]string{"type": "boolean"}, "safety_identifier": map[string]string{"type": "boolean"}}},
+							"usage":             map[string]any{"type": "object", "properties": map[string]any{"response": map[string]string{"type": "boolean"}, "stream": map[string]string{"type": "boolean"}}},
 							"limits":            map[string]any{"type": "object", "properties": map[string]any{"context_tokens": map[string]string{"type": "integer", "format": "int64"}, "output_tokens": map[string]string{"type": "integer", "format": "int64"}}},
 							"parameters":        map[string]string{"$ref": "#/components/schemas/ModelParameters"},
 						},
@@ -111,6 +116,8 @@ func serveOpenAPI(publicOrigin string) http.HandlerFunc {
 													"items": map[string]any{
 														"type": "object",
 														"properties": map[string]any{
+															"id":           map[string]string{"type": "string"},
+															"owned_by":     map[string]any{"type": "string", "const": protocol.PublicProvider},
 															"capabilities": map[string]string{"$ref": "#/components/schemas/ModelCapabilities"},
 														},
 													},

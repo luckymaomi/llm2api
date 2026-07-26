@@ -128,6 +128,7 @@ func (s *Service) nonStreamAttempt(ctx context.Context, run workflowRun, candida
 	completedAt := s.clock.Now().UTC()
 	status := response.StatusCode
 	usage := responseUsage(run.request, parsed)
+	parsed.ID = publicCompletionID(run.accepted.RequestID)
 	parsed.Model = run.model.PublicName
 	result := ChatResult{RequestID: run.accepted.RequestID, Response: parsed}
 	var resultPersistenceError error

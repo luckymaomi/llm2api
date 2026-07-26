@@ -42,6 +42,40 @@ func TestModelParameterContractExplainsUnsupportedAndConditionalRequests(t *test
 	}
 }
 
+// This protects the client-visible result that a model cannot accept a
+// message-name field which its declared Provider contract cannot carry.
+func TestModelCapabilityRejectsUnsupportedMessageNamesBeforeSending(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		PublicName: "glm-free", ProviderSlug: "zhipu",
+		Capabilities: registry.ModelCapabilities{Chat: true},
+	}
+	err := validateCapabilities(model, canonical.ChatRequest{
+		Model: "glm-free", Messages: []canonical.Message{{Role: canonical.RoleUser, Name: "member", Content: canonical.TextContent("Reply")}},
+	})
+	if err == nil || err.Kind != canonical.ErrorUnsupportedCapability || err.Capability != "messages.name" || err.Provider != "zhipu" || err.Model != "glm-free" {
+		t.Fatalf("message-name capability error = %#v", err)
+	}
+}
+
+func TestModelCapabilityRejectsUnsupportedStreamUsageBeforeSending(t *testing.T) {
+	t.Parallel()
+
+	includeUsage := true
+	model := Model{
+		PublicName: "model-without-stream-usage", ProviderSlug: "internal-provider",
+		Capabilities: registry.ModelCapabilities{Chat: true, Streaming: true},
+	}
+	err := validateCapabilities(model, canonical.ChatRequest{
+		Model: "model-without-stream-usage", Stream: true, StreamUsage: &includeUsage,
+		Messages: []canonical.Message{{Role: canonical.RoleUser, Content: canonical.TextContent("Reply")}},
+	})
+	if err == nil || err.Kind != canonical.ErrorUnsupportedCapability || err.Capability != "usage.stream" || err.Parameter != "stream_options.include_usage" {
+		t.Fatalf("stream-usage capability error = %#v", err)
+	}
+}
+
 func float64Pointer(value float64) *float64 {
 	return &value
 }

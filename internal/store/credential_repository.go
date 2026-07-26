@@ -17,10 +17,15 @@ import (
 
 func (r *RegistryRepository) CreateCredential(ctx context.Context, input registry.NewCredential, actorID uuid.UUID, mutation registry.Mutation) (registry.Credential, error) {
 	return r.executeCredentialMutation(ctx, actorID, mutation, func(queries *db.Queries) (registry.Credential, error) {
+		sharedScopeID, err := upsertSharedCapacityScope(ctx, queries, input.ResourcePoolID, input.SharedCapacityScope, input.SharedRPMLimit, input.SharedTPMLimit, input.SharedConcurrencyLimit, input.SharedDailyTokenLimit, input.SharedDailyResetMinuteUTC)
+		if err != nil {
+			return registry.Credential{}, err
+		}
 		created, err := queries.CreateCredential(ctx, db.CreateCredentialParams{
 			ID: input.ID, ResourcePoolID: input.ResourcePoolID, Name: input.Name, EncryptedSecret: input.EncryptedSecret,
 			SecretFingerprint: input.SecretFingerprint,
-			RpmLimit:          input.RPMLimit, TpmLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit,
+			RpmLimit:          input.RPMLimit, TpmLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit, Priority: input.Priority, Weight: input.Weight,
+			SharedCapacityScopeID: sharedScopeID,
 		})
 		if err != nil {
 			return registry.Credential{}, translateRegistryError(err)
@@ -49,10 +54,18 @@ func (r *RegistryRepository) UpdateCredential(ctx context.Context, input registr
 		if err != nil {
 			return registry.Credential{}, translateRegistryError(err)
 		}
+		if current.Status == db.CredentialStatusRetired || !current.UpdatedAt.Time.UTC().Equal(input.ExpectedUpdatedAt.UTC()) {
+			return registry.Credential{}, registry.ErrConflict
+		}
+		sharedScopeID, err := upsertSharedCapacityScope(ctx, queries, current.ResourcePoolID, input.SharedCapacityScope, input.SharedRPMLimit, input.SharedTPMLimit, input.SharedConcurrencyLimit, input.SharedDailyTokenLimit, input.SharedDailyResetMinuteUTC)
+		if err != nil {
+			return registry.Credential{}, err
+		}
 		if _, err := queries.UpdateCredential(ctx, db.UpdateCredentialParams{
 			Name: input.Name, ReplaceSecret: input.ReplaceSecret, EncryptedSecret: input.EncryptedSecret, SecretFingerprint: input.SecretFingerprint,
-			RpmLimit: input.RPMLimit, TpmLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit,
-			ID: input.ID, ExpectedUpdatedAt: timestamp(input.ExpectedUpdatedAt),
+			RpmLimit: input.RPMLimit, TpmLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit, Priority: input.Priority, Weight: input.Weight,
+			SharedCapacityScopeID: sharedScopeID,
+			ID:                    input.ID, ExpectedUpdatedAt: timestamp(input.ExpectedUpdatedAt),
 		}); err != nil {
 			return registry.Credential{}, translateRegistryError(err)
 		}
@@ -77,6 +90,21 @@ func (r *RegistryRepository) UpdateCredential(ctx context.Context, input registr
 		}
 		return credentialByID(ctx, queries, input.ID)
 	})
+}
+
+func upsertSharedCapacityScope(ctx context.Context, queries *db.Queries, resourcePoolID uuid.UUID, scope *string, rpm *int32, tpm *int64, concurrency *int32, dailyTokens *int64, dailyResetMinuteUTC *int32) (*uuid.UUID, error) {
+	if scope == nil {
+		return nil, nil
+	}
+	id, err := queries.UpsertSharedCapacityScope(ctx, db.UpsertSharedCapacityScopeParams{
+		ResourcePoolID: resourcePoolID, ScopeName: *scope,
+		RpmLimit: *rpm, TpmLimit: *tpm, ConcurrencyLimit: *concurrency,
+		DailyTokenLimit: dailyTokens, DailyResetMinuteUtc: dailyResetMinuteUTC,
+	})
+	if err != nil {
+		return nil, translateRegistryError(err)
+	}
+	return &id, nil
 }
 
 func upsertDiscoveredModels(ctx context.Context, queries *db.Queries, resourcePoolID uuid.UUID, models []registry.DiscoveredModel) ([]registry.CredentialModelBinding, error) {
@@ -227,7 +255,9 @@ func credentialByID(ctx context.Context, queries *db.Queries, id uuid.UUID) (reg
 	return registry.Credential{
 		ID: row.ID, ResourcePoolID: row.ResourcePoolID, ResourcePoolName: row.ResourcePoolName, ResourcePoolSlug: row.ResourcePoolSlug,
 		ProviderID: row.ProviderID, ProviderName: row.ProviderName, ProviderKind: providers.Kind(row.ProviderKind), ProviderBaseURL: row.ProviderBaseUrl,
-		Name: row.Name, Status: registry.CredentialStatus(row.Status), HealthStatus: registry.CredentialHealthStatus(row.HealthStatus), HealthGeneration: row.HealthGeneration, RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit, ConcurrencyLimit: row.ConcurrencyLimit,
+		Name: row.Name, Status: registry.CredentialStatus(row.Status), HealthStatus: registry.CredentialHealthStatus(row.HealthStatus), HealthGeneration: row.HealthGeneration, RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit, ConcurrencyLimit: row.ConcurrencyLimit, Priority: row.Priority, Weight: row.Weight,
+		SharedCapacityScope: row.SharedCapacityScope, SharedRPMLimit: row.SharedRpmLimit, SharedTPMLimit: row.SharedTpmLimit, SharedConcurrencyLimit: row.SharedConcurrencyLimit,
+		SharedDailyTokenLimit: row.SharedDailyTokenLimit, SharedDailyResetMinuteUTC: row.SharedDailyResetMinuteUtc,
 		CooldownUntil: timePointer(row.CooldownUntil), ConsecutiveFailures: row.ConsecutiveFailures, LastSuccessAt: timePointer(row.LastSuccessAt), LastErrorKind: row.LastErrorKind,
 		LastProbeAt: timePointer(row.LastProbeAt), LastProbeLatencyMs: row.LastProbeLatencyMs, LastProbeKind: row.LastProbeKind, LastProbeStatus: row.LastProbeStatus, LastProbeErrorKind: row.LastProbeErrorKind,
 		RetiredAt: timePointer(row.RetiredAt), CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ModelBindings: bindings,
@@ -248,7 +278,9 @@ func (r *RegistryRepository) ListCredentials(ctx context.Context, includeRetired
 		item := registry.Credential{
 			ID: row.ID, ResourcePoolID: row.ResourcePoolID, ResourcePoolName: row.ResourcePoolName, ResourcePoolSlug: row.ResourcePoolSlug,
 			ProviderID: row.ProviderID, ProviderName: row.ProviderName, ProviderKind: providers.Kind(row.ProviderKind), ProviderBaseURL: row.ProviderBaseUrl,
-			Name: row.Name, Status: registry.CredentialStatus(row.Status), HealthStatus: registry.CredentialHealthStatus(row.HealthStatus), HealthGeneration: row.HealthGeneration, RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit, ConcurrencyLimit: row.ConcurrencyLimit,
+			Name: row.Name, Status: registry.CredentialStatus(row.Status), HealthStatus: registry.CredentialHealthStatus(row.HealthStatus), HealthGeneration: row.HealthGeneration, RPMLimit: row.RpmLimit, TPMLimit: row.TpmLimit, ConcurrencyLimit: row.ConcurrencyLimit, Priority: row.Priority, Weight: row.Weight,
+			SharedCapacityScope: row.SharedCapacityScope, SharedRPMLimit: row.SharedRpmLimit, SharedTPMLimit: row.SharedTpmLimit, SharedConcurrencyLimit: row.SharedConcurrencyLimit,
+			SharedDailyTokenLimit: row.SharedDailyTokenLimit, SharedDailyResetMinuteUTC: row.SharedDailyResetMinuteUtc,
 			CooldownUntil: timePointer(row.CooldownUntil), ConsecutiveFailures: row.ConsecutiveFailures, LastSuccessAt: timePointer(row.LastSuccessAt), LastErrorKind: row.LastErrorKind,
 			LastProbeAt: timePointer(row.LastProbeAt), LastProbeLatencyMs: row.LastProbeLatencyMs, LastProbeKind: row.LastProbeKind, LastProbeStatus: row.LastProbeStatus, LastProbeErrorKind: row.LastProbeErrorKind,
 			RetiredAt: timePointer(row.RetiredAt), CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ModelBindings: bindings,

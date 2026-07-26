@@ -100,6 +100,23 @@ export function CredentialsPage() {
         meta: { align: 'center' },
       },
       {
+        id: 'routing',
+        header: '调度',
+        meta: { align: 'center' },
+        cell: ({ row }) => (
+          <div className="table-status-cell">
+            <strong>优先级 {row.original.priority}</strong>
+            <small className="table-subline">同级权重 {row.original.weight}</small>
+          </div>
+        ),
+      },
+      {
+        id: 'shared-capacity',
+        header: '共享上游额度',
+        meta: { align: 'center' },
+        cell: ({ row }) => <SharedCapacityCell credential={row.original} />,
+      },
+      {
         id: 'capacity',
         header: '网关余量',
         meta: { align: 'center' },
@@ -349,6 +366,50 @@ function CredentialCapacityCell({ capacity }: { capacity: Credential['capacity']
       <small className="table-subline">
         {capacityRow(capacity.concurrencyInUse, capacity.concurrencyLimit, '并发')}
       </small>
+    </div>
+  )
+}
+
+function SharedCapacityCell({ credential }: { credential: Credential }) {
+  if (!credential.sharedCapacityScope) return <span className="table-subline">未配置</span>
+  const capacity = credential.capacity.sharedCapacity
+  return (
+    <div className="table-status-cell">
+      <strong>{credential.sharedCapacityScope}</strong>
+      {capacity?.state === 'observed' ? (
+        <>
+          <small className="table-subline">
+            {capacityRow(
+              capacity.requestsPerMinuteRemaining,
+              capacity.requestsPerMinuteLimit,
+              'RPM',
+            )}
+          </small>
+          <small className="table-subline">
+            {capacityRow(capacity.tokensPerMinuteRemaining, capacity.tokensPerMinuteLimit, 'TPM')}
+          </small>
+          {capacity.dailyTokenLimit !== undefined ? (
+            <small className="table-subline">
+              {capacityRow(capacity.dailyTokenRemaining, capacity.dailyTokenLimit, 'TPD')}
+              {capacity.dailyTokenResetAt
+                ? ` · ${formatDateTime(capacity.dailyTokenResetAt)} 重置`
+                : ''}
+            </small>
+          ) : null}
+          <small className="table-subline">
+            {capacityRow(capacity.concurrencyInUse, capacity.concurrencyLimit, '并发')}
+          </small>
+        </>
+      ) : (
+        <small className="table-subline">
+          {limit(credential.sharedRpmLimit)} / {limit(credential.sharedTpmLimit)} /{' '}
+          {limit(credential.sharedConcurrencyLimit)}
+          {credential.sharedDailyTokenLimit !== undefined
+            ? ` / ${formatNumber(credential.sharedDailyTokenLimit)} TPD`
+            : ''}
+          ，暂不可观测
+        </small>
+      )}
     </div>
   )
 }

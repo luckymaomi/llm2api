@@ -88,7 +88,7 @@ func TestChatUsesEverySafeSamePoolCandidateBeforeReturning(t *testing.T) {
 		t.Fatal(err)
 	}
 	maxTokens := int64(32)
-	_, providerError := service.Chat(context.Background(), ChatCommand{
+	result, providerError := service.Chat(context.Background(), ChatCommand{
 		Principal: identity.GatewayPrincipal{UserID: uuid.New(), KeyID: uuid.New()},
 		Request: canonical.ChatRequest{
 			Model: "public-model", MaxOutputTokens: &maxTokens,
@@ -98,6 +98,9 @@ func TestChatUsesEverySafeSamePoolCandidateBeforeReturning(t *testing.T) {
 	})
 	if providerError != nil {
 		t.Fatalf("Chat() error = %v", providerError)
+	}
+	if result.Response.Model != "public-model" || result.Response.ID == "chatcmpl-1" || !strings.HasPrefix(result.Response.ID, "chatcmpl_") {
+		t.Fatalf("public completion identity = id %q model %q", result.Response.ID, result.Response.Model)
 	}
 	if providerCalls != 2 {
 		t.Fatalf("provider calls = %d, want 2", providerCalls)

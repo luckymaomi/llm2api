@@ -18,7 +18,7 @@ func zhipuCapabilities() Capabilities {
 	return Capabilities{
 		Chat: true, Models: true, Streaming: true, Tools: true, ToolStreaming: true, ToolChoiceAuto: true,
 		JSONOutput: true, ReasoningToggle: true, ReasoningEffort: true, ReasoningContent: true,
-		ReasoningReplay: true, ResponseUsage: true, ResponseRequestID: true,
+		ReasoningReplay: true, ResponseUsage: true, StreamUsage: true, ResponseRequestID: true,
 		Parameters: ParameterCapabilities{
 			MaxOutputTokens: integerBetween(1, 131_072), Temperature: numberBetween(0, 1), TopP: numberBetween(0.01, 1),
 		},
@@ -30,7 +30,7 @@ func zhipuPolicy(capabilities Capabilities) wirePolicy {
 		kind:         KindZhipu,
 		capabilities: capabilities,
 		chatPath:     "chat/completions", modelsPath: "models", reasoning: reasoningWireZhipu,
-		sendToolStream: true, responseRequestIDBody: true, maxStops: 4,
+		includeStreamUsage: capabilities.StreamUsage, sendToolStream: true, responseRequestIDBody: true, maxStops: 4,
 		finishReasons: map[string]canonical.FinishReason{"sensitive": canonical.FinishReasonContentFilter},
 		finishReasonErrors: map[string]canonical.ErrorKind{
 			"network_error": canonical.ErrorProviderTemporary, "model_context_window_exceeded": canonical.ErrorInvalidRequest,

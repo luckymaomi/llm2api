@@ -175,6 +175,9 @@ type Querier interface {
 	UpsertDiscoveredModel(ctx context.Context, arg UpsertDiscoveredModelParams) (Model, error)
 	// Provider rows are deterministic projections of the validated code catalog.
 	UpsertProviderProjection(ctx context.Context, arg UpsertProviderProjectionParams) (Provider, error)
+	// This is the sole owner of one official upstream account/project limit.
+	// The caller holds the affected credential row lock before changing a scope.
+	UpsertSharedCapacityScope(ctx context.Context, arg UpsertSharedCapacityScopeParams) (uuid.UUID, error)
 }
 
 var _ Querier = (*Queries)(nil)

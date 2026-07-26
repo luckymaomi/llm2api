@@ -91,6 +91,51 @@ func TestValkeyRateInspectionDoesNotConsumeAndRefundIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestValkeyFixedWindowQuotaIsAtomicAndResetsAtTheBoundary(t *testing.T) {
+	coordinator, _, _ := integrationCoordinator(t)
+	requests := BucketLimit{
+		Dimension: GlobalDimension(), Metric: MetricRequests,
+		CapacityTokens: 2, RefillTokens: 2, RefillInterval: time.Hour, RequestedTokens: 1,
+	}
+	daily := BucketLimit{
+		Dimension: Dimension{Scope: ScopeSharedUpstream, SubjectID: "account-fixed-window"}, Metric: MetricDailyTokens,
+		CapacityTokens: 5, RequestedTokens: 5, FixedWindow: 120 * time.Millisecond,
+	}
+
+	first, err := coordinator.AcquireRate(context.Background(), []BucketLimit{requests, daily})
+	if err != nil || !first.Granted || first.Buckets[1].RemainingTokens != 0 {
+		t.Fatalf("first fixed-window AcquireRate() = %#v, %v", first, err)
+	}
+	blocked, err := coordinator.AcquireRate(context.Background(), []BucketLimit{requests, daily})
+	if err != nil || blocked.Granted || !blocked.RetryAt.After(blocked.ObservedAt) {
+		t.Fatalf("blocked fixed-window AcquireRate() = %#v, %v", blocked, err)
+	}
+	requestOnly, err := coordinator.AcquireRate(context.Background(), []BucketLimit{requests})
+	if err != nil || !requestOnly.Granted || requestOnly.Buckets[0].RemainingTokens != 0 {
+		t.Fatalf("request-only AcquireRate() = %#v, %v; fixed-window denial deducted another dimension", requestOnly, err)
+	}
+
+	granted := waitForRateGrant(t, coordinator, daily, blocked.RetryAt)
+	if !granted.Granted || granted.Buckets[0].RemainingTokens != 0 {
+		t.Fatalf("fixed-window AcquireRate(after reset) = %#v", granted)
+	}
+}
+
+func TestValkeyFixedWindowConfigurationChangeFailsClosedUntilReset(t *testing.T) {
+	coordinator, _, _ := integrationCoordinator(t)
+	dimension := Dimension{Scope: ScopeSharedUpstream, SubjectID: "account-config-change"}
+	initial := BucketLimit{Dimension: dimension, Metric: MetricDailyTokens, CapacityTokens: 10, RequestedTokens: 4, FixedWindow: time.Second}
+	acquired, err := coordinator.AcquireRate(context.Background(), []BucketLimit{initial})
+	if err != nil || !acquired.Granted || acquired.Buckets[0].RemainingTokens != 6 {
+		t.Fatalf("initial fixed-window AcquireRate() = %#v, %v", acquired, err)
+	}
+	changed := BucketLimit{Dimension: dimension, Metric: MetricDailyTokens, CapacityTokens: 20, RequestedTokens: 1, FixedWindow: time.Second}
+	observed, err := coordinator.InspectRate(context.Background(), []BucketLimit{changed})
+	if err != nil || observed.Buckets[0].RemainingTokens != 0 {
+		t.Fatalf("InspectRate(changed fixed quota) = %#v, %v; current window must fail closed", observed, err)
+	}
+}
+
 func TestValkeyLeaseIsSharedRenewableAndIdempotentlyReleased(t *testing.T) {
 	firstInstance, client, prefix := integrationCoordinator(t)
 	secret := sha256.Sum256([]byte("coordination-integration:" + prefix))

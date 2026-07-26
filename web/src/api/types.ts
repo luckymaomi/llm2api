@@ -131,13 +131,18 @@ export interface ModelCapabilities {
   reasoningMode?: 'toggle' | 'effort' | 'hybrid' | 'always_on'
   reasoningAlwaysOn: boolean
   reasoningDefaultEnabled: boolean
+  reasoningConfig: boolean
+  reasoningContent: boolean
   reasoningPreserve: boolean
   reasoningEfforts: string[]
   toolChoiceModesWithReasoning: string[]
   structuredOutput: boolean
   jsonSchemaOutput: boolean
+  messageName: boolean
   promptCacheKey: boolean
   safetyIdentifier: boolean
+  responseUsage: boolean
+  streamUsage: boolean
   contextTokens: number
   outputTokens: number
   parameters: ModelParameterCapabilities
@@ -257,14 +262,18 @@ export type CredentialHealthStatus = 'healthy' | 'cooling' | 'probing' | 'repair
 
 export interface CredentialCapacity {
   state: 'observed' | 'unavailable'
-  scope: 'gateway_credential'
+  scope: 'gateway_credential' | 'gateway_shared_upstream'
   observedAt?: string
   requestsPerMinuteLimit?: number
   requestsPerMinuteRemaining?: number
   tokensPerMinuteLimit?: number
   tokensPerMinuteRemaining?: number
+  dailyTokenLimit?: number
+  dailyTokenRemaining?: number
+  dailyTokenResetAt?: string
   concurrencyLimit?: number
   concurrencyInUse?: number
+  sharedCapacity?: CredentialCapacity
 }
 
 export type UpstreamStatusState = 'observed' | 'unknown' | 'unavailable'
@@ -303,6 +312,14 @@ export interface Credential {
   rpmLimit?: number
   tpmLimit?: number
   concurrencyLimit?: number
+  priority: number
+  weight: number
+  sharedCapacityScope?: string
+  sharedRpmLimit?: number
+  sharedTpmLimit?: number
+  sharedConcurrencyLimit?: number
+  sharedDailyTokenLimit?: number
+  sharedDailyResetMinuteUtc?: number
   cooldownUntil?: string
   consecutiveFailures: number
   lastSuccessAt?: string
@@ -328,6 +345,14 @@ export interface CredentialUpdateInput {
   rpmLimit?: number
   tpmLimit?: number
   concurrencyLimit?: number
+  priority: number
+  weight: number
+  sharedCapacityScope?: string
+  sharedRpmLimit?: number
+  sharedTpmLimit?: number
+  sharedConcurrencyLimit?: number
+  sharedDailyTokenLimit?: number
+  sharedDailyResetMinuteUtc?: number
   expectedUpdatedAt: string
 }
 

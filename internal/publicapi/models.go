@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/luckymaomi/llm2api/internal/httpserver"
+	"github.com/luckymaomi/llm2api/internal/protocol"
+	"github.com/luckymaomi/llm2api/internal/registry"
 )
 
 func (a *API) models(w http.ResponseWriter, r *http.Request) {
@@ -17,9 +19,10 @@ func (a *API) models(w http.ResponseWriter, r *http.Request) {
 	data := make([]map[string]any, 0, len(models))
 	for _, model := range models {
 		data = append(data, map[string]any{
-			"id": model.PublicName, "object": "model", "created": model.CreatedAt.Unix(), "owned_by": model.ProviderSlug,
+			"id": model.PublicName, "object": "model", "created": model.CreatedAt.Unix(), "owned_by": protocol.PublicProvider,
 			"capabilities": map[string]any{
 				"chat_completions": model.Capabilities.Chat,
+				"responses":        model.Capabilities.Chat,
 				"streaming":        model.Capabilities.Streaming,
 				"tools": map[string]any{
 					"function_calling":     model.Capabilities.Tools,
@@ -33,6 +36,8 @@ func (a *API) models(w http.ResponseWriter, r *http.Request) {
 					"mode":                           model.Capabilities.ReasoningMode,
 					"always_on":                      model.Capabilities.ReasoningAlwaysOn,
 					"default_enabled":                model.Capabilities.ReasoningDefaultEnabled,
+					"configurable":                   reasoningConfigurable(model.Capabilities),
+					"content":                        model.Capabilities.ReasoningContent,
 					"preserve":                       model.Capabilities.ReasoningPreserve,
 					"efforts":                        model.Capabilities.ReasoningEfforts,
 					"tool_choice_modes_when_enabled": model.Capabilities.ToolChoiceModesWithReasoning,
@@ -44,8 +49,13 @@ func (a *API) models(w http.ResponseWriter, r *http.Request) {
 				},
 				"extensions": map[string]any{
 					"partial_mode":      model.Capabilities.PartialMode,
+					"message_name":      model.Capabilities.MessageName,
 					"prompt_cache_key":  model.Capabilities.PromptCacheKey,
 					"safety_identifier": model.Capabilities.SafetyIdentifier,
+				},
+				"usage": map[string]any{
+					"response": model.Capabilities.ResponseUsage,
+					"stream":   model.Capabilities.StreamUsage,
 				},
 				"limits": map[string]int64{
 					"context_tokens": model.Capabilities.ContextTokens,
@@ -56,4 +66,8 @@ func (a *API) models(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+}
+
+func reasoningConfigurable(capabilities registry.ModelCapabilities) bool {
+	return capabilities.ReasoningConfig || capabilities.ReasoningMode == registry.ReasoningToggle || capabilities.ReasoningMode == registry.ReasoningHybrid
 }

@@ -16,6 +16,8 @@ type Candidate struct {
 	CredentialActive     bool
 	Capabilities         []Capability
 	CooldownUntil        time.Time
+	Priority             int32
+	Weight               int32
 }
 
 type Requirements struct {
@@ -58,8 +60,8 @@ type Evaluation struct {
 type SelectionMode string
 
 const (
-	SelectionNone        SelectionMode = "none"
-	SelectionEqualRotate SelectionMode = "equal_rotate"
+	SelectionNone             SelectionMode = "none"
+	SelectionPriorityWeighted SelectionMode = "priority_weighted"
 )
 
 type Decision struct {

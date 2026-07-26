@@ -82,7 +82,7 @@ func TestDocumentationEndpointsExposeStableMachineReadableEntryPoints(t *testing
 	if got := response.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
 		t.Fatalf("llms.txt content type = %q", got)
 	}
-	if body := response.Body.String(); !strings.Contains(body, "https://gateway.example/v1/models") {
+	if body := response.Body.String(); !strings.Contains(body, "https://gateway.example/v1/models") || !strings.Contains(body, "Provider: llm2api") {
 		t.Fatalf("llms.txt did not contain the public models endpoint: %s", body)
 	}
 
@@ -98,6 +98,9 @@ func TestDocumentationEndpointsExposeStableMachineReadableEntryPoints(t *testing
 	}
 	if document["openapi"] != "3.1.0" {
 		t.Fatalf("openapi version = %v", document["openapi"])
+	}
+	if document["x-provider"] != "llm2api" {
+		t.Fatalf("openapi public Provider = %v", document["x-provider"])
 	}
 	paths, ok := document["paths"].(map[string]any)
 	if !ok || paths["/models"] == nil || paths["/chat/completions"] == nil || paths["/responses"] == nil {

@@ -10,6 +10,7 @@ import (
 const (
 	maximumBucketTokens   = int64(1_000_000_000_000)
 	maximumRefillInterval = 24 * time.Hour
+	maximumFixedWindow    = 31 * 24 * time.Hour
 	maximumFullRefill     = 30 * 24 * time.Hour
 	maximumRateDimensions = 16
 )
@@ -112,35 +113,43 @@ func (c *Coordinator) prepareRateLimits(limits []BucketLimit) ([]string, []any, 
 		return nil, nil, fmt.Errorf("%w: at most %d bucket limits are supported", ErrInvalidInput, maximumRateDimensions)
 	}
 	keys := make([]string, len(limits))
-	arguments := make([]any, 0, len(limits)*5)
+	arguments := make([]any, 0, len(limits)*7)
 	seen := make(map[string]struct{}, len(limits))
 	for index, limit := range limits {
 		if err := validateDimension(limit.Dimension); err != nil {
 			return nil, nil, err
 		}
-		if limit.Metric != MetricRequests && limit.Metric != MetricTokens {
+		if limit.Metric != MetricRequests && limit.Metric != MetricTokens && limit.Metric != MetricDailyTokens {
 			return nil, nil, fmt.Errorf("%w: unsupported bucket metric %q", ErrInvalidInput, limit.Metric)
 		}
 		if limit.CapacityTokens < 1 || limit.CapacityTokens > maximumBucketTokens ||
-			limit.RefillTokens < 1 || limit.RefillTokens > maximumBucketTokens ||
 			limit.RequestedTokens < 1 || limit.RequestedTokens > limit.CapacityTokens {
 			return nil, nil, fmt.Errorf("%w: bucket token values are outside supported bounds", ErrInvalidInput)
 		}
-		if limit.RefillInterval < time.Millisecond || limit.RefillInterval > maximumRefillInterval {
-			return nil, nil, fmt.Errorf("%w: refill interval must be between 1ms and 24h", ErrInvalidInput)
+		idleTTLMillis := int64(0)
+		if limit.FixedWindow > 0 || limit.FixedWindowOffset > 0 {
+			if limit.RefillTokens != 0 || limit.RefillInterval != 0 || limit.FixedWindow < time.Millisecond || limit.FixedWindow > maximumFixedWindow ||
+				limit.FixedWindowOffset < 0 || limit.FixedWindowOffset >= limit.FixedWindow {
+				return nil, nil, fmt.Errorf("%w: fixed quota window is invalid", ErrInvalidInput)
+			}
+		} else {
+			if limit.RefillTokens < 1 || limit.RefillTokens > maximumBucketTokens ||
+				limit.RefillInterval < time.Millisecond || limit.RefillInterval > maximumRefillInterval {
+				return nil, nil, fmt.Errorf("%w: refill interval must be between 1ms and 24h", ErrInvalidInput)
+			}
+			fullRefillMillis := math.Ceil(float64(limit.CapacityTokens) * float64(limit.RefillInterval.Milliseconds()) / float64(limit.RefillTokens))
+			if fullRefillMillis > float64(maximumFullRefill.Milliseconds()) {
+				return nil, nil, fmt.Errorf("%w: bucket full-refill duration exceeds 30 days", ErrInvalidInput)
+			}
+			idleTTLMillis = int64(math.Ceil(math.Max(float64(limit.RefillInterval.Milliseconds()), fullRefillMillis*2)))
 		}
-		fullRefillMillis := math.Ceil(float64(limit.CapacityTokens) * float64(limit.RefillInterval.Milliseconds()) / float64(limit.RefillTokens))
-		if fullRefillMillis > float64(maximumFullRefill.Milliseconds()) {
-			return nil, nil, fmt.Errorf("%w: bucket full-refill duration exceeds 30 days", ErrInvalidInput)
-		}
-		idleTTLMillis := int64(math.Ceil(math.Max(float64(limit.RefillInterval.Milliseconds()), fullRefillMillis*2)))
 		key := c.rateKey(limit)
 		if _, exists := seen[key]; exists {
 			return nil, nil, fmt.Errorf("%w: duplicate bucket dimension and metric", ErrInvalidInput)
 		}
 		seen[key] = struct{}{}
 		keys[index] = key
-		arguments = append(arguments, limit.CapacityTokens, limit.RefillTokens, limit.RefillInterval.Milliseconds(), limit.RequestedTokens, idleTTLMillis)
+		arguments = append(arguments, limit.CapacityTokens, limit.RefillTokens, limit.RefillInterval.Milliseconds(), limit.RequestedTokens, idleTTLMillis, limit.FixedWindow.Milliseconds(), limit.FixedWindowOffset.Milliseconds())
 	}
 	return keys, arguments, nil
 }

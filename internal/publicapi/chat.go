@@ -87,7 +87,7 @@ func (a *API) streamChat(w http.ResponseWriter, r *http.Request, command request
 		protocol.WriteError(w, requestID, workflowError)
 		return
 	}
-	_ = protocol.WriteSSE(w, streamErrorEnvelope(workflowError, requestID))
+	_ = protocol.WriteSSE(w, protocol.PresentError(requestID, workflowError))
 	_ = protocol.WriteSSEDone(w)
 	_ = controller.Flush()
 }
@@ -101,10 +101,4 @@ func parseIdempotencyKey(raw string) (*string, *canonical.Error) {
 		return nil, &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "invalid_idempotency_key", Message: "Idempotency-Key is invalid", HTTPStatus: http.StatusBadRequest}
 	}
 	return &value, nil
-}
-
-func streamErrorEnvelope(providerError *canonical.Error, requestID string) map[string]any {
-	return map[string]any{"error": map[string]any{
-		"message": providerError.Message, "type": string(providerError.Kind), "param": providerError.Parameter, "code": providerError.Code,
-	}, "request_id": requestID}
 }

@@ -16,6 +16,7 @@ func agnesCapabilities() Capabilities {
 	return Capabilities{
 		Chat: true, Models: true, Streaming: true, Tools: true,
 		ToolChoiceAuto: true, ToolChoiceNamed: true, ImageInput: true, ReasoningToggle: true,
+		ResponseUsage: true, StreamUsage: true,
 		Parameters: ParameterCapabilities{
 			MaxOutputTokens: integerAtLeast(1), Temperature: numberBetween(0, 2), TopP: numberBetween(0, 1),
 			PresencePenalty: numberBetween(-2, 2), FrequencyPenalty: numberBetween(-2, 2),
@@ -28,7 +29,7 @@ func agnesPolicy(capabilities Capabilities) wirePolicy {
 		kind:         KindAgnes,
 		capabilities: capabilities,
 		chatPath:     "chat/completions", modelsPath: "models", reasoning: reasoningWireAgnes,
-		maxStops: 4,
+		includeStreamUsage: capabilities.StreamUsage, maxStops: 4,
 		classify: classifyHTTPError, retryAfter: standardRetryAfter,
 	}
 }

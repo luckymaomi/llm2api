@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,10 @@ import (
 	"github.com/luckymaomi/llm2api/internal/resilience"
 	"github.com/luckymaomi/llm2api/internal/routing"
 )
+
+func publicCompletionID(requestID uuid.UUID) string {
+	return "chatcmpl_" + strings.ReplaceAll(requestID.String(), "-", "")
+}
 
 type Config struct {
 	MaxResponseBytes           int64
@@ -213,6 +218,9 @@ func validateCapabilities(model Model, request canonical.ChatRequest) *canonical
 	if request.Stream && !model.Capabilities.Streaming {
 		return unsupported("streaming", "stream", "the selected model does not support streaming")
 	}
+	if request.StreamUsage != nil && *request.StreamUsage && !model.Capabilities.StreamUsage {
+		return unsupported("usage.stream", "stream_options.include_usage", "the selected model does not support authoritative stream usage")
+	}
 	if len(request.Tools) > 0 && !model.Capabilities.Tools {
 		return unsupported("tools.function_calling", "tools", "the selected model does not support function tools")
 	}
@@ -234,6 +242,9 @@ func validateCapabilities(model Model, request canonical.ChatRequest) *canonical
 		return unsupported("tools.streaming_tool_calls", "tools", "the selected model does not support streaming tool calls")
 	}
 	for _, message := range request.Messages {
+		if message.Name != "" && !model.Capabilities.MessageName {
+			return unsupported("messages.name", "messages", "the selected model does not support message names")
+		}
 		for _, part := range message.Content {
 			if part.Type == canonical.ContentPartImageURL && !model.Capabilities.ImageInput {
 				return unsupported("vision.image_url", "messages", "the selected model does not support image URL input")
@@ -491,7 +502,7 @@ func (s *Service) selectCandidate(run workflowRun, excluded []routing.CandidateI
 		routeCandidates = append(routeCandidates, routing.Candidate{
 			ID: id, ModelID: routing.ModelID(run.model.ID.String()), ResourcePoolID: routing.ResourcePoolID(run.accepted.ResourcePoolID.String()),
 			ModelPublished: true, CredentialAuthorized: true, CredentialActive: true,
-			Capabilities: required, CooldownUntil: timeOrZero(candidate.CooldownUntil),
+			Capabilities: required, CooldownUntil: timeOrZero(candidate.CooldownUntil), Priority: candidate.Priority, Weight: candidate.Weight,
 		})
 	}
 	decision, err := s.router.Select(routing.Requirements{
@@ -518,7 +529,10 @@ func (s *Service) leaseRequest(claim execution.Claim, run workflowRun, candidate
 		ModelID: run.model.ID, ProviderID: run.model.ProviderID, CredentialID: candidate.ID,
 		ResourcePoolID:  run.accepted.ResourcePoolID,
 		EstimatedTokens: run.estimatedTokens,
-		RPMLimit:        candidate.RPMLimit, TPMLimit: candidate.TPMLimit, Concurrency: candidate.ConcurrencyLimit}
+		RPMLimit:        candidate.RPMLimit, TPMLimit: candidate.TPMLimit, Concurrency: candidate.ConcurrencyLimit,
+		SharedCapacityScope: candidate.SharedCapacityScope, SharedRPMLimit: candidate.SharedRPMLimit,
+		SharedTPMLimit: candidate.SharedTPMLimit, SharedConcurrency: candidate.SharedConcurrencyLimit,
+		SharedDailyTokenLimit: candidate.SharedDailyTokenLimit, SharedDailyResetMinuteUTC: candidate.SharedDailyResetMinuteUTC}
 }
 
 func admissionError(err error) *canonical.Error {
