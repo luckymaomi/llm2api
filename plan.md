@@ -44,6 +44,7 @@
 - [x] 运行定向测试、类型检查和构建
 - [x] 运行真实 Kitty -> LLM2API -> Agnes 流式、工具、取消、错误、终止和脱敏验收
 - [x] 运行 migration up -> reset/down -> up
+- [x] 修复 operations production 验收缺少 `LLM2API_PUBLIC_ORIGIN` 导致的网关启动失败，并增加脱敏启动诊断
 - [ ] 提交、推送、观察 CI；Kitty npm 发布暂按 owner 最新指令不执行
 
 ## 恶劣路径与恢复
@@ -70,3 +71,5 @@
 - `scripts/test-migrations.ps1`：真实 PostgreSQL up -> reset/down -> up 通过。
 - `scripts/test-provider-real.ps1 -KittyRepository ..\kitty -AgnesPoolOnly`：真实 Kitty relay 通过，Kitty eval 报告 `streamingTools=true`、流式 smoke、生产 turn、上下文压力、后台、浏览器、工具修复均通过；账本 `requests=66`、`distinctUpstreamKeys=5`、`authoritativeTokens=529849`。
 - 本机 Zhipu 候选 `/models` 均返回 401，未将 `glm-4.7-flash` 宣称为本次真实 Zhipu 成功调用；其精确 profile 已加入代码目录供动态探测匹配。
+- `scripts/test-operations.ps1`：通过；此前首个失败根因为 production profile 未设置合法 `LLM2API_PUBLIC_ORIGIN`，网关按配置校验退出。
+- `go vet ./...`：通过。

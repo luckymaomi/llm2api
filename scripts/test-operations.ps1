@@ -113,6 +113,7 @@ try {
   $env:LLM2API_VALKEY_ADDRESS = $valkey.Address
   $env:LLM2API_VALKEY_PASSWORD = $password
   $env:LLM2API_HTTP_ADDRESS = "127.0.0.1:$gatewayPort"
+  $env:LLM2API_PUBLIC_ORIGIN = "http://127.0.0.1:$gatewayPort"
   $env:LLM2API_SESSION_PEPPER = "operations-session-pepper-$runID"
   $env:LLM2API_API_KEY_PEPPER = "operations-api-key-pepper-$runID"
   $env:LLM2API_CREDENTIAL_FINGERPRINT_PEPPER = "operations-credential-fingerprint-pepper-$runID"
@@ -127,7 +128,18 @@ try {
   $gateway = Start-Process @gatewayStartArguments
   $deadline = (Get-Date).AddSeconds(20)
   do {
-    if ($gateway.HasExited) { throw "Production gateway exited before readiness." }
+    if ($gateway.HasExited) {
+      $diagnostics = @()
+      foreach ($logPath in @($stdoutPath, $stderrPath)) {
+        if (Test-Path -LiteralPath $logPath) {
+          $content = (Get-Content -LiteralPath $logPath -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
+          $content = [regex]::Replace($content, '(?i)(password|secret|token|key|dsn|postgres(?:ql)?://)[^\s"'']+', '$1=<redacted>')
+          if ($content.Trim()) { $diagnostics += "$(Split-Path -Leaf $logPath):`n$content" }
+        }
+      }
+      $detail = if ($diagnostics.Count -gt 0) { "`n$($diagnostics -join "`n")" } else { "" }
+      throw "Production gateway exited before readiness.$detail"
+    }
     try {
       $ready = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$gatewayPort/health/ready" -TimeoutSec 1
       if ([int]$ready.StatusCode -eq 200) { break }
