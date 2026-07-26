@@ -17,6 +17,7 @@ x-gateway: &gateway
   environment: &gateway-environment
     LLM2API_PROFILE: production
     LLM2API_HTTP_ADDRESS: 0.0.0.0:8080
+    LLM2API_PUBLIC_ORIGIN: ${LLM2API_PUBLIC_ORIGIN:?set the public Gateway API origin}
     LLM2API_DATABASE_URL_FILE: /run/secrets/database_url
     LLM2API_DATABASE_MIGRATE_ON_START: "false"
     LLM2API_DATABASE_MIN_CONNECTIONS: "4"
@@ -27,6 +28,7 @@ x-gateway: &gateway
     LLM2API_ACTIVE_MASTER_KEY_VERSION: ${LLM2API_ACTIVE_MASTER_KEY_VERSION:?set the active master key version}
     LLM2API_SESSION_PEPPER_FILE: /run/secrets/session_pepper
     LLM2API_API_KEY_PEPPER_FILE: /run/secrets/api_key_pepper
+    LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE: /run/secrets/credential_fingerprint_pepper
     LLM2API_COORDINATION_KEY_HASH_SECRET_FILE: /run/secrets/coordination_key_hash_secret
     LLM2API_COOKIE_SECURE: "true"
     LLM2API_TRUSTED_PROXY: ${LLM2API_TRUSTED_PROXY:-172.30.0.10}
@@ -37,6 +39,7 @@ x-gateway: &gateway
     - master_keys
     - session_pepper
     - api_key_pepper
+    - credential_fingerprint_pepper
     - coordination_key_hash_secret
   healthcheck:
     test: ["CMD", "/llm2api-healthcheck"]
@@ -198,5 +201,7 @@ secrets:
     file: ${LLM2API_SESSION_PEPPER_FILE:?set the session pepper file}
   api_key_pepper:
     file: ${LLM2API_API_KEY_PEPPER_FILE:?set the API key pepper file}
+  credential_fingerprint_pepper:
+    file: ${LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE:?set the credential fingerprint pepper file}
   coordination_key_hash_secret:
     file: ${LLM2API_COORDINATION_KEY_HASH_SECRET_FILE:?set the coordination hash secret file}

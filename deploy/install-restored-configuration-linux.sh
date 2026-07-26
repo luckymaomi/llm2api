@@ -114,6 +114,7 @@ declare -A replacements=(
   [LLM2API_MASTER_KEYS_FILE]="$target_configuration/secrets/master-keys"
   [LLM2API_SESSION_PEPPER_FILE]="$target_configuration/secrets/session-pepper"
   [LLM2API_API_KEY_PEPPER_FILE]="$target_configuration/secrets/api-key-pepper"
+  [LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE]="$target_configuration/secrets/credential-fingerprint-pepper"
   [LLM2API_COORDINATION_KEY_HASH_SECRET_FILE]="$target_configuration/secrets/coordination-secret"
 )
 declare -A seen_keys=()
@@ -151,7 +152,7 @@ while IFS= read -r line || [[ -n $line ]]; do
   [[ -z ${seen_keys[$key]+x} ]] || { echo "restored deployment environment contains a duplicate key" >&2; exit 1; }
   seen_keys[$key]=true
   case "$key" in
-    LLM2API_DATABASE_URL|LLM2API_VALKEY_PASSWORD|LLM2API_MASTER_KEYS|LLM2API_SESSION_PEPPER|LLM2API_API_KEY_PEPPER|LLM2API_COORDINATION_KEY_HASH_SECRET)
+    LLM2API_DATABASE_URL|LLM2API_VALKEY_PASSWORD|LLM2API_MASTER_KEYS|LLM2API_SESSION_PEPPER|LLM2API_API_KEY_PEPPER|LLM2API_CREDENTIAL_FINGERPRINT_PEPPER|LLM2API_COORDINATION_KEY_HASH_SECRET)
       echo "restored deployment environment contains an inline secret" >&2
       exit 1
       ;;
@@ -169,7 +170,7 @@ done
 
 install -o 0 -g 0 -m 0400 "$source_configuration/secrets/postgres-password" "$staging_configuration/secrets/postgres-password"
 install -o 65532 -g 65532 -m 0400 "$database_url_file" "$staging_configuration/secrets/database-url"
-for secret_name in valkey-password master-keys session-pepper api-key-pepper coordination-secret; do
+for secret_name in valkey-password master-keys session-pepper api-key-pepper credential-fingerprint-pepper coordination-secret; do
   install -o 65532 -g 65532 -m 0400 "$source_configuration/secrets/$secret_name" "$staging_configuration/secrets/$secret_name"
 done
 install -o 999 -g 1000 -m 0400 "$source_configuration/secrets/valkey-acl" "$staging_configuration/secrets/valkey-acl"
@@ -181,7 +182,7 @@ chmod 0640 "$staging_configuration/deployment.env"
 verify_runtime_configuration_tree "$staging_configuration"
 (
   unset LLM2API_POSTGRES_PASSWORD LLM2API_DATABASE_URL LLM2API_VALKEY_PASSWORD \
-    LLM2API_MASTER_KEYS LLM2API_SESSION_PEPPER LLM2API_API_KEY_PEPPER \
+    LLM2API_MASTER_KEYS LLM2API_SESSION_PEPPER LLM2API_API_KEY_PEPPER LLM2API_CREDENTIAL_FINGERPRINT_PEPPER \
     LLM2API_COORDINATION_KEY_HASH_SECRET
   load_llm2api_environment "$staging_configuration/deployment.env"
   require_configuration_bindings "$target_configuration"
@@ -192,6 +193,7 @@ verify_runtime_configuration_tree "$staging_configuration"
   export LLM2API_MASTER_KEYS_FILE="$staging_configuration/secrets/master-keys"
   export LLM2API_SESSION_PEPPER_FILE="$staging_configuration/secrets/session-pepper"
   export LLM2API_API_KEY_PEPPER_FILE="$staging_configuration/secrets/api-key-pepper"
+  export LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE="$staging_configuration/secrets/credential-fingerprint-pepper"
   export LLM2API_COORDINATION_KEY_HASH_SECRET_FILE="$staging_configuration/secrets/coordination-secret"
   require_file_secrets
   require_immutable_gateway_image

@@ -19,6 +19,7 @@ type Definition struct {
 	DisplayName string
 	Contract    ContractInfo
 	Presets     []ProviderPreset
+	Models      []ModelProfile
 	Build       AdapterBuilder
 }
 
@@ -36,20 +37,21 @@ const (
 )
 
 type ContractInfo struct {
-	ReferenceURL      string
-	ContractSnapshot  string
-	VerifiedAt        string
-	ReferenceProvider string
-	VerifiedModels    []string
-	LiveCapabilities  []string
-	Status            VerificationStatus
+	ReferenceURL      string             `json:"reference_url"`
+	ContractSnapshot  string             `json:"contract_snapshot"`
+	VerifiedAt        string             `json:"verified_at"`
+	ReferenceProvider string             `json:"reference_provider,omitempty"`
+	VerifiedModels    []string           `json:"verified_models"`
+	LiveCapabilities  []string           `json:"live_capabilities"`
+	Status            VerificationStatus `json:"status"`
 }
 
 type Catalog struct {
-	definitions map[Kind]Definition
-	kinds       []KindInfo
-	presets     []ProviderPreset
-	presetByID  map[string]ProviderPreset
+	definitions  map[Kind]Definition
+	kinds        []KindInfo
+	presets      []ProviderPreset
+	presetByID   map[string]ProviderPreset
+	modelsByKind map[Kind][]ModelProfile
 }
 
 func NewCatalog(definitions []Definition) (*Catalog, error) {
@@ -57,9 +59,10 @@ func NewCatalog(definitions []Definition) (*Catalog, error) {
 		return nil, fmt.Errorf("at least one Provider definition is required")
 	}
 	catalog := &Catalog{
-		definitions: make(map[Kind]Definition, len(definitions)),
-		kinds:       make([]KindInfo, 0, len(definitions)),
-		presetByID:  make(map[string]ProviderPreset),
+		definitions:  make(map[Kind]Definition, len(definitions)),
+		kinds:        make([]KindInfo, 0, len(definitions)),
+		presetByID:   make(map[string]ProviderPreset),
+		modelsByKind: make(map[Kind][]ModelProfile, len(definitions)),
 	}
 	for _, definition := range definitions {
 		if definition.Kind == "" || definition.DisplayName == "" || definition.Build == nil {
@@ -70,6 +73,9 @@ func NewCatalog(definitions []Definition) (*Catalog, error) {
 		}
 		if _, exists := catalog.definitions[definition.Kind]; exists {
 			return nil, fmt.Errorf("Provider kind %q is registered more than once", definition.Kind)
+		}
+		if err := validateModelProfiles(definition.Models); err != nil {
+			return nil, fmt.Errorf("Provider kind %q model profiles: %w", definition.Kind, err)
 		}
 		for _, preset := range definition.Presets {
 			preset.Kind = definition.Kind
@@ -84,13 +90,40 @@ func NewCatalog(definitions []Definition) (*Catalog, error) {
 			catalog.presets = append(catalog.presets, preset)
 		}
 		definition.Presets = cloneProviderPresets(definition.Presets)
+		definition.Models = cloneModelProfiles(definition.Models)
 		definition.Contract = cloneContractInfo(definition.Contract)
 		catalog.definitions[definition.Kind] = definition
+		catalog.modelsByKind[definition.Kind] = cloneModelProfiles(definition.Models)
 		catalog.kinds = append(catalog.kinds, KindInfo{Kind: definition.Kind, DisplayName: definition.DisplayName, Contract: cloneContractInfo(definition.Contract)})
 	}
 	sort.Slice(catalog.kinds, func(i, j int) bool { return catalog.kinds[i].Kind < catalog.kinds[j].Kind })
 	sort.Slice(catalog.presets, func(i, j int) bool { return catalog.presets[i].ID < catalog.presets[j].ID })
 	return catalog, nil
+}
+
+// ModelCapabilities returns the code-verified capability profile for an
+// upstream model. Unknown upstream names deliberately have no profile: the
+// gateway must not invent a capability contract from a provider prefix alone.
+func (c *Catalog) ModelCapabilities(kind Kind, upstreamName string) (ModelProfile, bool) {
+	if c == nil {
+		return ModelProfile{}, false
+	}
+	for _, profile := range c.modelsByKind[kind] {
+		if profile.UpstreamName == upstreamName {
+			return cloneModelProfile(profile), true
+		}
+	}
+	return ModelProfile{}, false
+}
+
+// ModelProfiles returns the code-owned, verified model directory for one
+// Provider. It is distinct from models discovered under a particular API Key:
+// a Key may have access to only a subset of this directory.
+func (c *Catalog) ModelProfiles(kind Kind) []ModelProfile {
+	if c == nil {
+		return nil
+	}
+	return cloneModelProfiles(c.modelsByKind[kind])
 }
 
 func (c *Catalog) Build(kind Kind, options AdapterOptions) (Adapter, error) {
@@ -163,7 +196,26 @@ func cloneContractInfo(info ContractInfo) ContractInfo {
 
 var defaultCatalog = mustCatalog([]Definition{
 	{
-		Kind: KindOpenAICompatible, DisplayName: "OpenAI-compatible",
+		Kind: KindKimi, DisplayName: "Kimi",
+		Contract: ContractInfo{
+			ReferenceURL: "https://platform.kimi.com/docs/api/chat", ContractSnapshot: "2026-07-26",
+			VerifiedAt: "2026-07-26", ReferenceProvider: "Moonshot AI", VerifiedModels: []string{"kimi-k3", "kimi-k2.6"},
+			LiveCapabilities: []string{"models", "chat", "stream", "tools", "streaming_tools", "reasoning", "vision", "structured_output", "partial_mode", "prompt_cache", "usage", "balance_endpoint"}, Status: VerificationVerified,
+		},
+		Presets: []ProviderPreset{{
+			ID: "kimi", Slug: "kimi", Name: "Kimi", BaseURL: "https://api.moonshot.cn/v1",
+			SourceURL: "https://platform.kimi.com/docs/api/overview", VerifiedAt: "2026-07-26",
+		}},
+		Models: []ModelProfile{
+			kimiK3Model(), kimiK27CodeModel("kimi-k2.7-code"), kimiK27CodeModel("kimi-k2.7-code-highspeed"),
+			kimiK26Model(), kimiK25Model(),
+		},
+		Build: func(options AdapterOptions) (Adapter, error) {
+			return NewKimiWithCapabilities(options.BaseURL, options.Capabilities)
+		},
+	},
+	{
+		Kind: KindSiliconFlow, DisplayName: "硅基流动",
 		Contract: ContractInfo{
 			ReferenceURL: "https://api-docs.siliconflow.cn/docs/api/chat-completions-post", ContractSnapshot: "2026-07-22",
 			VerifiedAt: "2026-07-22", ReferenceProvider: "SiliconFlow", VerifiedModels: []string{"Qwen/Qwen3.5-9B"},
@@ -173,8 +225,12 @@ var defaultCatalog = mustCatalog([]Definition{
 			ID: "siliconflow", Slug: "siliconflow", Name: "硅基流动", BaseURL: "https://api.siliconflow.cn/v1",
 			SourceURL: "https://api-docs.siliconflow.cn/docs/api/chat-completions-post", VerifiedAt: "2026-07-22",
 		}},
+		Models: []ModelProfile{
+			siliconFlowModel("Qwen/Qwen3.5-9B", 0, 0, true),
+			siliconFlowModel("Pro/zai-org/GLM-4.7", 0, 0, true),
+		},
 		Build: func(options AdapterOptions) (Adapter, error) {
-			return NewOpenAICompatible(OpenAICompatibleOptions{BaseURL: options.BaseURL, Capabilities: options.Capabilities})
+			return NewSiliconFlow(SiliconFlowOptions{BaseURL: options.BaseURL, Capabilities: options.Capabilities})
 		},
 	},
 	{
@@ -188,7 +244,19 @@ var defaultCatalog = mustCatalog([]Definition{
 			ID: "zhipu", Slug: "zhipu", Name: "智谱 GLM", BaseURL: "https://open.bigmodel.cn/api/paas/v4",
 			SourceURL: "https://docs.bigmodel.cn/cn/guide/develop/http/introduction", VerifiedAt: "2026-07-22",
 		}},
-		Build: func(options AdapterOptions) (Adapter, error) { return NewZhipuWithBaseURL(options.BaseURL) },
+		Models: []ModelProfile{
+			zhipuTextModel("glm-5.2", 1_000_000, 131_072, true, true),
+			zhipuTextModel("glm-5.1", 0, 0, false, true),
+			zhipuTextModel("glm-5", 0, 0, false, true),
+			zhipuTextModel("glm-5-turbo", 0, 0, false, false),
+			zhipuTextModel("glm-4.7", 0, 0, false, true),
+			zhipuTextModel("glm-4.6", 0, 0, false, false),
+			zhipuTextModel("glm-4.5", 0, 0, false, false),
+			zhipuVisionModel("glm-5v-turbo", 200_000, 131_072),
+		},
+		Build: func(options AdapterOptions) (Adapter, error) {
+			return NewZhipuWithCapabilities(options.BaseURL, options.Capabilities)
+		},
 	},
 	{
 		Kind: KindAgnes, DisplayName: "Agnes",
@@ -201,20 +269,13 @@ var defaultCatalog = mustCatalog([]Definition{
 			ID: "agnes", Slug: "agnes", Name: "Agnes", BaseURL: "https://apihub.agnes-ai.com/v1",
 			SourceURL: "https://apihub.agnes-ai.com/v1", VerifiedAt: "2026-07-22",
 		}},
-		Build: func(options AdapterOptions) (Adapter, error) { return NewAgnesWithBaseURL(options.BaseURL) },
-	},
-	{
-		Kind: KindGemini, DisplayName: "Google Gemini",
-		Contract: ContractInfo{
-			ReferenceURL: "https://ai.google.dev/gemini-api/docs/openai", ContractSnapshot: "2026-07-22",
-			VerifiedAt: "2026-07-22", VerifiedModels: []string{"gemini-3.5-flash"},
-			LiveCapabilities: []string{"models", "chat", "tools", "reasoning", "usage", "retryable_error", "thought_signature", "signed_tool_replay"}, Status: VerificationVerified,
+		Models: []ModelProfile{
+			agnesTextModel("agnes-1.5-flash", 256_000, 65_536, false),
+			agnesTextModel("agnes-2.0-flash", 512_000, 65_536, true),
 		},
-		Presets: []ProviderPreset{{
-			ID: "gemini", Slug: "gemini", Name: "Google Gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
-			SourceURL: "https://ai.google.dev/gemini-api/docs/openai", VerifiedAt: "2026-07-22",
-		}},
-		Build: func(options AdapterOptions) (Adapter, error) { return NewGeminiWithBaseURL(options.BaseURL) },
+		Build: func(options AdapterOptions) (Adapter, error) {
+			return NewAgnesWithCapabilities(options.BaseURL, options.Capabilities)
+		},
 	},
 })
 

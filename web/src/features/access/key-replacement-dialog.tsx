@@ -1,8 +1,8 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy } from 'lucide-react'
 import { useState } from 'react'
 
-import { accessApi, type CreatedGatewayKey, type GatewayKey } from '@/api'
+import { accessApi, gatewayDocumentationApi, type CreatedGatewayKey, type GatewayKey } from '@/api'
 import { Button } from '@/components/ui/button'
 import { DialogFrame } from '@/components/ui/dialog'
 import { FormProblem } from '@/features/auth/form-problem'
@@ -26,7 +26,11 @@ export function KeyReplacementDialog({ gatewayKey, onOpenChange }: KeyReplacemen
       await queryClient.invalidateQueries({ queryKey: ['gateway-keys'] })
     },
   })
-  const gatewayBaseURL = `${window.location.origin}/v1`
+  const gatewayDocumentation = useQuery({
+    queryKey: ['gateway-documentation'],
+    queryFn: ({ signal }) => gatewayDocumentationApi.get(signal),
+  })
+  const gatewayBaseURL = gatewayDocumentation.data?.baseURL
 
   function close(): void {
     if (mutation.isPending) return
@@ -80,7 +84,9 @@ export function KeyReplacementDialog({ gatewayKey, onOpenChange }: KeyReplacemen
             <Button
               variant="secondary"
               icon={copied ? <Check size={16} /> : <Copy size={16} />}
+              disabled={!gatewayBaseURL}
               onClick={async () => {
+                if (!gatewayBaseURL) return
                 try {
                   await navigator.clipboard.writeText(
                     `OPENAI_BASE_URL=${gatewayBaseURL}\nOPENAI_API_KEY=${created.secret}`,
@@ -104,7 +110,7 @@ export function KeyReplacementDialog({ gatewayKey, onOpenChange }: KeyReplacemen
             <div>
               <dt>Base URL</dt>
               <dd>
-                <code>{gatewayBaseURL}</code>
+                <code>{gatewayBaseURL ?? '正在读取 Gateway 地址'}</code>
               </dd>
             </div>
             <div>
@@ -133,7 +139,7 @@ export function KeyReplacementDialog({ gatewayKey, onOpenChange }: KeyReplacemen
               <dd>{gatewayKey?.routes.map(routeLabel).join(', ')}</dd>
             </div>
           </dl>
-          <FormProblem error={mutation.error} />
+          <FormProblem error={mutation.error ?? gatewayDocumentation.error} />
         </>
       )}
     </DialogFrame>

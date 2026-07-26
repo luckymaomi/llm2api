@@ -171,6 +171,7 @@ func (s *Service) streamAttempt(ctx context.Context, run workflowRun, candidate 
 		circuitPermit.Complete(resilience.PermitReleased)
 		return state.committed, storageError("usage_completion_failed", err)
 	}
+	s.reconcileLease(context.WithoutCancel(ctx), lease, run.estimatedTokens, usage)
 	circuitPermit.Complete(resilience.PermitSucceeded)
 	if err := sink(run.accepted.RequestID, state.doneEvent); err != nil {
 		return true, &canonical.Error{Kind: canonical.ErrorStreamInterrupted, Code: "client_stream_interrupted", Message: "client stopped receiving the stream completion", Cause: err}

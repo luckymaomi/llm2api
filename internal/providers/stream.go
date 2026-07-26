@@ -193,13 +193,6 @@ func (p *chatStreamParser) parseStreamChoice(choice wireStreamChoice) ([]canonic
 				FunctionName: toolCall.Function.Name, ArgumentsFragment: toolCall.Function.Arguments,
 			},
 		}))
-		if toolCall.ExtraContent != nil && p.adapter.policy.decodeToolCallMetadata != nil {
-			metadata, err := p.adapter.policy.decodeToolCallMetadata(wireToolCall{ExtraContent: toolCall.ExtraContent})
-			if err != nil {
-				return nil, err
-			}
-			events[len(events)-1].ToolCallDelta.ProviderMetadata = metadata
-		}
 	}
 	if choice.FinishReason != nil {
 		finishReason, err := p.adapter.parseFinishReason(*choice.FinishReason)

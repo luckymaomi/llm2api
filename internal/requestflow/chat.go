@@ -146,6 +146,7 @@ func (s *Service) nonStreamAttempt(ctx context.Context, run workflowRun, candida
 		circuitPermit.Complete(resilience.PermitReleased)
 		return ChatResult{}, storageError("usage_completion_failed", err)
 	}
+	s.reconcileLease(context.WithoutCancel(ctx), lease, run.estimatedTokens, usage)
 	circuitPermit.Complete(resilience.PermitSucceeded)
 	if resultPersistenceError != nil {
 		return ChatResult{}, storageError("result_persistence_failed", resultPersistenceError)
@@ -237,6 +238,19 @@ func (s *Service) ensureClientRetryAfter(providerError *canonical.Error) {
 		retryAt := s.clock.Now().UTC().Add(s.config.Circuit.OpenDuration)
 		providerError.RetryAfter = &canonical.RetryAfter{At: &retryAt}
 	}
+}
+
+func (s *Service) reconcileLease(ctx context.Context, lease Lease, estimatedTokens int64, usage Usage) {
+	if lease == nil || usage.Source != canonical.UsageAuthoritative || estimatedTokens < 1 {
+		return
+	}
+	actualTokens := usage.InputTokens + usage.OutputTokens
+	if actualTokens < 0 || actualTokens >= estimatedTokens {
+		return
+	}
+	// The response and ledger are already durable. A failed coordinator refund
+	// leaves capacity conservatively reserved and must not change the response.
+	_ = lease.Reconcile(ctx, actualTokens)
 }
 
 func responseUsage(request canonical.ChatRequest, response canonical.ChatResponse) Usage {

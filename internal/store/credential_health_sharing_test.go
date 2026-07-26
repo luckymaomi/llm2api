@@ -106,8 +106,8 @@ VALUES ($1, $2, $3, 'Shared Health Pool')`, resourcePoolID, providerID, "shared-
 		t.Fatalf("insert shared health pool: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO provider_credentials
-(id, resource_pool_id, name, encrypted_secret)
-VALUES ($1, $2, 'Shared Health Key', $3)`, credentialID, resourcePoolID, []byte("encrypted-fixture")); err != nil {
+(id, resource_pool_id, name, encrypted_secret, secret_fingerprint)
+VALUES ($1, $2, 'Shared Health Key', $3, $4)`, credentialID, resourcePoolID, []byte("encrypted-fixture"), credentialFixtureFingerprint(t, credentialID)); err != nil {
 		t.Fatalf("insert shared health credential: %v", err)
 	}
 	t.Cleanup(func() {

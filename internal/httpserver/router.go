@@ -39,7 +39,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, readiness Readiness, regi
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 	router.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
-	documentationRoutes(router)
+	documentationRoutes(router, cfg.HTTP.PublicOrigin)
 	if controlAPI != nil {
 		router.Mount("/api", controlAPI)
 	}

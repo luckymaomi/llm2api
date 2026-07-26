@@ -101,7 +101,7 @@ func (f *fixture) providerRoutes() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"object": "list",
-			"data":   []any{map[string]any{"id": "fixture-chat", "object": "model"}},
+			"data":   []any{map[string]any{"id": "Qwen/Qwen3.5-9B", "object": "model"}},
 		})
 	})
 	router.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +111,7 @@ func (f *fixture) providerRoutes() http.Handler {
 		}
 		body := http.MaxBytesReader(w, r.Body, 1<<20)
 		payload, err := readAll(body)
-		if err != nil || !bytes.Contains(payload, []byte(`"model":"fixture-chat"`)) {
+		if err != nil || !bytes.Contains(payload, []byte(`"model":"Qwen/Qwen3.5-9B"`)) {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
@@ -185,7 +185,7 @@ func (f *fixture) providerRoutes() http.Handler {
 		f.completed.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "chatcmpl-fixture", "model": "fixture-chat", "created": time.Now().Unix(),
+			"id": "chatcmpl-fixture", "model": "Qwen/Qwen3.5-9B", "created": time.Now().Unix(),
 			"choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": "fixture response"}, "finish_reason": "stop"}},
 			"usage":   map[string]any{"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
 		})

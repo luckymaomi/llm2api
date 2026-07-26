@@ -11,6 +11,7 @@ import (
 	"github.com/luckymaomi/llm2api/internal/canonical"
 	"github.com/luckymaomi/llm2api/internal/config"
 	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/providers"
 	"github.com/luckymaomi/llm2api/internal/registry"
 	"github.com/luckymaomi/llm2api/internal/requestflow"
 	"github.com/luckymaomi/llm2api/internal/subscription"
@@ -38,6 +39,7 @@ type identityService interface {
 	RevokeUserSessions(context.Context, identity.Principal, uuid.UUID, string) (identity.SessionRevocation, error)
 	CreateGatewayKey(context.Context, identity.Principal, uuid.UUID, string, []identity.GatewayKeyRoute, *time.Time, identity.MutationRequest) (identity.GatewayKey, error)
 	ReplaceGatewayKey(context.Context, identity.Principal, uuid.UUID, identity.MutationRequest) (identity.GatewayKey, error)
+	RevealGatewayKey(context.Context, identity.Principal, uuid.UUID) (string, error)
 	ListGatewayKeys(context.Context, identity.Principal, uuid.UUID) ([]identity.GatewayKey, error)
 	DeleteGatewayKey(context.Context, identity.Principal, uuid.UUID) error
 }
@@ -56,7 +58,9 @@ type registryService interface {
 	SetCredentialStatus(context.Context, identity.Principal, uuid.UUID, registry.CredentialStatus, time.Time, registry.MutationRequest) (registry.Credential, error)
 	RetireCredential(context.Context, identity.Principal, uuid.UUID, time.Time, registry.MutationRequest) (registry.Credential, error)
 	RefreshCredentialModels(context.Context, identity.Principal, uuid.UUID, time.Time, registry.MutationRequest) (registry.ModelDiscoveryExecution, registry.Credential, error)
+	RefreshAllCredentialModels(context.Context, identity.Principal, registry.MutationRequest) (registry.CredentialModelProbeBatch, error)
 	ProbeCredential(context.Context, identity.Principal, uuid.UUID, uuid.UUID, string) (registry.CredentialProbeExecution, registry.Credential, error)
+	FetchCredentialUpstreamStatus(context.Context, identity.Principal, uuid.UUID, string) (providers.UpstreamStatusObservation, registry.Credential, error)
 	ListCredentials(context.Context, identity.Principal, bool) ([]registry.Credential, error)
 }
 
@@ -80,17 +84,22 @@ type gatewayKeyTestWorkflow interface {
 	Stream(context.Context, requestflow.ChatCommand, requestflow.StreamSink) *canonical.Error
 }
 
+type credentialCapacityInspector interface {
+	InspectCredential(context.Context, requestflow.CredentialCapacityInput) (requestflow.CredentialCapacity, error)
+}
+
 type API struct {
-	identity       identityService
-	registry       registryService
-	subscriptions  subscriptionService
-	loginGuard     LoginGuard
-	config         config.Security
-	logger         *slog.Logger
-	usage          *UsageAPI
-	gatewayKeyTest gatewayKeyTestWorkflow
-	siteProfile    *SiteProfileAPI
-	operations     *OperationsAPI
+	identity           identityService
+	registry           registryService
+	subscriptions      subscriptionService
+	loginGuard         LoginGuard
+	config             config.Security
+	logger             *slog.Logger
+	usage              *UsageAPI
+	gatewayKeyTest     gatewayKeyTestWorkflow
+	credentialCapacity credentialCapacityInspector
+	siteProfile        *SiteProfileAPI
+	operations         *OperationsAPI
 }
 
 func New(identity identityService, registry registryService, subscriptions subscriptionService, loginGuard LoginGuard, securityConfig config.Security, logger *slog.Logger) *API {
@@ -102,6 +111,11 @@ func (a *API) WithOperationsAPI(value *OperationsAPI) *API   { a.operations = va
 func (a *API) WithUsageAPI(value *UsageAPI) *API             { a.usage = value; return a }
 func (a *API) WithGatewayKeyTestWorkflow(value gatewayKeyTestWorkflow) *API {
 	a.gatewayKeyTest = value
+	return a
+}
+
+func (a *API) WithCredentialCapacityInspector(value credentialCapacityInspector) *API {
+	a.credentialCapacity = value
 	return a
 }
 
@@ -149,6 +163,7 @@ func (a *API) registerAccessRoutes(router chi.Router) {
 	router.With(a.requireAdministrator, a.requireCSRF).Post("/members/{userID}/password", a.resetMemberPassword)
 	router.Get("/keys", a.listKeys)
 	router.With(a.requireCSRF).Post("/keys", a.createKey)
+	router.With(a.requireCSRF).Post("/keys/{keyID}/reveal", a.revealKey)
 	router.With(a.requireCSRF).Delete("/keys/{keyID}", a.deleteKey)
 	router.With(a.requireCSRF).Post("/keys/{keyID}/replacement", a.replaceKey)
 }
@@ -163,11 +178,13 @@ func (a *API) registerRegistryRoutes(router chi.Router) {
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Put("/resource-pools/{resourcePoolID}/status", a.setResourcePoolStatus)
 	router.With(a.requireProviderAdministrator).Get("/credentials", a.listCredentials)
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Post("/credentials/batch", a.importCredentials)
+	router.With(a.requireProviderAdministrator, a.requireCSRF).Post("/credentials/probe", a.probeAllCredentials)
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Put("/credentials/{credentialID}", a.updateCredential)
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Put("/credentials/{credentialID}/status", a.setCredentialStatus)
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Delete("/credentials/{credentialID}", a.retireCredential)
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Post("/credentials/{credentialID}/probe", a.probeCredential)
 	router.With(a.requireProviderAdministrator, a.requireCSRF).Post("/credentials/{credentialID}/deep-test", a.deepTestCredential)
+	router.With(a.requireProviderAdministrator, a.requireCSRF).Post("/credentials/{credentialID}/upstream-status", a.fetchCredentialUpstreamStatus)
 }
 
 func (a *API) registerSubscriptionRoutes(router chi.Router) {

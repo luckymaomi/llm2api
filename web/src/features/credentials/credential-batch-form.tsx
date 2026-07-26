@@ -142,11 +142,12 @@ function parseLines(value: string): Array<{ name: string; secret: string }> {
     .filter((item) => item.secret.length > 0)
 }
 
-const batchStatus = { created: '已创建', skipped: '已跳过', rejected: '已拒绝' } as const
+const batchStatus = { created: '已创建', duplicate: '已存在', rejected: '已拒绝' } as const
 
 function batchErrorLabel(kind: string): string {
   if (kind === 'invalid_input') return '名称或 Key 不符合要求'
-  if (kind === 'conflict') return 'Key 已存在或数据发生冲突'
+  if (kind === 'credential_already_managed') return '这把上游 API Key 已在 Gateway 中管理'
+  if (kind === 'conflict') return '数据发生冲突，请重试'
   if (kind === 'model_discovery_failed') return '无法读取这把 Key 的模型列表'
   if (kind === 'persistence_failed') return '保存失败，请重试'
   return '未能添加'

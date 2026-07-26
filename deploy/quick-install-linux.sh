@@ -85,6 +85,7 @@ valkey_password=$(openssl rand -hex 24)
 master_key=$(openssl rand -base64 32 | tr -d '\n')
 session_pepper=$(openssl rand -hex 32)
 api_key_pepper=$(openssl rand -hex 32)
+credential_fingerprint_pepper=$(openssl rand -hex 32)
 coordination_secret=$(openssl rand -hex 32)
 
 printf '%s' "$postgres_password" > "$configuration_root/secrets/postgres-password"
@@ -94,6 +95,7 @@ printf 'user default on >%s ~* &* +@all' "$valkey_password" > "$configuration_ro
 printf '1:%s' "$master_key" > "$configuration_root/secrets/master-keys"
 printf '%s' "$session_pepper" > "$configuration_root/secrets/session-pepper"
 printf '%s' "$api_key_pepper" > "$configuration_root/secrets/api-key-pepper"
+printf '%s' "$credential_fingerprint_pepper" > "$configuration_root/secrets/credential-fingerprint-pepper"
 printf '%s' "$coordination_secret" > "$configuration_root/secrets/coordination-secret"
 
 cat > "$configuration_root/deployment.env" <<EOF
@@ -103,6 +105,7 @@ LLM2API_VALKEY_IMAGE=$valkey_image
 LLM2API_CADDY_IMAGE=$caddy_image
 LLM2API_ACTIVE_MASTER_KEY_VERSION=1
 LLM2API_SITE_ADDRESS=$domain
+LLM2API_PUBLIC_ORIGIN=https://$domain
 LLM2API_ACME_EMAIL=$acme_email
 LLM2API_POSTGRES_DB=llm2api
 LLM2API_POSTGRES_USER=llm2api
@@ -113,12 +116,14 @@ LLM2API_VALKEY_ACL_FILE=$configuration_root/secrets/valkey-acl
 LLM2API_MASTER_KEYS_FILE=$configuration_root/secrets/master-keys
 LLM2API_SESSION_PEPPER_FILE=$configuration_root/secrets/session-pepper
 LLM2API_API_KEY_PEPPER_FILE=$configuration_root/secrets/api-key-pepper
+LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE=$configuration_root/secrets/credential-fingerprint-pepper
 LLM2API_COORDINATION_KEY_HASH_SECRET_FILE=$configuration_root/secrets/coordination-secret
 EOF
 
 chown 65532:65532 "$configuration_root/secrets/database-url" "$configuration_root/secrets/valkey-password" \
   "$configuration_root/secrets/master-keys" "$configuration_root/secrets/session-pepper" \
-  "$configuration_root/secrets/api-key-pepper" "$configuration_root/secrets/coordination-secret"
+  "$configuration_root/secrets/api-key-pepper" "$configuration_root/secrets/credential-fingerprint-pepper" \
+  "$configuration_root/secrets/coordination-secret"
 chown 999:1000 "$configuration_root/secrets/valkey-acl"
 chown root:root "$configuration_root/secrets/postgres-password" "$configuration_root/deployment.env"
 chmod 0400 "$configuration_root/secrets/"*

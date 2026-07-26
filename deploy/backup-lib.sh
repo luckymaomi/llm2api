@@ -14,6 +14,7 @@ declare -ar LLM2API_BACKUP_CONFIGURATION_FILES=(
   secrets/master-keys
   secrets/session-pepper
   secrets/api-key-pepper
+  secrets/credential-fingerprint-pepper
   secrets/coordination-secret
 )
 
@@ -200,6 +201,7 @@ verify_configuration_tree_contract() {
         [secrets/master-keys]='file:65532:65532:400'
         [secrets/session-pepper]='file:65532:65532:400'
         [secrets/api-key-pepper]='file:65532:65532:400'
+        [secrets/credential-fingerprint-pepper]='file:65532:65532:400'
         [secrets/coordination-secret]='file:65532:65532:400'
       )
       ;;
@@ -215,6 +217,7 @@ verify_configuration_tree_contract() {
         [secrets/master-keys]='file:0:0:400'
         [secrets/session-pepper]='file:0:0:400'
         [secrets/api-key-pepper]='file:0:0:400'
+        [secrets/credential-fingerprint-pepper]='file:0:0:400'
         [secrets/coordination-secret]='file:0:0:400'
       )
       ;;
@@ -269,6 +272,7 @@ LLM2API_VALKEY_ACL_FILE:secrets/valkey-acl
 LLM2API_MASTER_KEYS_FILE:secrets/master-keys
 LLM2API_SESSION_PEPPER_FILE:secrets/session-pepper
 LLM2API_API_KEY_PEPPER_FILE:secrets/api-key-pepper
+LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE:secrets/credential-fingerprint-pepper
 LLM2API_COORDINATION_KEY_HASH_SECRET_FILE:secrets/coordination-secret
 EOF
 }
@@ -306,6 +310,7 @@ verify_backup_payload() {
     [configuration/secrets/master-keys]=file
     [configuration/secrets/session-pepper]=file
     [configuration/secrets/api-key-pepper]=file
+    [configuration/secrets/credential-fingerprint-pepper]=file
     [configuration/secrets/coordination-secret]=file
     [postgres.dump]=file
     [postgres.dump.sha256]=file

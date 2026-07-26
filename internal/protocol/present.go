@@ -12,10 +12,13 @@ import (
 
 type ErrorEnvelope struct {
 	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Param   string `json:"param,omitempty"`
-		Code    string `json:"code"`
+		Message    string `json:"message"`
+		Type       string `json:"type"`
+		Param      string `json:"param,omitempty"`
+		Code       string `json:"code"`
+		Model      string `json:"model,omitempty"`
+		Provider   string `json:"provider,omitempty"`
+		Capability string `json:"capability,omitempty"`
 	} `json:"error"`
 	RequestID string `json:"request_id,omitempty"`
 }
@@ -44,7 +47,6 @@ func PresentStreamEvent(event canonical.StreamEvent) map[string]any {
 	case canonical.StreamToolCallDelta:
 		if event.ToolCallDelta != nil {
 			call := map[string]any{"index": event.ToolCallDelta.Index, "id": event.ToolCallDelta.ID, "type": event.ToolCallDelta.Type, "function": map[string]any{"name": event.ToolCallDelta.FunctionName, "arguments": event.ToolCallDelta.ArgumentsFragment}}
-			presentToolCallMetadata(call, event.ToolCallDelta.ProviderMetadata)
 			delta["tool_calls"] = []map[string]any{call}
 		}
 	}
@@ -96,6 +98,9 @@ func WriteError(w http.ResponseWriter, requestID string, providerError *canonica
 	envelope.Error.Type = string(providerError.Kind)
 	envelope.Error.Param = providerError.Parameter
 	envelope.Error.Code = providerError.Code
+	envelope.Error.Model = providerError.Model
+	envelope.Error.Provider = providerError.Provider
+	envelope.Error.Capability = providerError.Capability
 	w.Header().Set("Content-Type", "application/json")
 	if providerError.RetryAfter != nil {
 		if providerError.RetryAfter.DelaySeconds != nil {
@@ -117,18 +122,11 @@ func presentMessage(message canonical.Message) map[string]any {
 		calls := make([]map[string]any, 0, len(message.ToolCalls))
 		for _, call := range message.ToolCalls {
 			presented := map[string]any{"id": call.ID, "type": call.Type, "function": map[string]any{"name": call.Function.Name, "arguments": call.Function.Arguments}}
-			presentToolCallMetadata(presented, call.ProviderMetadata)
 			calls = append(calls, presented)
 		}
 		result["tool_calls"] = calls
 	}
 	return result
-}
-
-func presentToolCallMetadata(target map[string]any, metadata *canonical.ToolCallProviderMetadata) {
-	if metadata != nil && metadata.GoogleThoughtSignature != "" {
-		target["extra_content"] = map[string]any{"google": map[string]any{"thought_signature": metadata.GoogleThoughtSignature}}
-	}
 }
 
 func messageText(parts []canonical.ContentPart) string {

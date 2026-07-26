@@ -17,9 +17,17 @@ func TestProviderCapabilitiesDescribeExecutableContracts(t *testing.T) {
 	if !agnes.Chat || !agnes.Models || !agnes.Streaming || !agnes.Tools || !agnes.ReasoningToggle {
 		t.Fatalf("Agnes capabilities = %#v", agnes)
 	}
-	gemini := NewGemini().Capabilities()
-	if !gemini.Chat || !gemini.Models || !gemini.Streaming || !gemini.Tools || !gemini.ToolStreaming || !gemini.ReasoningEffort || !gemini.StreamUsage {
-		t.Fatalf("Gemini capabilities = %#v", gemini)
+	kimi := NewKimi().Capabilities()
+	if !kimi.Chat || !kimi.Models || !kimi.Streaming || !kimi.Tools || !kimi.ToolStreaming || !kimi.VideoInput || !kimi.PartialMode || !kimi.ReasoningAlwaysOn || !kimi.JSONSchemaOutput {
+		t.Fatalf("Kimi capabilities = %#v", kimi)
+	}
+	silicon, err := NewSiliconFlow(SiliconFlowOptions{BaseURL: "https://llm.example/v1", Capabilities: SiliconFlowCapabilities()})
+	if err != nil {
+		t.Fatalf("create SiliconFlow adapter: %v", err)
+	}
+	capabilities := silicon.Capabilities()
+	if !capabilities.Chat || !capabilities.Models || !capabilities.Streaming || !capabilities.Tools || !capabilities.JSONOutput || !capabilities.StreamUsage {
+		t.Fatalf("SiliconFlow capabilities = %#v", capabilities)
 	}
 }
 
@@ -49,8 +57,8 @@ func TestModelsProbeRejectsMalformedModelIdentity(t *testing.T) {
 func TestPublishedProviderModelsProbesAreNonGenerating(t *testing.T) {
 	t.Parallel()
 
-	compatible, err := NewOpenAICompatible(OpenAICompatibleOptions{
-		BaseURL: "https://llm.example/v1", Capabilities: NarrowOpenAICompatibleCapabilities(),
+	silicon, err := NewSiliconFlow(SiliconFlowOptions{
+		BaseURL: "https://llm.example/v1", Capabilities: SiliconFlowCapabilities(),
 	})
 	if err != nil {
 		t.Fatalf("create adapter: %v", err)
@@ -60,10 +68,10 @@ func TestPublishedProviderModelsProbesAreNonGenerating(t *testing.T) {
 		adapter  Adapter
 		endpoint string
 	}{
-		{name: "openai-compatible", adapter: compatible, endpoint: "https://llm.example/v1/models"},
+		{name: "siliconflow", adapter: silicon, endpoint: "https://llm.example/v1/models"},
 		{name: "zhipu", adapter: NewZhipu(), endpoint: "https://open.bigmodel.cn/api/paas/v4/models"},
 		{name: "agnes", adapter: NewAgnes(), endpoint: "https://apihub.agnes-ai.com/v1/models"},
-		{name: "gemini", adapter: NewGemini(), endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/models"},
+		{name: "kimi", adapter: NewKimi(), endpoint: "https://api.moonshot.cn/v1/models"},
 	}
 	for _, test := range adapters {
 		probe, probeErr := test.adapter.Probe(context.Background(), Credential{APIKey: "fixture-key"})

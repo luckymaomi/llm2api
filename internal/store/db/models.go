@@ -525,16 +525,24 @@ type CredentialMutation struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
+type CredentialUpstreamObservation struct {
+	CredentialID uuid.UUID          `json:"credential_id"`
+	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
+	Observation  []byte             `json:"observation"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GatewayKey struct {
-	ID           uuid.UUID          `json:"id"`
-	UserID       uuid.UUID          `json:"user_id"`
-	Name         string             `json:"name"`
-	Prefix       string             `json:"prefix"`
-	SecretDigest []byte             `json:"secret_digest"`
-	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
-	LastUsedAt   pgtype.Timestamptz `json:"last_used_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Name            string             `json:"name"`
+	Prefix          string             `json:"prefix"`
+	SecretDigest    []byte             `json:"secret_digest"`
+	EncryptedSecret []byte             `json:"encrypted_secret"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type GatewayKeyModel struct {
@@ -597,6 +605,7 @@ type ProviderCredential struct {
 	ResourcePoolID      uuid.UUID              `json:"resource_pool_id"`
 	Name                string                 `json:"name"`
 	EncryptedSecret     []byte                 `json:"encrypted_secret"`
+	SecretFingerprint   string                 `json:"secret_fingerprint"`
 	Status              CredentialStatus       `json:"status"`
 	HealthStatus        CredentialHealthStatus `json:"health_status"`
 	HealthGeneration    int64                  `json:"health_generation"`

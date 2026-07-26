@@ -24,25 +24,20 @@ func resourcePoolMutation(request MutationRequest, action string, input any) (Mu
 	return mutationFingerprint(request, action, input)
 }
 
-func credentialCreateMutation(request MutationRequest, input NewCredential, secret string) (Mutation, error) {
+func credentialCreateMutation(request MutationRequest, input NewCredential) (Mutation, error) {
 	payload := struct {
-		ResourcePoolID   uuid.UUID         `json:"resource_pool_id"`
-		Name             string            `json:"name"`
-		RPMLimit         *int32            `json:"rpm_limit"`
-		TPMLimit         *int64            `json:"tpm_limit"`
-		ConcurrencyLimit *int32            `json:"concurrency_limit"`
-		DiscoveredModels []DiscoveredModel `json:"discovered_models"`
-		SecretDigest     [32]byte          `json:"secret_digest"`
-	}{input.ResourcePoolID, input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, input.DiscoveredModels, sha256.Sum256([]byte(secret))}
+		ResourcePoolID    uuid.UUID         `json:"resource_pool_id"`
+		Name              string            `json:"name"`
+		RPMLimit          *int32            `json:"rpm_limit"`
+		TPMLimit          *int64            `json:"tpm_limit"`
+		ConcurrencyLimit  *int32            `json:"concurrency_limit"`
+		DiscoveredModels  []DiscoveredModel `json:"discovered_models"`
+		SecretFingerprint string            `json:"secret_fingerprint"`
+	}{input.ResourcePoolID, input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, input.DiscoveredModels, input.SecretFingerprint}
 	return mutationFingerprint(request, "credential.create", payload)
 }
 
-func credentialUpdateMutation(request MutationRequest, input CredentialChange, secret string) (Mutation, error) {
-	var secretDigest *[32]byte
-	if input.ReplaceSecret {
-		digest := sha256.Sum256([]byte(secret))
-		secretDigest = &digest
-	}
+func credentialUpdateMutation(request MutationRequest, input CredentialChange) (Mutation, error) {
 	payload := struct {
 		ID                uuid.UUID         `json:"id"`
 		Name              string            `json:"name"`
@@ -52,7 +47,7 @@ func credentialUpdateMutation(request MutationRequest, input CredentialChange, s
 		ReplaceModels     bool              `json:"replace_models"`
 		DiscoveredModels  []DiscoveredModel `json:"discovered_models"`
 		ExpectedUpdatedAt time.Time         `json:"expected_updated_at"`
-		SecretDigest      *[32]byte         `json:"secret_digest,omitempty"`
-	}{input.ID, input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, input.ReplaceModels, input.DiscoveredModels, input.ExpectedUpdatedAt.UTC().Truncate(time.Microsecond), secretDigest}
+		SecretFingerprint string            `json:"secret_fingerprint,omitempty"`
+	}{input.ID, input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit, input.ReplaceModels, input.DiscoveredModels, input.ExpectedUpdatedAt.UTC().Truncate(time.Microsecond), input.SecretFingerprint}
 	return mutationFingerprint(request, "credential.update", payload)
 }

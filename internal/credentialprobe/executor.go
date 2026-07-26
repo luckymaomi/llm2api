@@ -38,7 +38,7 @@ func (e *Executor) Discover(ctx context.Context, target registry.ModelDiscoveryT
 	startedAt := time.Now()
 	result := registry.ModelDiscoveryExecution{Status: "failed", Models: []string{}}
 	adapter, err := e.catalog.Build(target.Provider.Kind, providers.AdapterOptions{
-		BaseURL: target.Provider.BaseURL, Capabilities: providers.NarrowOpenAICompatibleCapabilities(),
+		BaseURL: target.Provider.BaseURL, Capabilities: providers.ModelDiscoveryCapabilities(),
 	})
 	if err != nil {
 		result.ErrorKind = stringPointer(string(canonical.ErrorProviderConfiguration))
@@ -89,6 +89,76 @@ func (e *Executor) Discover(ctx context.Context, target registry.ModelDiscoveryT
 	}
 	result.Status = "succeeded"
 	return withDiscoveryLatency(result, startedAt)
+}
+
+// FetchUpstreamStatus is deliberately separate from model discovery and the
+// billable generation probe. It only follows a Provider adapter's documented,
+// read-only status endpoint.
+func (e *Executor) FetchUpstreamStatus(ctx context.Context, target registry.CredentialUpstreamStatusTarget) registry.CredentialUpstreamStatusExecution {
+	startedAt := time.Now()
+	result := registry.CredentialUpstreamStatusExecution{Observation: providers.UpstreamStatusObservation{
+		State: providers.UpstreamStatusUnavailable, Scope: providers.UpstreamStatusScopeUnknown,
+		Source: "manual_status_fetch_failed", Reason: "无法获取上游状态",
+	}}
+	adapter, err := e.catalog.Build(target.Provider.Kind, providers.AdapterOptions{
+		BaseURL: target.Provider.BaseURL, Capabilities: providers.ModelDiscoveryCapabilities(),
+	})
+	if err != nil {
+		result.ErrorKind = stringPointer(string(canonical.ErrorProviderConfiguration))
+		result.Observation.Reason = "上游状态适配器不可用"
+		return withUpstreamStatusLatency(result, startedAt)
+	}
+	probeContext, cancel := context.WithTimeout(ctx, e.timeout)
+	defer cancel()
+	probe, err := adapter.StatusProbe(probeContext, providers.Credential{APIKey: target.Secret})
+	if err != nil {
+		kind := canonicalErrorKind(err)
+		result.ErrorKind = &kind
+		result.Observation.Reason = upstreamStatusReason(kind)
+		return withUpstreamStatusLatency(result, startedAt)
+	}
+	if !probe.Available || probe.Request == nil {
+		result.Observation = providers.UpstreamStatusObservation{
+			State: providers.UpstreamStatusUnknown, Scope: providers.UpstreamStatusScopeUnknown,
+			Source: "official_endpoint_unavailable", Reason: "该 Provider 未公开可读取的上游状态端点",
+		}
+		return withUpstreamStatusLatency(result, startedAt)
+	}
+	client, err := security.NewSSRFSafeClient(e.policy)
+	if err != nil {
+		result.ErrorKind = stringPointer(string(canonical.ErrorProviderConfiguration))
+		result.Observation.Reason = "上游状态网络策略不可用"
+		return withUpstreamStatusLatency(result, startedAt)
+	}
+	response, err := client.Do(probe.Request)
+	if err != nil {
+		_, kind, _ := classifyTransportFailure(err)
+		result.ErrorKind = kind
+		result.Observation.Reason = upstreamStatusReason(pointerValue(kind))
+		return withUpstreamStatusLatency(result, startedAt)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, e.maxResponseBytes+1))
+	if err != nil {
+		result.ErrorKind = stringPointer(string(canonical.ErrorUncertain))
+		result.Observation.Reason = "上游状态响应读取中断"
+		return withUpstreamStatusLatency(result, startedAt)
+	}
+	if int64(len(body)) > e.maxResponseBytes {
+		result.ErrorKind = stringPointer("status_response_too_large")
+		result.Observation.Reason = "上游状态响应超过安全上限"
+		return withUpstreamStatusLatency(result, startedAt)
+	}
+	observation, providerErr := adapter.ParseStatusProbe(probe.Kind, response.StatusCode, response.Header, body)
+	if providerErr != nil {
+		kind := string(providerErr.Kind)
+		result.ErrorKind = &kind
+		result.Observation.Source = "official_status_endpoint"
+		result.Observation.Reason = upstreamStatusReason(kind)
+		return withUpstreamStatusLatency(result, startedAt)
+	}
+	result.Observation = observation
+	return withUpstreamStatusLatency(result, startedAt)
 }
 
 func (e *Executor) Execute(ctx context.Context, target registry.CredentialProbeTarget) registry.CredentialProbeExecution {
@@ -160,15 +230,13 @@ func (e *Executor) Execute(ctx context.Context, target registry.CredentialProbeT
 }
 
 func probeCapabilities(model registry.ModelCapabilities) providers.Capabilities {
-	capabilities := providers.NarrowOpenAICompatibleCapabilities()
+	capabilities := model.AdapterCapabilities()
 	capabilities.Streaming = false
 	capabilities.Tools = false
 	capabilities.ToolStreaming = false
-	capabilities.ReasoningToggle = model.ReasoningMode == registry.ReasoningToggle || model.ReasoningMode == registry.ReasoningHybrid
-	capabilities.ReasoningEffort = model.ReasoningMode == registry.ReasoningEffort || model.ReasoningMode == registry.ReasoningHybrid
-	capabilities.ReasoningContent = model.Reasoning
-	capabilities.ReasoningReplay = false
+	capabilities.ParallelToolCalls = false
 	capabilities.JSONOutput = false
+	capabilities.JSONSchemaOutput = false
 	return capabilities
 }
 
@@ -240,6 +308,39 @@ func withLatency(result registry.CredentialProbeExecution, startedAt time.Time) 
 func withDiscoveryLatency(result registry.ModelDiscoveryExecution, startedAt time.Time) registry.ModelDiscoveryExecution {
 	result.LatencyMillis = max(time.Since(startedAt).Milliseconds(), 0)
 	return result
+}
+
+func withUpstreamStatusLatency(result registry.CredentialUpstreamStatusExecution, startedAt time.Time) registry.CredentialUpstreamStatusExecution {
+	result.LatencyMillis = max(time.Since(startedAt).Milliseconds(), 0)
+	return result
+}
+
+func upstreamStatusReason(kind string) string {
+	switch kind {
+	case string(canonical.ErrorAuthentication):
+		return "上游拒绝了 API Key"
+	case string(canonical.ErrorPermission):
+		return "上游 API Key 没有读取该状态的权限"
+	case string(canonical.ErrorRateLimit):
+		return "上游限流，稍后再获取"
+	case string(canonical.ErrorQuota):
+		return "上游配额拒绝了状态请求"
+	case string(canonical.ErrorProviderTemporary):
+		return "上游暂时不可用"
+	case "probe_timeout_or_canceled":
+		return "获取上游状态超时或被取消"
+	case "dns_resolution_failed", "upstream_connection_failed", "provider_transport_failed":
+		return "无法连接上游状态端点"
+	default:
+		return "上游状态暂不可用"
+	}
+}
+
+func pointerValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func stringPointer(value string) *string {

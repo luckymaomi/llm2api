@@ -53,6 +53,23 @@ type RateDecision struct {
 	Buckets    []BucketState
 }
 
+// RateObservation reports the current state of rate buckets without consuming
+// capacity. It is a runtime fact owned by the coordinator, not an upstream
+// quota or billing balance.
+type RateObservation struct {
+	ObservedAt time.Time
+	Buckets    []BucketState
+}
+
+// RateRefundDecision reports whether a token refund was applied. A repeated
+// reference is intentionally a no-op so recovery paths cannot credit capacity
+// more than once.
+type RateRefundDecision struct {
+	Applied    bool
+	ObservedAt time.Time
+	Buckets    []BucketState
+}
+
 type ConcurrencyLimit struct {
 	Dimension   Dimension
 	MaxInFlight int64

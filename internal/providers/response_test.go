@@ -73,11 +73,11 @@ func TestProviderResponsesBecomeCanonicalFacts(t *testing.T) {
 	}
 }
 
-func TestOpenAICompatibleParsesToolResponseAndDeclaredRequestID(t *testing.T) {
+func TestSiliconFlowParsesToolResponseAndDeclaredRequestID(t *testing.T) {
 	t.Parallel()
 
-	adapter, err := NewOpenAICompatible(OpenAICompatibleOptions{
-		BaseURL: "https://llm.example/v1", Capabilities: NarrowOpenAICompatibleCapabilities(), RequestIDHeader: "X-Request-ID",
+	adapter, err := NewSiliconFlow(SiliconFlowOptions{
+		BaseURL: "https://llm.example/v1", Capabilities: SiliconFlowCapabilities(), RequestIDHeader: "X-Request-ID",
 	})
 	if err != nil {
 		t.Fatalf("create adapter: %v", err)
@@ -103,33 +103,16 @@ func TestOpenAICompatibleParsesToolResponseAndDeclaredRequestID(t *testing.T) {
 	}
 }
 
-func TestGeminiPreservesToolCallThoughtSignature(t *testing.T) {
+func TestSiliconFlowStreamReassemblesReasoningToolsAndUsage(t *testing.T) {
 	t.Parallel()
-
-	response, err := NewGemini().ParseResponse(http.StatusOK, nil, []byte(`{
-		"id":"chat-gemini-1","created":1710000004,"model":"gemini-3.5-flash",
-		"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"Beijing\"}"},"extra_content":{"google":{"thought_signature":"signed-thought"}}}]} ,"finish_reason":"tool_calls"}],
-		"usage":{"prompt_tokens":10,"completion_tokens":6,"total_tokens":16}
-	}`))
-	if err != nil {
-		t.Fatalf("parse Gemini response: %v", err)
-	}
-	metadata := response.Choices[0].Message.ToolCalls[0].ProviderMetadata
-	if metadata == nil || metadata.GoogleThoughtSignature != "signed-thought" {
-		t.Fatalf("tool call metadata = %#v", metadata)
-	}
-}
-
-func TestOpenAICompatibleStreamReassemblesReasoningToolsAndUsage(t *testing.T) {
-	t.Parallel()
-	capabilities := NarrowOpenAICompatibleCapabilities()
+	capabilities := SiliconFlowCapabilities()
 	capabilities.Streaming = true
 	capabilities.Tools = true
 	capabilities.ToolStreaming = true
 	capabilities.ReasoningContent = true
 	capabilities.ResponseUsage = true
 	capabilities.StreamUsage = true
-	adapter, err := NewOpenAICompatible(OpenAICompatibleOptions{
+	adapter, err := NewSiliconFlow(SiliconFlowOptions{
 		BaseURL: "https://llm.example/v1", Capabilities: capabilities,
 	})
 	if err != nil {

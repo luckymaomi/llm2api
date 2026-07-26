@@ -3,15 +3,19 @@ import type {
   Credential,
   CredentialBatchInput,
   CredentialBatchResult,
+  CredentialModelProbeBatchResult,
   ModelDiscoveryResult,
   CredentialProbeResult,
+  CredentialHealthStatus,
   CredentialStatus,
   CredentialUpdateInput,
   Model,
+  ProviderModelProfile,
   Provider,
   ResourcePool,
   ResourcePoolInput,
   ResourcePoolStatus,
+  UpstreamStatusObservation,
 } from './types'
 
 const base = '/api/control'
@@ -89,6 +93,13 @@ export const catalogApi = {
         headers: mutationHeaders(idempotencyKey),
       })
       .then((items) => items.map(mapBatchResult)),
+  probeAllCredentials: (idempotencyKey: string) =>
+    apiClient
+      .request<CredentialModelProbeBatchWire>(`${base}/credentials/probe`, {
+        method: 'POST',
+        headers: mutationHeaders(idempotencyKey),
+      })
+      .then(mapCredentialModelProbeBatch),
   setCredentialStatus: (
     id: string,
     status: CredentialStatus,
@@ -132,6 +143,16 @@ export const catalogApi = {
         ...(signal ? { signal } : {}),
       })
       .then(mapProbeResult),
+  fetchCredentialUpstreamStatus: (id: string, signal?: AbortSignal) =>
+    apiClient
+      .request<CredentialUpstreamStatusWire>(
+        `${base}/credentials/${encodeURIComponent(id)}/upstream-status`,
+        { method: 'POST', ...(signal ? { signal } : {}) },
+      )
+      .then((result) => ({
+        observation: mapUpstreamStatus(result.observation),
+        credential: mapCredential(result.credential),
+      })),
 }
 
 interface ModelWire {
@@ -146,14 +167,61 @@ interface ModelWire {
     chat: boolean
     streaming: boolean
     tools: boolean
+    tool_choice_modes?: string[]
+    strict_tools?: boolean
+    parallel_tool_calls?: boolean
+    tool_streaming?: boolean
+    image_input?: boolean
+    video_input?: boolean
+    partial_mode?: boolean
     reasoning: boolean
-    reasoning_mode?: 'toggle' | 'effort' | 'hybrid'
+    reasoning_mode?: 'toggle' | 'effort' | 'hybrid' | 'always_on'
+    reasoning_always_on?: boolean
+    reasoning_default_enabled?: boolean
+    reasoning_preserve?: boolean
+    reasoning_efforts?: string[]
+    tool_choice_modes_with_reasoning?: string[]
     structured_output: boolean
+    json_schema_output?: boolean
+    prompt_cache_key?: boolean
+    safety_identifier?: boolean
     context_tokens: number
     output_tokens: number
+    parameters: {
+      max_completion_tokens: ParameterIntegerWire
+      temperature: ParameterNumberWire
+      top_p: ParameterNumberWire
+      presence_penalty: ParameterNumberWire
+      frequency_penalty: ParameterNumberWire
+      n: ParameterIntegerWire
+      top_k: ParameterNumberWire
+      thinking_budget: ParameterIntegerWire
+      sampling_conditions?: SamplingConditionWire[]
+    }
   }
   created_at: string
   updated_at: string
+}
+
+interface ParameterIntegerWire {
+  supported: boolean
+  minimum?: number
+  maximum?: number
+  exact_values?: number[]
+}
+
+interface ParameterNumberWire {
+  supported: boolean
+  minimum?: number
+  maximum?: number
+  exact_values?: number[]
+}
+
+interface SamplingConditionWire {
+  thinking_enabled?: boolean
+  temperature_exact?: number
+  temperature_at_most?: number
+  n_maximum?: number
 }
 
 interface ProviderWire {
@@ -165,11 +233,26 @@ interface ProviderWire {
   base_url: string
   source_url: string
   verified_at: string
-  contract: Provider['contract']
+  contract: ProviderContractWire
+  models: Array<{
+    upstream_name: string
+    display_name: string
+    capabilities: ModelWire['capabilities']
+  }>
   resource_pool_count: number
   active_credential_count: number
   created_at: string
   updated_at: string
+}
+
+interface ProviderContractWire {
+  reference_url: string
+  contract_snapshot: string
+  verified_at: string
+  reference_provider?: string
+  verified_models: string[]
+  live_capabilities: string[]
+  status: 'verified' | 'degraded'
 }
 
 interface ResourcePoolWire {
@@ -203,6 +286,19 @@ interface CredentialWire {
   provider_base_url: string
   name: string
   status: CredentialStatus
+  health_status: CredentialHealthStatus
+  upstream_status?: UpstreamStatusWire
+  capacity: {
+    state: 'observed' | 'unavailable'
+    scope: 'gateway_credential'
+    observed_at?: string
+    requests_per_minute_limit?: number
+    requests_per_minute_remaining?: number
+    tokens_per_minute_limit?: number
+    tokens_per_minute_remaining?: number
+    concurrency_limit?: number
+    concurrency_in_use?: number
+  }
   rpm_limit?: number
   tpm_limit?: number
   concurrency_limit?: number
@@ -228,10 +324,29 @@ interface CredentialWire {
   }>
 }
 
+interface UpstreamStatusWire {
+  state: 'observed' | 'unknown' | 'unavailable'
+  scope: 'account' | 'project' | 'credential' | 'unknown'
+  observed_at: string
+  source: string
+  reason?: string
+  balance?: {
+    currency: string
+    available: string
+    voucher: string
+    cash: string
+  }
+}
+
+interface CredentialUpstreamStatusWire {
+  observation: UpstreamStatusWire
+  credential: CredentialWire
+}
+
 interface CredentialBatchResultWire {
   line: number
   name: string
-  status: 'created' | 'skipped' | 'rejected'
+  status: 'created' | 'duplicate' | 'rejected'
   credential?: CredentialWire
   error_kind?: string
 }
@@ -264,6 +379,14 @@ interface ModelDiscoveryWire {
   }
 }
 
+interface CredentialModelProbeBatchWire {
+  results: ModelDiscoveryWire[]
+  succeeded: number
+  failed: number
+  unavailable: number
+  uncertain: number
+}
+
 function mapModel(model: ModelWire): Model {
   return {
     id: model.id,
@@ -273,18 +396,7 @@ function mapModel(model: ModelWire): Model {
     publicName: model.public_name,
     upstreamName: model.upstream_name,
     displayName: model.display_name,
-    capabilities: {
-      chat: model.capabilities.chat,
-      streaming: model.capabilities.streaming,
-      tools: model.capabilities.tools,
-      reasoning: model.capabilities.reasoning,
-      ...(model.capabilities.reasoning_mode
-        ? { reasoningMode: model.capabilities.reasoning_mode }
-        : {}),
-      structuredOutput: model.capabilities.structured_output,
-      contextTokens: model.capabilities.context_tokens,
-      outputTokens: model.capabilities.output_tokens,
-    },
+    capabilities: mapModelCapabilities(model.capabilities),
     createdAt: model.created_at,
     updatedAt: model.updated_at,
   }
@@ -300,11 +412,30 @@ function mapProvider(provider: ProviderWire): Provider {
     baseUrl: provider.base_url,
     sourceUrl: provider.source_url,
     verifiedAt: provider.verified_at,
-    contract: provider.contract,
+    contract: {
+      referenceUrl: provider.contract.reference_url,
+      contractSnapshot: provider.contract.contract_snapshot,
+      verifiedAt: provider.contract.verified_at,
+      ...(provider.contract.reference_provider
+        ? { referenceProvider: provider.contract.reference_provider }
+        : {}),
+      verifiedModels: provider.contract.verified_models,
+      liveCapabilities: provider.contract.live_capabilities,
+      status: provider.contract.status,
+    },
+    models: provider.models.map(mapProviderModelProfile),
     resourcePoolCount: provider.resource_pool_count,
     activeCredentialCount: provider.active_credential_count,
     createdAt: provider.created_at,
     updatedAt: provider.updated_at,
+  }
+}
+
+function mapProviderModelProfile(profile: ProviderWire['models'][number]): ProviderModelProfile {
+  return {
+    upstreamName: profile.upstream_name,
+    displayName: profile.display_name,
+    capabilities: mapModelCapabilities(profile.capabilities),
   }
 }
 
@@ -330,6 +461,74 @@ function mapResourcePool(pool: ResourcePoolWire): ResourcePool {
   }
 }
 
+function mapModelCapabilities(capabilities: ModelWire['capabilities']): Model['capabilities'] {
+  return {
+    chat: capabilities.chat,
+    streaming: capabilities.streaming,
+    tools: capabilities.tools,
+    toolChoiceModes: capabilities.tool_choice_modes ?? [],
+    strictTools: capabilities.strict_tools ?? false,
+    parallelToolCalls: capabilities.parallel_tool_calls ?? false,
+    toolStreaming: capabilities.tool_streaming ?? false,
+    imageInput: capabilities.image_input ?? false,
+    videoInput: capabilities.video_input ?? false,
+    partialMode: capabilities.partial_mode ?? false,
+    reasoning: capabilities.reasoning,
+    ...(capabilities.reasoning_mode ? { reasoningMode: capabilities.reasoning_mode } : {}),
+    reasoningAlwaysOn: capabilities.reasoning_always_on ?? false,
+    reasoningDefaultEnabled: capabilities.reasoning_default_enabled ?? false,
+    reasoningPreserve: capabilities.reasoning_preserve ?? false,
+    reasoningEfforts: capabilities.reasoning_efforts ?? [],
+    toolChoiceModesWithReasoning: capabilities.tool_choice_modes_with_reasoning ?? [],
+    structuredOutput: capabilities.structured_output,
+    jsonSchemaOutput: capabilities.json_schema_output ?? false,
+    promptCacheKey: capabilities.prompt_cache_key ?? false,
+    safetyIdentifier: capabilities.safety_identifier ?? false,
+    contextTokens: capabilities.context_tokens,
+    outputTokens: capabilities.output_tokens,
+    parameters: {
+      maxCompletionTokens: mapIntegerParameter(capabilities.parameters.max_completion_tokens),
+      temperature: mapNumberParameter(capabilities.parameters.temperature),
+      topP: mapNumberParameter(capabilities.parameters.top_p),
+      presencePenalty: mapNumberParameter(capabilities.parameters.presence_penalty),
+      frequencyPenalty: mapNumberParameter(capabilities.parameters.frequency_penalty),
+      n: mapIntegerParameter(capabilities.parameters.n),
+      topK: mapNumberParameter(capabilities.parameters.top_k),
+      thinkingBudget: mapIntegerParameter(capabilities.parameters.thinking_budget),
+      samplingConditions: (capabilities.parameters.sampling_conditions ?? []).map((condition) => ({
+        ...(condition.thinking_enabled !== undefined
+          ? { thinkingEnabled: condition.thinking_enabled }
+          : {}),
+        ...(condition.temperature_exact !== undefined
+          ? { temperatureExact: condition.temperature_exact }
+          : {}),
+        ...(condition.temperature_at_most !== undefined
+          ? { temperatureAtMost: condition.temperature_at_most }
+          : {}),
+        ...(condition.n_maximum !== undefined ? { nMaximum: condition.n_maximum } : {}),
+      })),
+    },
+  }
+}
+
+function mapIntegerParameter(value: ParameterIntegerWire) {
+  return {
+    supported: value.supported,
+    ...(value.minimum !== undefined ? { minimum: value.minimum } : {}),
+    ...(value.maximum !== undefined ? { maximum: value.maximum } : {}),
+    exactValues: value.exact_values ?? [],
+  }
+}
+
+function mapNumberParameter(value: ParameterNumberWire) {
+  return {
+    supported: value.supported,
+    ...(value.minimum !== undefined ? { minimum: value.minimum } : {}),
+    ...(value.maximum !== undefined ? { maximum: value.maximum } : {}),
+    exactValues: value.exact_values ?? [],
+  }
+}
+
 function mapCredential(credential: CredentialWire): Credential {
   return {
     id: credential.id,
@@ -342,6 +541,33 @@ function mapCredential(credential: CredentialWire): Credential {
     providerBaseUrl: credential.provider_base_url,
     name: credential.name,
     status: credential.status,
+    healthStatus: credential.health_status,
+    capacity: {
+      state: credential.capacity.state,
+      scope: credential.capacity.scope,
+      ...(credential.capacity.observed_at ? { observedAt: credential.capacity.observed_at } : {}),
+      ...(credential.capacity.requests_per_minute_limit !== undefined
+        ? { requestsPerMinuteLimit: credential.capacity.requests_per_minute_limit }
+        : {}),
+      ...(credential.capacity.requests_per_minute_remaining !== undefined
+        ? { requestsPerMinuteRemaining: credential.capacity.requests_per_minute_remaining }
+        : {}),
+      ...(credential.capacity.tokens_per_minute_limit !== undefined
+        ? { tokensPerMinuteLimit: credential.capacity.tokens_per_minute_limit }
+        : {}),
+      ...(credential.capacity.tokens_per_minute_remaining !== undefined
+        ? { tokensPerMinuteRemaining: credential.capacity.tokens_per_minute_remaining }
+        : {}),
+      ...(credential.capacity.concurrency_limit !== undefined
+        ? { concurrencyLimit: credential.capacity.concurrency_limit }
+        : {}),
+      ...(credential.capacity.concurrency_in_use !== undefined
+        ? { concurrencyInUse: credential.capacity.concurrency_in_use }
+        : {}),
+    },
+    ...(credential.upstream_status
+      ? { upstreamStatus: mapUpstreamStatus(credential.upstream_status) }
+      : {}),
     ...(credential.rpm_limit !== undefined ? { rpmLimit: credential.rpm_limit } : {}),
     ...(credential.tpm_limit !== undefined ? { tpmLimit: credential.tpm_limit } : {}),
     ...(credential.concurrency_limit !== undefined
@@ -377,6 +603,26 @@ function mapCredential(credential: CredentialWire): Credential {
       modelId: binding.model_id,
       modelName: binding.model_name ?? binding.model_id,
     })),
+  }
+}
+
+function mapUpstreamStatus(status: UpstreamStatusWire): UpstreamStatusObservation {
+  return {
+    state: status.state,
+    scope: status.scope,
+    observedAt: status.observed_at,
+    source: status.source,
+    ...(status.reason ? { reason: status.reason } : {}),
+    ...(status.balance
+      ? {
+          balance: {
+            currency: status.balance.currency,
+            available: status.balance.available,
+            voucher: status.balance.voucher,
+            cash: status.balance.cash,
+          },
+        }
+      : {}),
   }
 }
 
@@ -421,5 +667,17 @@ function mapDiscoveryResult(result: ModelDiscoveryWire): ModelDiscoveryResult {
     retryable: execution.retryable,
     latencyMillis: execution.latency_ms,
     models: execution.models,
+  }
+}
+
+function mapCredentialModelProbeBatch(
+  result: CredentialModelProbeBatchWire,
+): CredentialModelProbeBatchResult {
+  return {
+    results: result.results.map(mapDiscoveryResult),
+    succeeded: result.succeeded,
+    failed: result.failed,
+    unavailable: result.unavailable,
+    uncertain: result.uncertain,
   }
 }

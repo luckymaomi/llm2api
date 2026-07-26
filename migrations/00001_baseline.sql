@@ -78,6 +78,7 @@ CREATE TABLE gateway_keys (
     name text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 120),
     prefix text NOT NULL,
     secret_digest bytea NOT NULL UNIQUE,
+    encrypted_secret bytea NOT NULL,
     expires_at timestamptz,
     deleted_at timestamptz,
     last_used_at timestamptz,
@@ -168,6 +169,7 @@ CREATE TABLE provider_credentials (
     resource_pool_id uuid NOT NULL REFERENCES resource_pools(id),
     name text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 120),
     encrypted_secret bytea NOT NULL,
+	secret_fingerprint text NOT NULL CHECK (char_length(secret_fingerprint) = 43),
     status credential_status NOT NULL DEFAULT 'active',
     health_status credential_health_status NOT NULL DEFAULT 'healthy',
     health_generation bigint NOT NULL DEFAULT 0 CHECK (health_generation >= 0),
@@ -186,7 +188,17 @@ CREATE TABLE provider_credentials (
     retired_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    CHECK ((status = 'retired') = (retired_at IS NOT NULL))
+	CHECK ((status = 'retired') = (retired_at IS NOT NULL)),
+	CONSTRAINT provider_credentials_secret_fingerprint_key UNIQUE (secret_fingerprint)
+);
+
+-- An observation is evidence returned by an official Provider endpoint. It is
+-- deliberately separate from local rate leases and credential health.
+CREATE TABLE credential_upstream_observations (
+    credential_id uuid PRIMARY KEY REFERENCES provider_credentials(id),
+    observed_at timestamptz NOT NULL,
+    observation jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE credential_mutations (
@@ -441,6 +453,7 @@ DROP TABLE IF EXISTS service_plan_versions;
 DROP TABLE IF EXISTS service_plans;
 DROP TABLE IF EXISTS credential_models;
 DROP TABLE IF EXISTS credential_mutations;
+DROP TABLE IF EXISTS credential_upstream_observations;
 DROP TABLE IF EXISTS provider_credentials;
 DROP FUNCTION IF EXISTS reject_immutable_record_mutation();
 DROP TABLE IF EXISTS gateway_key_models;

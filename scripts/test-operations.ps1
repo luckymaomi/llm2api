@@ -115,6 +115,7 @@ try {
   $env:LLM2API_HTTP_ADDRESS = "127.0.0.1:$gatewayPort"
   $env:LLM2API_SESSION_PEPPER = "operations-session-pepper-$runID"
   $env:LLM2API_API_KEY_PEPPER = "operations-api-key-pepper-$runID"
+  $env:LLM2API_CREDENTIAL_FINGERPRINT_PEPPER = "operations-credential-fingerprint-pepper-$runID"
   $env:LLM2API_COORDINATION_KEY_HASH_SECRET = "operations-coordination-secret-$runID"
   $gatewayStartArguments = @{
     FilePath               = $binaryPath

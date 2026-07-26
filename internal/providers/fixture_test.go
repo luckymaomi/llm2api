@@ -42,3 +42,11 @@ func assertJSON(t *testing.T, got, want []byte) {
 func boolPointer(value bool) *bool {
 	return &value
 }
+
+func int64Pointer(value int64) *int64 {
+	return &value
+}
+
+func float64Pointer(value float64) *float64 {
+	return &value
+}

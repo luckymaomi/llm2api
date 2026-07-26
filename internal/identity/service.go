@@ -28,6 +28,7 @@ const (
 
 type Service struct {
 	repository        Repository
+	envelope          *security.EnvelopeCipher
 	passwordParams    security.PasswordParameters
 	sessionPepper     []byte
 	apiKeyPepper      []byte
@@ -35,8 +36,8 @@ type Service struct {
 	dummyPasswordHash string
 }
 
-func NewService(repository Repository, sessionPepper, apiKeyPepper []byte) (*Service, error) {
-	if repository == nil {
+func NewService(repository Repository, envelope *security.EnvelopeCipher, sessionPepper, apiKeyPepper []byte) (*Service, error) {
+	if repository == nil || envelope == nil {
 		return nil, fmt.Errorf("identity repository is required")
 	}
 	params := security.RecommendedPasswordParameters()
@@ -49,6 +50,7 @@ func NewService(repository Repository, sessionPepper, apiKeyPepper []byte) (*Ser
 	}
 	return &Service{
 		repository:        repository,
+		envelope:          envelope,
 		passwordParams:    params,
 		sessionPepper:     append([]byte(nil), sessionPepper...),
 		apiKeyPepper:      append([]byte(nil), apiKeyPepper...),
@@ -240,8 +242,13 @@ func (s *Service) createGatewayKey(ctx context.Context, actor Principal, userID 
 	if err != nil {
 		return GatewayKey{}, err
 	}
+	keyID := uuid.New()
+	encryptedSecret, err := s.envelope.Encrypt([]byte(secret), GatewayKeyEncryptionContext(keyID))
+	if err != nil {
+		return GatewayKey{}, fmt.Errorf("encrypt gateway key: %w", err)
+	}
 	key, err := s.repository.CreateGatewayKey(ctx, NewGatewayKey{
-		UserID: userID, Name: name, Prefix: credentialPrefix(secret), SecretDigest: digest[:],
+		ID: keyID, UserID: userID, Name: name, Prefix: credentialPrefix(secret), SecretDigest: digest[:], EncryptedSecret: encryptedSecret,
 		Routes: routes, ExpiresAt: normalizedExpiresAt, ReplacesKeyID: replacesKeyID,
 	}, actor.UserID, mutation)
 	if err != nil {
@@ -249,6 +256,35 @@ func (s *Service) createGatewayKey(ctx context.Context, actor Principal, userID 
 	}
 	key.Secret = secret
 	return key, nil
+}
+
+func (s *Service) RevealGatewayKey(ctx context.Context, actor Principal, keyID uuid.UUID) (string, error) {
+	if actor.Status != StatusActive || keyID == uuid.Nil {
+		return "", ErrForbidden
+	}
+	key, err := s.repository.GatewayKeyForReplacement(ctx, keyID)
+	if err != nil {
+		return "", err
+	}
+	if actor.Role != RoleAdministrator && (actor.Role != RoleMember || actor.UserID != key.UserID) {
+		return "", ErrForbidden
+	}
+	encrypted, err := s.repository.GetEncryptedGatewayKey(ctx, keyID)
+	if err != nil {
+		return "", err
+	}
+	plaintext, err := s.envelope.Decrypt(encrypted, GatewayKeyEncryptionContext(keyID))
+	if err != nil {
+		return "", fmt.Errorf("decrypt gateway key: %w", err)
+	}
+	secret := string(plaintext)
+	if !strings.HasPrefix(secret, "llmg_") || credentialPrefix(secret) != key.Prefix {
+		return "", ErrInvalidCredential
+	}
+	if err := s.repository.RecordGatewayKeyReveal(ctx, keyID, actor.UserID); err != nil {
+		return "", err
+	}
+	return secret, nil
 }
 
 func (s *Service) deriveGatewayKeySecret(actorID, idempotencyKey uuid.UUID) (string, error) {
@@ -265,6 +301,10 @@ func credentialPrefix(value string) string {
 		return value
 	}
 	return value[:credentialPrefixBytes]
+}
+
+func GatewayKeyEncryptionContext(id uuid.UUID) []byte {
+	return []byte("gateway-key:" + id.String())
 }
 
 func (s *Service) AuthenticateGatewayKey(ctx context.Context, secret string) (GatewayPrincipal, error) {

@@ -6,17 +6,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/luckymaomi/llm2api/internal/canonical"
 	"github.com/luckymaomi/llm2api/internal/providers"
 )
 
 var (
-	ErrInvalidInput        = errors.New("invalid registry input")
-	ErrNotFound            = errors.New("registry record not found")
-	ErrConflict            = errors.New("registry conflict")
-	ErrForbidden           = errors.New("registry operation forbidden")
-	ErrIdempotencyConflict = errors.New("registry idempotency key conflict")
-	ErrOutcomeUnknown      = errors.New("registry operation outcome is unknown")
-	ErrModelDiscovery      = errors.New("upstream model discovery failed")
+	ErrInvalidInput             = errors.New("invalid registry input")
+	ErrNotFound                 = errors.New("registry record not found")
+	ErrConflict                 = errors.New("registry conflict")
+	ErrForbidden                = errors.New("registry operation forbidden")
+	ErrIdempotencyConflict      = errors.New("registry idempotency key conflict")
+	ErrOutcomeUnknown           = errors.New("registry operation outcome is unknown")
+	ErrModelDiscovery           = errors.New("upstream model discovery failed")
+	ErrCredentialAlreadyManaged = errors.New("upstream credential is already managed")
 )
 
 type MutationRequest struct {
@@ -32,22 +34,127 @@ type Mutation struct {
 }
 
 type ModelCapabilities struct {
-	Chat             bool          `json:"chat"`
-	Streaming        bool          `json:"streaming"`
-	Tools            bool          `json:"tools"`
-	Reasoning        bool          `json:"reasoning"`
-	ReasoningMode    ReasoningMode `json:"reasoning_mode,omitempty"`
-	StructuredOutput bool          `json:"structured_output"`
-	ContextTokens    int64         `json:"context_tokens"`
-	OutputTokens     int64         `json:"output_tokens"`
+	Chat                         bool                            `json:"chat"`
+	Streaming                    bool                            `json:"streaming"`
+	Tools                        bool                            `json:"tools"`
+	ToolChoiceModes              []string                        `json:"tool_choice_modes,omitempty"`
+	StrictTools                  bool                            `json:"strict_tools"`
+	ParallelToolCalls            bool                            `json:"parallel_tool_calls"`
+	ToolStreaming                bool                            `json:"tool_streaming"`
+	ImageInput                   bool                            `json:"image_input"`
+	VideoInput                   bool                            `json:"video_input"`
+	PartialMode                  bool                            `json:"partial_mode"`
+	Reasoning                    bool                            `json:"reasoning"`
+	ReasoningMode                ReasoningMode                   `json:"reasoning_mode,omitempty"`
+	ReasoningAlwaysOn            bool                            `json:"reasoning_always_on"`
+	ReasoningDefaultEnabled      bool                            `json:"reasoning_default_enabled"`
+	ReasoningPreserve            bool                            `json:"reasoning_preserve"`
+	ReasoningEfforts             []string                        `json:"reasoning_efforts,omitempty"`
+	ToolChoiceModesWithReasoning []string                        `json:"tool_choice_modes_with_reasoning,omitempty"`
+	StructuredOutput             bool                            `json:"structured_output"`
+	JSONSchemaOutput             bool                            `json:"json_schema_output"`
+	PromptCacheKey               bool                            `json:"prompt_cache_key"`
+	SafetyIdentifier             bool                            `json:"safety_identifier"`
+	ContextTokens                int64                           `json:"context_tokens"`
+	OutputTokens                 int64                           `json:"output_tokens"`
+	Parameters                   providers.ParameterCapabilities `json:"parameters"`
+}
+
+// ModelCapabilitiesFromProfile converts the Provider-owned verified matrix
+// into the persisted/public model contract. No caller derives capabilities
+// from a model-name prefix or a generic OpenAI-compatible assumption.
+func ModelCapabilitiesFromProfile(profile providers.ModelProfile) ModelCapabilities {
+	capability := profile.Capabilities
+	reasoningMode := ReasoningMode("")
+	if capability.ReasoningAlwaysOn {
+		reasoningMode = ReasoningAlwaysOn
+	} else if capability.ReasoningToggle && capability.ReasoningEffort {
+		reasoningMode = ReasoningHybrid
+	} else if capability.ReasoningToggle {
+		reasoningMode = ReasoningToggle
+	} else if capability.ReasoningEffort {
+		reasoningMode = ReasoningEffort
+	}
+	toolChoice := make([]string, 0, 4)
+	if capability.ToolChoiceNone {
+		toolChoice = append(toolChoice, "none")
+	}
+	if capability.ToolChoiceAuto {
+		toolChoice = append(toolChoice, "auto")
+	}
+	if capability.ToolChoiceRequired {
+		toolChoice = append(toolChoice, "required")
+	}
+	if capability.ToolChoiceNamed {
+		toolChoice = append(toolChoice, "function")
+	}
+	efforts := make([]string, len(capability.AllowedReasoningEfforts))
+	for index, effort := range capability.AllowedReasoningEfforts {
+		efforts[index] = string(effort)
+	}
+	thinkingToolChoice := make([]string, len(capability.ToolChoiceModesWithReasoning))
+	for index, mode := range capability.ToolChoiceModesWithReasoning {
+		thinkingToolChoice[index] = string(mode)
+	}
+	return ModelCapabilities{
+		Chat: capability.Chat, Streaming: capability.Streaming, Tools: capability.Tools,
+		ToolChoiceModes: toolChoice, StrictTools: capability.StrictTools, ParallelToolCalls: capability.ParallelToolCalls, ToolStreaming: capability.ToolStreaming,
+		ImageInput: capability.ImageInput, VideoInput: capability.VideoInput, PartialMode: capability.PartialMode,
+		Reasoning:     capability.ReasoningToggle || capability.ReasoningAlwaysOn || capability.ReasoningEffort || capability.ReasoningContent,
+		ReasoningMode: reasoningMode, ReasoningAlwaysOn: capability.ReasoningAlwaysOn, ReasoningDefaultEnabled: capability.ReasoningDefaultEnabled,
+		ReasoningPreserve: capability.ReasoningReplay, ReasoningEfforts: efforts, ToolChoiceModesWithReasoning: thinkingToolChoice,
+		StructuredOutput: capability.JSONOutput, JSONSchemaOutput: capability.JSONSchemaOutput,
+		PromptCacheKey: capability.PromptCacheKey, SafetyIdentifier: capability.SafetyIdentifier,
+		ContextTokens: profile.ContextTokens, OutputTokens: profile.OutputTokens,
+		Parameters: providers.CloneParameterCapabilities(capability.Parameters),
+	}
+}
+
+// AdapterCapabilities is the only conversion from persisted model capability
+// facts back to a provider adapter policy.
+func (c ModelCapabilities) AdapterCapabilities() providers.Capabilities {
+	capability := providers.Capabilities{
+		Chat: c.Chat, Models: true, Streaming: c.Streaming, Tools: c.Tools, ToolStreaming: c.ToolStreaming, StrictTools: c.StrictTools,
+		ParallelToolCalls: c.ParallelToolCalls, ImageInput: c.ImageInput, VideoInput: c.VideoInput, PartialMode: c.PartialMode, JSONOutput: c.StructuredOutput,
+		JSONSchemaOutput: c.JSONSchemaOutput, ReasoningContent: c.Reasoning, ReasoningReplay: c.ReasoningPreserve,
+		ReasoningAlwaysOn: c.ReasoningAlwaysOn, ReasoningDefaultEnabled: c.ReasoningDefaultEnabled,
+		PromptCacheKey: c.PromptCacheKey, SafetyIdentifier: c.SafetyIdentifier,
+		Parameters: providers.CloneParameterCapabilities(c.Parameters),
+	}
+	for _, mode := range c.ToolChoiceModes {
+		switch mode {
+		case "none":
+			capability.ToolChoiceNone = true
+		case "auto":
+			capability.ToolChoiceAuto = true
+		case "required":
+			capability.ToolChoiceRequired = true
+		case "function":
+			capability.ToolChoiceNamed = true
+		}
+	}
+	capability.ReasoningToggle = c.ReasoningMode == ReasoningToggle || c.ReasoningMode == ReasoningHybrid
+	capability.ReasoningEffort = c.ReasoningMode == ReasoningEffort || c.ReasoningMode == ReasoningHybrid
+	for _, effort := range c.ReasoningEfforts {
+		capability.AllowedReasoningEfforts = append(capability.AllowedReasoningEfforts, canonicalReasoningEffort(effort))
+	}
+	for _, mode := range c.ToolChoiceModesWithReasoning {
+		capability.ToolChoiceModesWithReasoning = append(capability.ToolChoiceModesWithReasoning, canonical.ToolChoiceMode(mode))
+	}
+	return capability
+}
+
+func canonicalReasoningEffort(value string) canonical.ReasoningEffort {
+	return canonical.ReasoningEffort(value)
 }
 
 type ReasoningMode string
 
 const (
-	ReasoningToggle ReasoningMode = "toggle"
-	ReasoningEffort ReasoningMode = "effort"
-	ReasoningHybrid ReasoningMode = "hybrid"
+	ReasoningToggle   ReasoningMode = "toggle"
+	ReasoningEffort   ReasoningMode = "effort"
+	ReasoningHybrid   ReasoningMode = "hybrid"
+	ReasoningAlwaysOn ReasoningMode = "always_on"
 )
 
 type Model struct {
@@ -73,10 +180,20 @@ type Provider struct {
 	SourceURL             string                 `json:"source_url"`
 	VerifiedAt            time.Time              `json:"verified_at"`
 	Contract              providers.ContractInfo `json:"contract"`
+	Models                []ProviderModelProfile `json:"models"`
 	ResourcePoolCount     int64                  `json:"resource_pool_count"`
 	ActiveCredentialCount int64                  `json:"active_credential_count"`
 	CreatedAt             time.Time              `json:"created_at"`
 	UpdatedAt             time.Time              `json:"updated_at"`
+}
+
+// ProviderModelProfile is the code-owned capability directory presented while
+// an administrator chooses a Provider for a resource pool. It does not claim
+// that every imported API Key is authorized for every listed model.
+type ProviderModelProfile struct {
+	UpstreamName string            `json:"upstream_name"`
+	DisplayName  string            `json:"display_name"`
+	Capabilities ModelCapabilities `json:"capabilities"`
 }
 
 type ProviderProjection struct {
@@ -157,56 +274,59 @@ const (
 )
 
 type Credential struct {
-	ID                  uuid.UUID                `json:"id"`
-	ResourcePoolID      uuid.UUID                `json:"resource_pool_id"`
-	ResourcePoolName    string                   `json:"resource_pool_name"`
-	ResourcePoolSlug    string                   `json:"resource_pool_slug"`
-	ProviderID          uuid.UUID                `json:"provider_id"`
-	ProviderName        string                   `json:"provider_name"`
-	ProviderKind        providers.Kind           `json:"provider_kind"`
-	ProviderBaseURL     string                   `json:"provider_base_url"`
-	Name                string                   `json:"name"`
-	Status              CredentialStatus         `json:"status"`
-	HealthStatus        CredentialHealthStatus   `json:"health_status"`
-	HealthGeneration    int64                    `json:"health_generation"`
-	RPMLimit            *int32                   `json:"rpm_limit,omitempty"`
-	TPMLimit            *int64                   `json:"tpm_limit,omitempty"`
-	ConcurrencyLimit    *int32                   `json:"concurrency_limit,omitempty"`
-	CooldownUntil       *time.Time               `json:"cooldown_until,omitempty"`
-	ConsecutiveFailures int32                    `json:"consecutive_failures"`
-	LastSuccessAt       *time.Time               `json:"last_success_at,omitempty"`
-	LastErrorKind       *string                  `json:"last_error_kind,omitempty"`
-	LastProbeAt         *time.Time               `json:"last_probe_at,omitempty"`
-	LastProbeLatencyMs  *int64                   `json:"last_probe_latency_ms,omitempty"`
-	LastProbeKind       *string                  `json:"last_probe_kind,omitempty"`
-	LastProbeStatus     *string                  `json:"last_probe_status,omitempty"`
-	LastProbeErrorKind  *string                  `json:"last_probe_error_kind,omitempty"`
-	LastCheckedAt       *time.Time               `json:"last_checked_at,omitempty"`
-	RecentSuccessRate   *float64                 `json:"recent_success_rate,omitempty"`
-	FirstByteP95Ms      *int64                   `json:"first_byte_p95_ms,omitempty"`
-	TotalLatencyP95Ms   *int64                   `json:"total_latency_p95_ms,omitempty"`
-	RetiredAt           *time.Time               `json:"retired_at,omitempty"`
-	CreatedAt           time.Time                `json:"created_at"`
-	UpdatedAt           time.Time                `json:"updated_at"`
-	ModelBindings       []CredentialModelBinding `json:"model_bindings"`
+	ID                  uuid.UUID                            `json:"id"`
+	ResourcePoolID      uuid.UUID                            `json:"resource_pool_id"`
+	ResourcePoolName    string                               `json:"resource_pool_name"`
+	ResourcePoolSlug    string                               `json:"resource_pool_slug"`
+	ProviderID          uuid.UUID                            `json:"provider_id"`
+	ProviderName        string                               `json:"provider_name"`
+	ProviderKind        providers.Kind                       `json:"provider_kind"`
+	ProviderBaseURL     string                               `json:"provider_base_url"`
+	Name                string                               `json:"name"`
+	Status              CredentialStatus                     `json:"status"`
+	HealthStatus        CredentialHealthStatus               `json:"health_status"`
+	HealthGeneration    int64                                `json:"health_generation"`
+	RPMLimit            *int32                               `json:"rpm_limit,omitempty"`
+	TPMLimit            *int64                               `json:"tpm_limit,omitempty"`
+	ConcurrencyLimit    *int32                               `json:"concurrency_limit,omitempty"`
+	CooldownUntil       *time.Time                           `json:"cooldown_until,omitempty"`
+	ConsecutiveFailures int32                                `json:"consecutive_failures"`
+	LastSuccessAt       *time.Time                           `json:"last_success_at,omitempty"`
+	LastErrorKind       *string                              `json:"last_error_kind,omitempty"`
+	LastProbeAt         *time.Time                           `json:"last_probe_at,omitempty"`
+	LastProbeLatencyMs  *int64                               `json:"last_probe_latency_ms,omitempty"`
+	LastProbeKind       *string                              `json:"last_probe_kind,omitempty"`
+	LastProbeStatus     *string                              `json:"last_probe_status,omitempty"`
+	LastProbeErrorKind  *string                              `json:"last_probe_error_kind,omitempty"`
+	UpstreamStatus      *providers.UpstreamStatusObservation `json:"upstream_status,omitempty"`
+	LastCheckedAt       *time.Time                           `json:"last_checked_at,omitempty"`
+	RecentSuccessRate   *float64                             `json:"recent_success_rate,omitempty"`
+	FirstByteP95Ms      *int64                               `json:"first_byte_p95_ms,omitempty"`
+	TotalLatencyP95Ms   *int64                               `json:"total_latency_p95_ms,omitempty"`
+	RetiredAt           *time.Time                           `json:"retired_at,omitempty"`
+	CreatedAt           time.Time                            `json:"created_at"`
+	UpdatedAt           time.Time                            `json:"updated_at"`
+	ModelBindings       []CredentialModelBinding             `json:"model_bindings"`
 }
 
 type NewCredential struct {
-	ID               uuid.UUID
-	ResourcePoolID   uuid.UUID
-	Name             string
-	EncryptedSecret  []byte
-	RPMLimit         *int32
-	TPMLimit         *int64
-	ConcurrencyLimit *int32
-	DiscoveredModels []DiscoveredModel
-	Discovery        ModelDiscoveryExecution
+	ID                uuid.UUID
+	ResourcePoolID    uuid.UUID
+	Name              string
+	EncryptedSecret   []byte
+	SecretFingerprint string
+	RPMLimit          *int32
+	TPMLimit          *int64
+	ConcurrencyLimit  *int32
+	DiscoveredModels  []DiscoveredModel
+	Discovery         ModelDiscoveryExecution
 }
 
 type CredentialChange struct {
 	ID                uuid.UUID
 	Name              string
 	EncryptedSecret   []byte
+	SecretFingerprint string
 	ReplaceSecret     bool
 	ReplaceModels     bool
 	RPMLimit          *int32
@@ -258,6 +378,23 @@ type CredentialProbeExecutor interface {
 	Execute(context.Context, CredentialProbeTarget) CredentialProbeExecution
 }
 
+type CredentialUpstreamStatusTarget struct {
+	Provider     Provider
+	CredentialID uuid.UUID
+	Secret       string
+	RequestID    string
+}
+
+type CredentialUpstreamStatusExecution struct {
+	Observation   providers.UpstreamStatusObservation `json:"observation"`
+	LatencyMillis int64                               `json:"latency_ms"`
+	ErrorKind     *string                             `json:"error_kind,omitempty"`
+}
+
+type CredentialUpstreamStatusExecutor interface {
+	FetchUpstreamStatus(context.Context, CredentialUpstreamStatusTarget) CredentialUpstreamStatusExecution
+}
+
 type ModelDiscoveryTarget struct {
 	Provider Provider
 	Secret   string
@@ -269,6 +406,19 @@ type ModelDiscoveryExecution struct {
 	Retryable     bool     `json:"retryable"`
 	LatencyMillis int64    `json:"latency_ms"`
 	Models        []string `json:"models"`
+}
+
+type CredentialModelProbeResult struct {
+	Credential Credential
+	Execution  ModelDiscoveryExecution
+}
+
+type CredentialModelProbeBatch struct {
+	Results     []CredentialModelProbeResult
+	Succeeded   int
+	Failed      int
+	Unavailable int
+	Uncertain   int
 }
 
 type ModelDiscoveryExecutor interface {
@@ -289,10 +439,12 @@ type Repository interface {
 
 	CreateCredential(context.Context, NewCredential, uuid.UUID, Mutation) (Credential, error)
 	UpdateCredential(context.Context, CredentialChange, uuid.UUID, Mutation) (Credential, error)
+	GetCredentialBySecretFingerprint(context.Context, string) (Credential, error)
 	SetCredentialStatus(context.Context, uuid.UUID, CredentialStatus, time.Time, uuid.UUID, Mutation) (Credential, error)
 	RetireCredential(context.Context, uuid.UUID, []byte, time.Time, uuid.UUID, Mutation) (Credential, error)
 	ListCredentials(context.Context, bool) ([]Credential, error)
 	GetCredential(context.Context, uuid.UUID) (Credential, error)
 	GetEncryptedCredential(context.Context, uuid.UUID) ([]byte, error)
 	RecordCredentialProbe(context.Context, uuid.UUID, time.Time, CredentialProbeExecution, uuid.UUID, string) (Credential, error)
+	RecordCredentialUpstreamStatus(context.Context, uuid.UUID, providers.UpstreamStatusObservation, uuid.UUID, string) (Credential, error)
 }

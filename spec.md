@@ -35,7 +35,7 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 - 在线支付、充值、开票、优惠码和自动售卖；
 - 消费者 OAuth/Session 账号池、批量注册、接码、养号、绕过风控或突破上游额度；
 - Kubernetes、多地域主动高可用和移动端控制台；
-- 图像、视频、语音、Embedding、Rerank 等独立公共协议。
+- 语音、Embedding、Rerank 等独立公共协议。
 
 “免费”只表示合法上游合同中的免费资源或管理员发放的免费套餐，不承诺上游永久免费、无限量或始终可用。
 
@@ -64,8 +64,9 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 - 公共合同为 OpenAI-compatible `GET /v1/models`、`POST /v1/chat/completions` 和 `POST /v1/responses`。
 - Chat Completions 与 Responses 支持非流式、流式、工具调用、reasoning 和 usage；无法无损表达的能力在发送前明确拒绝。
 - Public API 拥有客户端 wire，Canonical Model 拥有内部语义，Provider Adapter 或明确 policy 拥有厂商差异。
-- 当前专用 adapter 为智谱 GLM、Agnes 和 Google Gemini，同时保留受限的通用 OpenAI-compatible adapter。
-- Provider kind、展示名称、builder、权威合同 URL、快照日期、现场验证日期与 wire 能力由 `internal/providers` 唯一拥有；每把上游 API Key 当前可见的模型 ID 由成功的 `/models` 探测快照唯一拥有，控制 API、资源池和 UI 只投影这些事实。
+- 当前专用 adapter 为 Agnes、智谱 GLM、硅基流动和 Kimi；上游 wire 差异只保留在各自 adapter 内。
+- `GET /v1/models` 为每个已授权模型返回稳定、机器可读的 capabilities：chat、stream、工具/选择/严格 schema/并行或流式工具、thinking/reasoning、图片/视频、JSON 输出、扩展字段、token 限制及 `parameters`。`parameters` 为每项公开请求参数给出支持状态、范围、固定值及与 thinking 相关的条件；请求字段只在目标模型能无损表达时转发，否则返回带 model、provider、capability 与原因的结构化 4xx。
+- Provider kind、展示名称、builder、权威合同 URL、快照日期、现场验证日期、模型能力目录与 wire 能力由 `internal/providers` 唯一拥有；每把上游 API Key 当前可见的模型 ID 由成功的 `/models` 探测快照唯一拥有，控制 API、资源池和 UI 只投影这些事实。
 - 模型、能力、错误和限额是易变外部事实；修改前依据官方资料和隔离 wire 复核。无法权威查询的余额保持未知，不伪造剩余额度。
 
 ### 现场兼容基线
@@ -76,8 +77,8 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 | --- | --- | --- | --- |
 | Agnes | `agnes` | `agnes-2.0-flash` | models、chat、stream、tools、thinking、usage、取消与未知边界 |
 | 智谱 GLM | `zhipu` | `glm-5.2` | models、chat、stream、tools、reasoning、usage、结构化 quota 与同池接管 |
-| Google Gemini | `gemini` | `gemini-3.5-flash` | models、工具调用、thought signature 回放、reasoning、usage 与结构化错误 |
-| 硅基流动 | `openai-compatible` | `Qwen/Qwen3.5-9B` | models、chat、Responses、stream、tools、reasoning、usage 与标准 SDK |
+| 硅基流动 | `siliconflow` | `Qwen/Qwen3.5-9B` | models、chat、stream、tools、reasoning、usage 与标准 SDK |
+| Kimi | `kimi` | `kimi-k3` | models、chat、stream、工具与流式工具、thinking、图片/视频、JSON Schema、Partial、缓存键、安全标识、官方余额端点 |
 
 标准客户端现场版本为 OpenAI Go `v3.44.0` 与 Python `openai==2.46.0`。
 
@@ -85,8 +86,8 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 
 ### Provider 与资源池
 
-- Provider catalog 是代码内置的 adapter 能力、端点与校验数据源，只在创建资源池时提供平台选项；控制台不建立独立 Provider 页面、导航或管理状态。
-- 资源池是明确的上游资格边界。管理员选择一个 Provider，使用中文、英文或混合名称创建资源池；稳定 slug 由服务端自动生成，不作为管理员输入或控制台任务。一个资源池只属于一个 Provider，当前模型集合由活动上游 Key 的成功探测快照并集派生。
+- Provider catalog 是代码内置的 adapter 能力、端点与校验数据源，只在创建资源池时提供平台选项；表单同时投影该 Provider 的已核验模型目录、逐模型能力、限制与官方依据，不建立独立 Provider 业务对象或导航。
+- 资源池是明确的上游资格边界。管理员选择一个 Provider，使用中文、英文或混合名称创建资源池；稳定 slug 由服务端自动生成，不作为管理员输入或控制台任务。一个资源池只属于一个 Provider，可以容纳多把上游 API Key；其当前模型集合由活动 Key 的成功探测快照并集派生，不能把 Provider 目录误当作每把 Key 都已授权。
 - 创建资源池只持久化经过校验的 Provider 和 HTTPS 端点，不发送上游请求；添加或刷新上游 API Key 时才通过 SSRF-safe transport 调用 `/models`。
 - 停用或退役资源池只阻止新请求，历史 request、attempt 和审计保持可解释引用。
 
@@ -94,6 +95,8 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 
 - 上游 API Key 属于一个资源池。服务端通过该 Key 的 `/models` 响应保存最新成功的模型快照；同池合格 Key 只会参与自己已声明支持的模型的公平选择。
 - 管理员通过唯一的“添加上游 API Key”入口逐行粘贴凭据：一行创建一条，多行批量创建，可使用 `名称,上游 API Key` 或只粘贴 Key。结果逐项返回 created/skipped/rejected，绝不回显 secret；已有 Key 可以替换 secret、编辑名称和限额、轻量探测、深度测试、启用、停用和退役。探测失败保留上一次成功快照。
+- 每条上游 API Key 还可由管理员手动获取上游状态。网关容量、上游健康/冷却和上游官方观测是不同事实：前者由 Valkey 协调，健康由 registry 拥有，官方观测必须携带 state、scope、source、observed_at 与可读原因。没有正式读取端点或调用失败时为 unknown/unavailable，禁止以本地桶、Key 数量或一次连通性伪造余额、剩余额度或重置时间。
+- Kimi 余额端点返回账户级 CNY 可用/代金券/现金余额；Kimi 的 RPM、TPM、并发和 TPD 也受账户累计充值权益约束，多把 Key 不得相加。任何 Kimi “免费模型”资格只由当时授权 Key 的 `/v1/models` 或明确官方公布的模型 ID 证明。
 - secret 使用版本化 AEAD 加密保存，只在发送边界按需解密。退役会清除调度资格但保留历史脱敏引用。
 - 状态至少区分 active、cooling、disabled、retired。探测记录稳定结果类别、延迟、模型和 Request ID；传输阶段明确区分 `dns_resolution_failed`、`outbound_address_blocked`、`upstream_connection_failed`、`tls_handshake_failed`、`provider_transport_failed` 与 `probe_timeout_or_canceled`，响应不返回上游正文、secret 或敏感 header。
 

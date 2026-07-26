@@ -27,6 +27,10 @@ type createdGatewayKeyView struct {
 	Secret string         `json:"secret"`
 }
 
+type revealedGatewayKeyView struct {
+	Secret string `json:"secret"`
+}
+
 type gatewayKeyRouteView struct {
 	ModelID          string `json:"modelId"`
 	ModelName        string `json:"modelName"`
@@ -124,6 +128,21 @@ func (a *API) deleteKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) revealKey(w http.ResponseWriter, r *http.Request) {
+	keyID, err := uuid.Parse(chi.URLParam(r, "keyID"))
+	if err != nil {
+		writeDecodeError(w, r, err)
+		return
+	}
+	secret, err := a.identity.RevealGatewayKey(r.Context(), principalFromContext(r.Context()), keyID)
+	if err != nil {
+		a.writeIdentityError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeData(w, http.StatusOK, revealedGatewayKeyView{Secret: secret})
 }
 
 func (a *API) replaceKey(w http.ResponseWriter, r *http.Request) {

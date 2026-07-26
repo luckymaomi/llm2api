@@ -49,6 +49,61 @@ func (c *Coordinator) AcquireRate(ctx context.Context, limits []BucketLimit) (Ra
 	return decision, nil
 }
 
+// InspectRate calculates current bucket balances without deducting capacity.
+// It uses Valkey server time and fails closed when the coordinator is absent.
+func (c *Coordinator) InspectRate(ctx context.Context, limits []BucketLimit) (RateObservation, error) {
+	keys, arguments, err := c.prepareRateLimits(limits)
+	if err != nil {
+		return RateObservation{}, err
+	}
+	values, err := inspectRateScript.Run(ctx, c.client, keys, arguments...).Int64Slice()
+	if err != nil {
+		return RateObservation{}, unavailable("inspect rate tokens", err)
+	}
+	if len(values) != 1+len(limits) || values[0] <= 0 {
+		return RateObservation{}, unavailable("inspect rate tokens", fmt.Errorf("invalid script result"))
+	}
+	result := RateObservation{ObservedAt: time.UnixMilli(values[0]).UTC(), Buckets: make([]BucketState, len(limits))}
+	for index, limit := range limits {
+		if values[1+index] < 0 {
+			return RateObservation{}, unavailable("inspect rate tokens", fmt.Errorf("negative bucket balance"))
+		}
+		result.Buckets[index] = BucketState{Dimension: limit.Dimension, Metric: limit.Metric, RemainingTokens: values[1+index]}
+	}
+	return result, nil
+}
+
+// RefundRate credits already-reserved tokens exactly once for a completed
+// execution. Callers may only refund capacity whose upstream usage is known.
+func (c *Coordinator) RefundRate(ctx context.Context, reference string, limits []BucketLimit) (RateRefundDecision, error) {
+	if len(reference) == 0 || len(reference) > maximumSubjectBytes {
+		return RateRefundDecision{}, fmt.Errorf("%w: refund reference must contain 1-%d bytes", ErrInvalidInput, maximumSubjectBytes)
+	}
+	rateKeys, arguments, err := c.prepareRateLimits(limits)
+	if err != nil {
+		return RateRefundDecision{}, err
+	}
+	keys := make([]string, 0, len(rateKeys)+1)
+	keys = append(keys, c.rateRefundKey(reference))
+	keys = append(keys, rateKeys...)
+	arguments = append([]any{maximumFullRefill.Milliseconds()}, arguments...)
+	values, err := refundRateScript.Run(ctx, c.client, keys, arguments...).Int64Slice()
+	if err != nil {
+		return RateRefundDecision{}, unavailable("refund rate tokens", err)
+	}
+	if len(values) != 2+len(limits) || (values[0] != 0 && values[0] != 1) || values[1] <= 0 {
+		return RateRefundDecision{}, unavailable("refund rate tokens", fmt.Errorf("invalid script result"))
+	}
+	result := RateRefundDecision{Applied: values[0] == 1, ObservedAt: time.UnixMilli(values[1]).UTC(), Buckets: make([]BucketState, len(limits))}
+	for index, limit := range limits {
+		if values[2+index] < 0 {
+			return RateRefundDecision{}, unavailable("refund rate tokens", fmt.Errorf("negative bucket balance"))
+		}
+		result.Buckets[index] = BucketState{Dimension: limit.Dimension, Metric: limit.Metric, RemainingTokens: values[2+index]}
+	}
+	return result, nil
+}
+
 func (c *Coordinator) prepareRateLimits(limits []BucketLimit) ([]string, []any, error) {
 	if len(limits) == 0 {
 		return nil, nil, fmt.Errorf("%w: at least one bucket limit is required", ErrInvalidInput)

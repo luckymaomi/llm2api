@@ -76,6 +76,7 @@ require_file_secrets() {
     LLM2API_MASTER_KEYS \
     LLM2API_SESSION_PEPPER \
     LLM2API_API_KEY_PEPPER \
+    LLM2API_CREDENTIAL_FINGERPRINT_PEPPER \
     LLM2API_COORDINATION_KEY_HASH_SECRET; do
     [[ -z ${!name+x} ]] || { echo "$name must use its _FILE input" >&2; return 1; }
   done
@@ -87,6 +88,7 @@ require_file_secrets() {
     LLM2API_MASTER_KEYS_FILE \
     LLM2API_SESSION_PEPPER_FILE \
     LLM2API_API_KEY_PEPPER_FILE \
+    LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE \
     LLM2API_COORDINATION_KEY_HASH_SECRET_FILE; do
     path=${!name:-}
     [[ -f "$path" && -s "$path" ]] || { echo "$name must name a non-empty file" >&2; return 1; }
@@ -105,10 +107,23 @@ require_immutable_gateway_image() {
 }
 
 deployment_compose() {
-  local project=${LLM2API_COMPOSE_PROJECT:-llm2api-production}
+  local project=${LLM2API_COMPOSE_PROJECT:-llm2api-production} overlay
+  local -a compose_files=(--file "$DEPLOY_DIRECTORY/compose.production.yaml")
   [[ $project =~ ^[a-z0-9][a-z0-9_-]{1,62}$ ]] || {
     echo "LLM2API_COMPOSE_PROJECT is invalid" >&2
     return 1
   }
-  docker compose --project-name "$project" --file "$DEPLOY_DIRECTORY/compose.production.yaml" "$@"
+  if [[ -n ${LLM2API_COMPOSE_OVERLAY_FILE:-} ]]; then
+    overlay=$LLM2API_COMPOSE_OVERLAY_FILE
+    [[ $overlay =~ ^compose\.[a-z0-9-]+\.yaml$ ]] || {
+      echo "LLM2API_COMPOSE_OVERLAY_FILE is invalid" >&2
+      return 1
+    }
+    [[ -f "$DEPLOY_DIRECTORY/$overlay" && ! -L "$DEPLOY_DIRECTORY/$overlay" ]] || {
+      echo "LLM2API_COMPOSE_OVERLAY_FILE does not name a regular deployment file" >&2
+      return 1
+    }
+    compose_files+=(--file "$DEPLOY_DIRECTORY/$overlay")
+  fi
+  docker compose --project-name "$project" "${compose_files[@]}" "$@"
 }

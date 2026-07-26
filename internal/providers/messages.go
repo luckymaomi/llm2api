@@ -19,6 +19,9 @@ func (a *openAIAdapter) encodeMessages(messages []canonical.Message) ([]wireMess
 		if message.Name != "" && !a.policy.capabilities.MessageName {
 			return nil, a.unsupported(fmt.Sprintf("messages[%d].name", index))
 		}
+		if message.Partial && !a.policy.capabilities.PartialMode {
+			return nil, a.unsupported(fmt.Sprintf("messages[%d].partial", index))
+		}
 		content, err := a.encodeContent(message.Role, message.Content, len(message.ToolCalls) > 0)
 		if err != nil {
 			return nil, a.requestError(canonical.ErrorInvalidRequest, "invalid_content", err.Error(), fmt.Sprintf("messages[%d].content", index))
@@ -39,6 +42,7 @@ func (a *openAIAdapter) encodeMessages(messages []canonical.Message) ([]wireMess
 			Content:    content,
 			ToolCalls:  toolCalls,
 			ToolCallID: message.ToolCallID,
+			Partial:    message.Partial,
 		}
 		if message.Reasoning != nil {
 			wireMessage.ReasoningContent = message.Reasoning.Text
@@ -58,7 +62,7 @@ func (a *openAIAdapter) encodeContent(role canonical.Role, content []canonical.C
 	if len(content) == 1 && content[0].Type == canonical.ContentPartText {
 		return content[0].Text, nil
 	}
-	if !a.policy.capabilities.ImageInput {
+	if !a.policy.capabilities.ImageInput && !a.policy.capabilities.VideoInput {
 		return nil, fmt.Errorf("provider cannot represent this content without loss")
 	}
 	if role != canonical.RoleUser {
@@ -70,10 +74,21 @@ func (a *openAIAdapter) encodeContent(role canonical.Role, content []canonical.C
 		case canonical.ContentPartText:
 			parts = append(parts, wireContentPart{Type: part.Type, Text: part.Text})
 		case canonical.ContentPartImageURL:
+			if !a.policy.capabilities.ImageInput {
+				return nil, fmt.Errorf("provider cannot represent image_url content without loss")
+			}
 			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
 				return nil, fmt.Errorf("image_url content requires a URL")
 			}
 			parts = append(parts, wireContentPart{Type: part.Type, ImageURL: &wireImageURL{URL: part.ImageURL.URL, Detail: part.ImageURL.Detail}})
+		case canonical.ContentPartVideoURL:
+			if !a.policy.capabilities.VideoInput {
+				return nil, fmt.Errorf("provider cannot represent video_url content without loss")
+			}
+			if part.VideoURL == nil || strings.TrimSpace(part.VideoURL.URL) == "" {
+				return nil, fmt.Errorf("video_url content requires a URL")
+			}
+			parts = append(parts, wireContentPart{Type: part.Type, VideoURL: &wireVideoURL{URL: part.VideoURL.URL}})
 		default:
 			return nil, fmt.Errorf("content part type %q is invalid", part.Type)
 		}
@@ -100,16 +115,10 @@ func (a *openAIAdapter) encodeToolCalls(toolCalls []canonical.ToolCall, messageI
 		if toolType != "function" {
 			return nil, a.unsupported(fmt.Sprintf("messages[%d].tool_calls[%d].type", messageIndex, index))
 		}
-		encodedCall := wireToolCall{
+		encoded = append(encoded, wireToolCall{
 			ID: toolCall.ID, Type: toolType,
 			Function: wireFunctionCall{Name: toolCall.Function.Name, Arguments: toolCall.Function.Arguments},
-		}
-		if a.policy.encodeToolCallMetadata != nil {
-			if err := a.policy.encodeToolCallMetadata(&encodedCall, toolCall); err != nil {
-				return nil, err
-			}
-		}
-		encoded = append(encoded, encodedCall)
+		})
 	}
 	return encoded, nil
 }

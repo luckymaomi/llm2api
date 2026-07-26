@@ -429,7 +429,7 @@ func (r *IdentityRepository) CreateGatewayKey(ctx context.Context, input identit
 		}
 		validatedRoutes = append(validatedRoutes, identity.GatewayKeyRoute{ModelID: validated.ModelID, ModelName: validated.PublicName, ResourcePoolID: validated.ResourcePoolID, ResourcePoolName: validated.ResourcePoolName})
 	}
-	created, err := queries.CreateGatewayKey(ctx, db.CreateGatewayKeyParams{UserID: input.UserID, Name: input.Name, Prefix: input.Prefix, SecretDigest: input.SecretDigest, ExpiresAt: optionalTimestamp(input.ExpiresAt)})
+	created, err := queries.CreateGatewayKey(ctx, db.CreateGatewayKeyParams{ID: input.ID, UserID: input.UserID, Name: input.Name, Prefix: input.Prefix, SecretDigest: input.SecretDigest, EncryptedSecret: input.EncryptedSecret, ExpiresAt: optionalTimestamp(input.ExpiresAt)})
 	if err != nil {
 		return identity.GatewayKey{}, translateStoreError(err)
 	}
@@ -503,6 +503,22 @@ func (r *IdentityRepository) GatewayKeyForReplacement(ctx context.Context, keyID
 		return identity.GatewayKey{}, identity.ErrConflict
 	}
 	return key, nil
+}
+
+func (r *IdentityRepository) GetEncryptedGatewayKey(ctx context.Context, keyID uuid.UUID) ([]byte, error) {
+	encrypted, err := r.queries.GetEncryptedGatewayKey(ctx, keyID)
+	if err != nil {
+		return nil, translateStoreError(err)
+	}
+	return append([]byte(nil), encrypted...), nil
+}
+
+func (r *IdentityRepository) RecordGatewayKeyReveal(ctx context.Context, keyID, actorID uuid.UUID) error {
+	_, err := r.queries.CreateAuditEvent(ctx, auditParams(&actorID, "gateway_key.revealed", "gateway_key", keyID.String(), nil))
+	if err == nil {
+		return nil
+	}
+	return translateStoreError(err)
 }
 
 func (r *IdentityRepository) DeleteGatewayKey(ctx context.Context, keyID, actorID uuid.UUID, allowAny bool) error {

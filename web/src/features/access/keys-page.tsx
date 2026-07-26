@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CirclePlay, Plus, RotateCw, XCircle } from 'lucide-react'
+import { CirclePlay, Eye, Plus, RotateCw, XCircle } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { accessApi, type GatewayKey } from '@/api'
@@ -17,6 +17,7 @@ import { formatDateTime } from '@/lib/format'
 
 import { GatewayKeyTestDialog } from './gateway-key-test-dialog'
 import { KeyForm } from './key-form'
+import { KeyRevealDialog } from './key-reveal-dialog'
 import { KeyReplacementDialog } from './key-replacement-dialog'
 
 export function KeysPage() {
@@ -25,6 +26,7 @@ export function KeysPage() {
   const canTest = hasCapability(session, 'api-key:test')
   const { state, setPage, setSearch, setStatus } = useListSearch()
   const [creating, setCreating] = useState(false)
+  const [revealKey, setRevealKey] = useState<GatewayKey | null>(null)
   const [replacementKey, setReplacementKey] = useState<GatewayKey | null>(null)
   const [deleteKey, setDeleteKey] = useState<GatewayKey | null>(null)
   const [testKey, setTestKey] = useState<GatewayKey | null>(null)
@@ -103,8 +105,14 @@ export function KeysPage() {
         header: '操作',
         meta: { align: 'center' },
         cell: ({ row }) =>
-          row.original.status === 'active' && (canRevoke || canTest) ? (
+          row.original.status === 'active' ? (
             <div className="row-actions row-actions--center">
+              <TableAction
+                label="显示并复制"
+                icon={<Eye size={16} />}
+                disabled={remove.isPending}
+                onClick={() => setRevealKey(row.original)}
+              />
               {canTest ? (
                 <TableAction
                   label="测试"
@@ -186,6 +194,10 @@ export function KeysPage() {
         />
       </PageSection>
       {canRevoke ? <KeyForm open={creating} onOpenChange={setCreating} /> : null}
+      <KeyRevealDialog
+        gatewayKey={revealKey}
+        onOpenChange={(open) => !open && setRevealKey(null)}
+      />
       <KeyReplacementDialog
         gatewayKey={replacementKey}
         onOpenChange={(open) => !open && setReplacementKey(null)}

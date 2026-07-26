@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, Pencil, Play, Plus, Power, RefreshCw } from 'lucide-react'
+import { Archive, CloudDownload, Pencil, Play, Plus, Power, RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
-import { catalogApi, type Credential, type CredentialStatus } from '@/api'
+import { catalogApi, type Credential, type CredentialModelProbeBatchResult } from '@/api'
 import { DataTable, type ColumnDef } from '@/components/data-table/data-table'
 import {
   RowActionItem,
@@ -13,13 +13,13 @@ import {
 import { Page, PageHeader, PageSection } from '@/components/layout'
 import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { NativeSelect } from '@/components/ui/field'
 import { FormProblem } from '@/features/auth/form-problem'
 import { formatDateTime, formatNumber } from '@/lib/format'
 
 import { CredentialBatchForm } from './credential-batch-form'
 import { CredentialForm } from './credential-form'
+import { CredentialOperationDialog, type CredentialOperation } from './credential-operation-dialog'
 import { probeErrorLabel } from './credential-probe-copy'
 import { CredentialProbeDialog } from './credential-probe-dialog'
 
@@ -28,62 +28,31 @@ export function CredentialsPage() {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<Credential | null>(null)
   const [probing, setProbing] = useState<Credential | null>(null)
-  const [probeAllResult, setProbeAllResult] = useState<{
-    succeeded: number
-    failed: number
+  const [probeAllResult, setProbeAllResult] = useState<CredentialModelProbeBatchResult | null>(null)
+  const [operation, setOperation] = useState<CredentialOperation | null>(null)
+  const [upstreamStatusResult, setUpstreamStatusResult] = useState<{
+    credentialName: string
+    state: NonNullable<Credential['upstreamStatus']>['state']
   } | null>(null)
-  const [statusTarget, setStatusTarget] = useState<{
-    credential: Credential
-    status: CredentialStatus
-  } | null>(null)
-  const [retiring, setRetiring] = useState<Credential | null>(null)
   const [resourcePoolId, setResourcePoolId] = useState('')
   const query = useQuery({
     queryKey: ['credentials'],
     queryFn: ({ signal }) => catalogApi.credentials(true, signal),
   })
-  const statusMutation = useMutation({
-    mutationFn: ({ credential, status }: NonNullable<typeof statusTarget>) =>
-      catalogApi.setCredentialStatus(
-        credential.id,
-        status,
-        credential.updatedAt,
-        crypto.randomUUID(),
-      ),
-    async onSuccess() {
-      setStatusTarget(null)
-      await queryClient.invalidateQueries({ queryKey: ['credentials'] })
-    },
-  })
-  const retireMutation = useMutation({
-    mutationFn: (credential: Credential) =>
-      catalogApi.retireCredential(credential.id, credential.updatedAt, crypto.randomUUID()),
-    async onSuccess() {
-      setRetiring(null)
-      await queryClient.invalidateQueries({ queryKey: ['credentials'] })
-      await queryClient.invalidateQueries({ queryKey: ['resource-pools'] })
-    },
-  })
   const probeAllMutation = useMutation({
-    mutationFn: async () => {
-      const candidates = (query.data ?? []).filter((credential) => credential.status === 'active')
-      const outcomes = await Promise.allSettled(
-        candidates.map((credential) =>
-          catalogApi.probeCredential(credential.id, credential.updatedAt, crypto.randomUUID()),
-        ),
-      )
-      return outcomes.reduce(
-        (result, outcome) => ({
-          ...result,
-          ...(outcome.status === 'fulfilled' && outcome.value.status === 'succeeded'
-            ? { succeeded: result.succeeded + 1 }
-            : { failed: result.failed + 1 }),
-        }),
-        { succeeded: 0, failed: 0 },
-      )
-    },
+    mutationFn: () => catalogApi.probeAllCredentials(crypto.randomUUID()),
     async onSuccess(result) {
       setProbeAllResult(result)
+      await queryClient.invalidateQueries({ queryKey: ['credentials'] })
+    },
+  })
+  const upstreamStatusMutation = useMutation({
+    mutationFn: (credential: Credential) => catalogApi.fetchCredentialUpstreamStatus(credential.id),
+    async onSuccess(result) {
+      setUpstreamStatusResult({
+        credentialName: result.credential.name,
+        state: result.observation.state,
+      })
       await queryClient.invalidateQueries({ queryKey: ['credentials'] })
     },
   })
@@ -108,6 +77,7 @@ export function CredentialsPage() {
       {
         accessorKey: 'name',
         header: '上游 API Key',
+        meta: { align: 'center' },
         cell: ({ row }) => (
           <div>
             <strong>{row.original.name}</strong>
@@ -115,10 +85,11 @@ export function CredentialsPage() {
           </div>
         ),
       },
-      { accessorKey: 'resourcePoolName', header: '资源池' },
+      { accessorKey: 'resourcePoolName', header: '资源池', meta: { align: 'center' } },
       {
         id: 'models',
         header: '模型',
+        meta: { align: 'center' },
         cell: ({ row }) => row.original.modelBindings.map((item) => item.modelName).join('、'),
       },
       {
@@ -126,7 +97,19 @@ export function CredentialsPage() {
         header: 'RPM / TPM / 并发',
         cell: ({ row }) =>
           `${limit(row.original.rpmLimit)} / ${limit(row.original.tpmLimit)} / ${limit(row.original.concurrencyLimit)}`,
-        meta: { align: 'right' },
+        meta: { align: 'center' },
+      },
+      {
+        id: 'capacity',
+        header: '网关余量',
+        meta: { align: 'center' },
+        cell: ({ row }) => <CredentialCapacityCell capacity={row.original.capacity} />,
+      },
+      {
+        id: 'upstream-status',
+        header: '上游观测',
+        meta: { align: 'center' },
+        cell: ({ row }) => <CredentialUpstreamStatusCell status={row.original.upstreamStatus} />,
       },
       {
         id: 'probe',
@@ -151,7 +134,19 @@ export function CredentialsPage() {
       {
         accessorKey: 'status',
         header: '状态',
-        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+        cell: ({ row }) => (
+          <div className="table-status-cell">
+            <StatusBadge status={row.original.status} />
+            <StatusBadge status={row.original.healthStatus} />
+            {row.original.cooldownUntil ? (
+              <small className="table-subline">
+                冷却至 {formatDateTime(row.original.cooldownUntil)}
+              </small>
+            ) : row.original.lastErrorKind ? (
+              <small className="table-subline">上游：{row.original.lastErrorKind}</small>
+            ) : null}
+          </div>
+        ),
         meta: { align: 'center' },
       },
       {
@@ -167,6 +162,15 @@ export function CredentialsPage() {
                 onClick={() => setProbing(row.original)}
               />
               <TableAction
+                label="获取上游状态"
+                icon={<CloudDownload size={16} />}
+                disabled={upstreamStatusMutation.isPending}
+                onClick={() => {
+                  setUpstreamStatusResult(null)
+                  upstreamStatusMutation.mutate(row.original)
+                }}
+              />
+              <TableAction
                 label="编辑"
                 icon={<Pencil size={16} />}
                 onClick={() => setEditing(row.original)}
@@ -175,7 +179,13 @@ export function CredentialsPage() {
                 {row.original.status === 'disabled' ? (
                   <RowActionItem
                     icon={<Play size={15} />}
-                    onSelect={() => setStatusTarget({ credential: row.original, status: 'active' })}
+                    onSelect={() =>
+                      setOperation({
+                        kind: 'set-status',
+                        credential: row.original,
+                        status: 'active',
+                      })
+                    }
                   >
                     启用 Key
                   </RowActionItem>
@@ -183,7 +193,11 @@ export function CredentialsPage() {
                   <RowActionItem
                     icon={<Power size={15} />}
                     onSelect={() =>
-                      setStatusTarget({ credential: row.original, status: 'disabled' })
+                      setOperation({
+                        kind: 'set-status',
+                        credential: row.original,
+                        status: 'disabled',
+                      })
                     }
                   >
                     停用 Key
@@ -195,7 +209,7 @@ export function CredentialsPage() {
                     <RowActionItem
                       icon={<Archive size={15} />}
                       danger
-                      onSelect={() => setRetiring(row.original)}
+                      onSelect={() => setOperation({ kind: 'retire', credential: row.original })}
                     >
                       退役 Key
                     </RowActionItem>
@@ -206,7 +220,7 @@ export function CredentialsPage() {
           ) : null,
       },
     ],
-    [],
+    [upstreamStatusMutation],
   )
 
   return (
@@ -240,19 +254,26 @@ export function CredentialsPage() {
         }
       />
       <PageSection>
-        <FormProblem
-          error={statusMutation.error ?? retireMutation.error ?? probeAllMutation.error}
-        />
+        <FormProblem error={probeAllMutation.error ?? upstreamStatusMutation.error} />
         {probeAllResult ? (
           <p
             className={
-              probeAllResult.failed === 0
+              probeAllResult.failed === 0 &&
+              probeAllResult.unavailable === 0 &&
+              probeAllResult.uncertain === 0
                 ? 'batch-probe-result'
                 : 'batch-probe-result batch-probe-result--warning'
             }
             role="status"
           >
-            已完成模型探测：成功 {probeAllResult.succeeded} 把，失败 {probeAllResult.failed} 把。
+            已完成模型探测：成功 {probeAllResult.succeeded} 把，失败 {probeAllResult.failed} 把，
+            暂不可用 {probeAllResult.unavailable} 把，结果未确认 {probeAllResult.uncertain} 把。
+          </p>
+        ) : null}
+        {upstreamStatusResult ? (
+          <p className="batch-probe-result" role="status">
+            已获取 {upstreamStatusResult.credentialName} 的上游观测：
+            {upstreamStatusLabel(upstreamStatusResult.state)}。
           </p>
         ) : null}
         <div className="table-toolbar">
@@ -301,24 +322,9 @@ export function CredentialsPage() {
           onOpenChange={(open) => !open && setProbing(null)}
         />
       ) : null}
-      <ConfirmDialog
-        open={statusTarget !== null}
-        onOpenChange={(open) => !open && setStatusTarget(null)}
-        title="更改上游 API Key 状态"
-        description="状态提交后会直接影响新请求的候选资格。"
-        confirmLabel="确认"
-        pending={statusMutation.isPending}
-        onConfirm={() => statusTarget && statusMutation.mutate(statusTarget)}
-      />
-      <ConfirmDialog
-        open={retiring !== null}
-        onOpenChange={(open) => !open && setRetiring(null)}
-        title="退役上游 API Key"
-        description="退役后 secret 将退出调度资格，历史请求仍保留脱敏引用。"
-        confirmLabel="确认退役"
-        pending={retireMutation.isPending}
-        danger
-        onConfirm={() => retiring && retireMutation.mutate(retiring)}
+      <CredentialOperationDialog
+        operation={operation}
+        onOpenChange={(open) => !open && setOperation(null)}
       />
     </Page>
   )
@@ -326,4 +332,68 @@ export function CredentialsPage() {
 
 function limit(value: number | undefined) {
   return value === undefined ? '不限' : formatNumber(value)
+}
+
+function CredentialCapacityCell({ capacity }: { capacity: Credential['capacity'] }) {
+  if (capacity.state !== 'observed') {
+    return <span className="table-subline">暂不可观测</span>
+  }
+  return (
+    <div className="table-status-cell">
+      <span>
+        {capacityRow(capacity.requestsPerMinuteRemaining, capacity.requestsPerMinuteLimit, 'RPM')}
+      </span>
+      <small className="table-subline">
+        {capacityRow(capacity.tokensPerMinuteRemaining, capacity.tokensPerMinuteLimit, 'TPM')}
+      </small>
+      <small className="table-subline">
+        {capacityRow(capacity.concurrencyInUse, capacity.concurrencyLimit, '并发')}
+      </small>
+    </div>
+  )
+}
+
+function CredentialUpstreamStatusCell({ status }: { status: Credential['upstreamStatus'] }) {
+  if (!status) return <span className="table-subline">尚未人工获取</span>
+  return (
+    <div className="table-status-cell">
+      <StatusBadge status={status.state} />
+      <small className="table-subline">{upstreamScopeLabel(status.scope)}</small>
+      <small className="table-subline">证据：{upstreamSourceLabel(status.source)}</small>
+      {status.balance ? (
+        <small className="table-subline">
+          可用 {status.balance.currency} {status.balance.available}
+        </small>
+      ) : status.reason ? (
+        <small className="table-subline">{status.reason}</small>
+      ) : null}
+      <small className="table-subline">{formatDateTime(status.observedAt)}</small>
+    </div>
+  )
+}
+
+function capacityRow(current: number | undefined, limit: number | undefined, unit: string) {
+  if (limit === undefined) return `未配置 ${unit}`
+  return `${formatNumber(current ?? 0)} / ${formatNumber(limit)} ${unit}`
+}
+
+function upstreamStatusLabel(state: NonNullable<Credential['upstreamStatus']>['state']) {
+  return state === 'observed' ? '已获得官方数据' : state === 'unknown' ? '官方数据未知' : '暂不可用'
+}
+
+function upstreamScopeLabel(scope: NonNullable<Credential['upstreamStatus']>['scope']) {
+  switch (scope) {
+    case 'account':
+      return '上游账户共享'
+    case 'project':
+      return '上游项目共享'
+    case 'credential':
+      return '上游 API Key'
+    default:
+      return '上游范围未知'
+  }
+}
+
+function upstreamSourceLabel(source: string) {
+  return source === 'official_balance_endpoint' ? '官方余额接口' : source
 }

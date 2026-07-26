@@ -113,8 +113,8 @@ WHERE user_id = sqlc.arg(user_id) AND id <> sqlc.arg(preserved_session_id) AND r
 DELETE FROM sessions WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '1 day';
 
 -- name: CreateGatewayKey :one
-INSERT INTO gateway_keys (user_id, name, prefix, secret_digest, expires_at)
-VALUES (sqlc.arg(user_id), sqlc.arg(name), sqlc.arg(prefix), sqlc.arg(secret_digest), sqlc.narg(expires_at))
+INSERT INTO gateway_keys (id, user_id, name, prefix, secret_digest, encrypted_secret, expires_at)
+VALUES (sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(name), sqlc.arg(prefix), sqlc.arg(secret_digest), sqlc.arg(encrypted_secret), sqlc.narg(expires_at))
 RETURNING *;
 
 -- name: ClaimGatewayKeyMutation :one
@@ -198,6 +198,11 @@ SELECT id, user_id, name, prefix, expires_at, deleted_at, last_used_at, created_
 FROM gateway_keys
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > now())
 FOR UPDATE;
+
+-- name: GetEncryptedGatewayKey :one
+SELECT encrypted_secret
+FROM gateway_keys
+WHERE id = sqlc.arg(id) AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > now());
 
 -- name: ListGatewayKeyModelBindingsByKey :many
 SELECT gkm.model_id, model.public_name, gkm.resource_pool_id, pool.name AS resource_pool_name

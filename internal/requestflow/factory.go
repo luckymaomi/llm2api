@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/luckymaomi/llm2api/internal/providers"
-	"github.com/luckymaomi/llm2api/internal/registry"
 	"github.com/luckymaomi/llm2api/internal/security"
 )
 
@@ -22,16 +21,7 @@ func NewProviderFactory(policy security.SSRFPolicy) *ProviderFactory {
 }
 
 func (f *ProviderFactory) Adapter(model Model) (providers.Adapter, error) {
-	capabilities := providers.NarrowOpenAICompatibleCapabilities()
-	capabilities.Streaming = model.Capabilities.Streaming
-	capabilities.Tools = model.Capabilities.Tools
-	capabilities.ToolStreaming = model.Capabilities.Tools && model.Capabilities.Streaming
-	capabilities.ReasoningToggle = model.Capabilities.ReasoningMode == registry.ReasoningToggle || model.Capabilities.ReasoningMode == registry.ReasoningHybrid
-	capabilities.ReasoningEffort = model.Capabilities.ReasoningMode == registry.ReasoningEffort || model.Capabilities.ReasoningMode == registry.ReasoningHybrid
-	capabilities.ReasoningContent = model.Capabilities.Reasoning
-	capabilities.ReasoningReplay = false
-	capabilities.JSONOutput = model.Capabilities.StructuredOutput
-	return f.catalog.Build(model.ProviderKind, providers.AdapterOptions{BaseURL: model.ProviderBaseURL, Capabilities: capabilities})
+	return f.catalog.Build(model.ProviderKind, providers.AdapterOptions{BaseURL: model.ProviderBaseURL, Capabilities: model.Capabilities.AdapterCapabilities()})
 }
 
 func (f *ProviderFactory) Client(candidate Candidate) (*http.Client, error) {

@@ -41,10 +41,12 @@ try {
   $masterKeysFile = Write-ServiceSecret "master-keys" "1:$masterKey"
   $sessionPepperFile = Write-ServiceSecret "session-pepper" "winservice-session-pepper-$runID"
   $apiKeyPepperFile = Write-ServiceSecret "api-key-pepper" "winservice-api-key-pepper-$runID"
+  $credentialFingerprintPepperFile = Write-ServiceSecret "credential-fingerprint-pepper" "winservice-credential-fingerprint-pepper-$runID"
   $coordinationSecretFile = Write-ServiceSecret "coordination-secret" "winservice-coordination-secret-$runID"
   $lines = @(
     "LLM2API_PROFILE=production",
     "LLM2API_HTTP_ADDRESS=127.0.0.1:$gatewayPort",
+    "LLM2API_PUBLIC_ORIGIN=http://127.0.0.1:$gatewayPort",
     "LLM2API_DATABASE_URL_FILE=$databaseURLFile",
     "LLM2API_DATABASE_MIGRATE_ON_START=false",
     "LLM2API_DATABASE_MIN_CONNECTIONS=1",
@@ -55,6 +57,7 @@ try {
     "LLM2API_ACTIVE_MASTER_KEY_VERSION=1",
     "LLM2API_SESSION_PEPPER_FILE=$sessionPepperFile",
     "LLM2API_API_KEY_PEPPER_FILE=$apiKeyPepperFile",
+    "LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE=$credentialFingerprintPepperFile",
     "LLM2API_COORDINATION_KEY_HASH_SECRET_FILE=$coordinationSecretFile",
     "LLM2API_COOKIE_SECURE=true"
   )

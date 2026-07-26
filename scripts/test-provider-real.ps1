@@ -21,12 +21,11 @@ function Invoke-ControlJSON {
 function New-ResourcePool {
   param(
     [Parameter(Mandatory = $true)][string] $ProviderID,
-    [Parameter(Mandatory = $true)][string] $Name,
-    [Parameter(Mandatory = $true)][string] $ModelID
+    [Parameter(Mandatory = $true)][string] $Name
   )
 
   return (Invoke-ControlJSON -Method Post -Path "/api/control/resource-pools" -Idempotent -Body @{
-      providerId = $ProviderID; name = $Name; modelIds = @($ModelID)
+      providerId = $ProviderID; name = $Name
     }).data
 }
 
@@ -34,14 +33,12 @@ function New-Credential {
   param(
     [Parameter(Mandatory = $true)][string] $ResourcePoolID,
     [Parameter(Mandatory = $true)][string] $Name,
-    [Parameter(Mandatory = $true)][string] $Secret,
-    [Parameter(Mandatory = $true)][string] $ModelID
+    [Parameter(Mandatory = $true)][string] $Secret
   )
 
   $result = (Invoke-ControlJSON -Method Post -Path "/api/control/credentials/batch" -Idempotent -Body @{
       resourcePoolId = $ResourcePoolID
       items = @(@{ name = $Name; secret = $Secret })
-      modelBindings = @(@{ model_id = $ModelID })
       rpmLimit = 60
       tpmLimit = 1000000
       concurrencyLimit = 4
@@ -204,7 +201,7 @@ try {
   $keyLines = @(Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root "key.txt") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
   $keyEntries = @($keyLines | ForEach-Object {
       $segments = @($_.Split([char]0xFF1A) | ForEach-Object { $_.Trim() })
-      if ($segments[0] -notmatch '^(agnes[1-3]|gemini1)$' -and $segments[0] -notmatch "^$zhipuLabelPrefix[1-3]$") {
+      if ($segments[0] -notmatch '^agnes[1-3]$' -and $segments[0] -notmatch "^$zhipuLabelPrefix[1-3]$") {
         return
       }
       if ($segments.Count -lt 2 -or @($segments | Where-Object { -not $_ }).Count -ne 0) {
@@ -218,7 +215,7 @@ try {
   $namedCredentialCount = @($keys).Count
   $siliconCredentialCount = @($siliconKeys).Count
   $shortCredentialCount = @((@($keys) + @($siliconKeys)) | Where-Object { $_.Length -lt 20 }).Count
-  if ($namedCredentialCount -ne 7 -or $siliconCredentialCount -ne 1 -or $shortCredentialCount -ne 0) {
+  if ($namedCredentialCount -ne 6 -or $siliconCredentialCount -ne 1 -or $shortCredentialCount -ne 0) {
     throw "Real Provider acceptance credential counts are invalid (named=$namedCredentialCount, SiliconFlow=$siliconCredentialCount, short=$shortCredentialCount)."
   }
 
@@ -226,20 +223,17 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Could not build the Provider ownership canary." }
   $agnesKeys = [System.Collections.Generic.List[string]]::new()
   $zhipuKeys = [System.Collections.Generic.List[string]]::new()
-  $geminiKeys = [System.Collections.Generic.List[string]]::new()
   foreach ($entry in $keyEntries) {
     if ($entry.Label -match '^agnes[1-3]$') {
       $agnesKeys.Add($entry.Secret)
     } elseif ($entry.Label -match "^$zhipuLabelPrefix[1-3]$") {
       $zhipuKeys.Add($entry.Secret)
-    } elseif ($entry.Label -eq "gemini1") {
-      $geminiKeys.Add($entry.Secret)
     } else {
       throw "A real Provider credential label is outside the expected six-label contract."
     }
   }
-  if ($agnesKeys.Count -ne 3 -or $zhipuKeys.Count -ne 3 -or $geminiKeys.Count -ne 1) {
-    throw "Credential labels did not classify three Agnes, three Zhipu, and one Gemini credential."
+  if ($agnesKeys.Count -ne 3 -or $zhipuKeys.Count -ne 3) {
+    throw "Credential labels did not classify three Agnes and three Zhipu credentials."
   }
   foreach ($secret in $agnesKeys) {
     $probe = Invoke-ProviderCanary -CanaryBinary $canaryBinary -Secret $secret -Kind "agnes" `
@@ -251,10 +245,7 @@ try {
       -ProviderBaseURL "https://open.bigmodel.cn/api/paas/v4" -Model "glm-5.2" -Scenarios "models"
     if (-not $probe.succeeded) { throw "A Zhipu credential failed its official models probe." }
   }
-  $geminiProbe = Invoke-ProviderCanary -CanaryBinary $canaryBinary -Secret $geminiKeys[0] -Kind "gemini" `
-    -ProviderBaseURL "https://generativelanguage.googleapis.com/v1beta/openai" -Model "gemini-3.5-flash" -Scenarios "models"
-  if (-not $geminiProbe.succeeded) { throw "The Gemini credential failed its official models probe." }
-  $siliconProbe = Invoke-ProviderCanary -CanaryBinary $canaryBinary -Secret $siliconKeys[0] -Kind "openai-compatible" `
+  $siliconProbe = Invoke-ProviderCanary -CanaryBinary $canaryBinary -Secret $siliconKeys[0] -Kind "siliconflow" `
     -ProviderBaseURL "https://api.siliconflow.cn/v1" -Model "Qwen/Qwen3.5-9B" -Scenarios "models"
   if (-not $siliconProbe.succeeded) { throw "The SiliconFlow credential failed its official models probe." }
 
@@ -294,6 +285,7 @@ try {
   $env:LLM2API_ACTIVE_MASTER_KEY_VERSION = "1"
   $env:LLM2API_SESSION_PEPPER = "llm2api-provider-session-pepper-0000"
   $env:LLM2API_API_KEY_PEPPER = "llm2api-provider-api-key-pepper-0000"
+  $env:LLM2API_CREDENTIAL_FINGERPRINT_PEPPER = "llm2api-provider-credential-fingerprint-pepper"
   $env:LLM2API_COORDINATION_KEY_HASH_SECRET = "llm2api-provider-coordination-pepper"
   $env:LLM2API_COOKIE_SECURE = "false"
   $env:LLM2API_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15,fdfe:dcba:9876::/48"
@@ -321,36 +313,36 @@ try {
   $setup.data.initialPassword = $null
 
   $providerCatalog = Invoke-RestMethod -Uri "$script:BaseURL/api/control/providers" -WebSession $script:AdminSession -TimeoutSec 30
-  $modelCatalog = Invoke-RestMethod -Uri "$script:BaseURL/api/control/models" -WebSession $script:AdminSession -TimeoutSec 30
   $agnes = @($providerCatalog.data | Where-Object { $_.catalog_id -eq "agnes" }) | Select-Object -First 1
   $zhipu = @($providerCatalog.data | Where-Object { $_.catalog_id -eq "zhipu" }) | Select-Object -First 1
-  $gemini = @($providerCatalog.data | Where-Object { $_.catalog_id -eq "gemini" }) | Select-Object -First 1
   $silicon = @($providerCatalog.data | Where-Object { $_.catalog_id -eq "siliconflow" }) | Select-Object -First 1
-  $agnesModel = @($modelCatalog.data | Where-Object { $_.provider_id -eq $agnes.id -and $_.public_name -eq "agnes-2.0-flash" }) | Select-Object -First 1
-  $zhipuModel = @($modelCatalog.data | Where-Object { $_.provider_id -eq $zhipu.id -and $_.public_name -eq "glm-5.2" }) | Select-Object -First 1
-  $geminiModel = @($modelCatalog.data | Where-Object { $_.provider_id -eq $gemini.id -and $_.public_name -eq "gemini-3.5-flash" }) | Select-Object -First 1
-  $siliconModel = @($modelCatalog.data | Where-Object { $_.provider_id -eq $silicon.id -and $_.public_name -eq "qwen3.5-9b" }) | Select-Object -First 1
-  if (@(@($agnes, $zhipu, $gemini, $silicon, $agnesModel, $zhipuModel, $geminiModel, $siliconModel) | Where-Object { $null -eq $_ }).Count -gt 0) {
-    throw "The code-owned Provider and model catalog did not expose the four verified real entry points."
+  if (@(@($agnes, $zhipu, $silicon) | Where-Object { $null -eq $_ }).Count -gt 0) {
+    throw "The code-owned Provider catalog did not expose the three verified real entry points."
   }
 
-  $agnesPool = New-ResourcePool -ProviderID $agnes.id -Name "Real Agnes" -ModelID $agnesModel.id
-  $zhipuPool = New-ResourcePool -ProviderID $zhipu.id -Name "Real Zhipu" -ModelID $zhipuModel.id
-  $geminiPool = New-ResourcePool -ProviderID $gemini.id -Name "Real Google Gemini" -ModelID $geminiModel.id
-  $siliconPool = New-ResourcePool -ProviderID $silicon.id -Name "Real SiliconFlow" -ModelID $siliconModel.id
-  if (@(@($agnesPool, $zhipuPool, $geminiPool, $siliconPool) | Where-Object { $_.status -ne "active" }).Count -gt 0) {
+  $agnesPool = New-ResourcePool -ProviderID $agnes.id -Name "Real Agnes"
+  $zhipuPool = New-ResourcePool -ProviderID $zhipu.id -Name "Real Zhipu"
+  $siliconPool = New-ResourcePool -ProviderID $silicon.id -Name "Real SiliconFlow"
+  if (@(@($agnesPool, $zhipuPool, $siliconPool) | Where-Object { $_.status -ne "active" }).Count -gt 0) {
     throw "A real Provider resource pool did not become active."
   }
 
   for ($index = 0; $index -lt 3; $index++) {
     New-Credential -ResourcePoolID $agnesPool.id -Name "Agnes dedicated $($index + 1)" -Secret $agnesKeys[$index] `
-      -ModelID $agnesModel.id | Out-Null
+      | Out-Null
   }
-  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu quota 1" -Secret $zhipuQuotaKeys[0] -ModelID $zhipuModel.id | Out-Null
-  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu success" -Secret $zhipuSuccessKeys[0] -ModelID $zhipuModel.id | Out-Null
-  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu quota 3" -Secret $zhipuQuotaKeys[1] -ModelID $zhipuModel.id | Out-Null
-  New-Credential -ResourcePoolID $geminiPool.id -Name "Gemini dedicated 1" -Secret $geminiKeys[0] -ModelID $geminiModel.id | Out-Null
-  New-Credential -ResourcePoolID $siliconPool.id -Name "SiliconFlow dedicated 1" -Secret $siliconKeys[0] -ModelID $siliconModel.id | Out-Null
+  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu quota 1" -Secret $zhipuQuotaKeys[0] | Out-Null
+  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu success" -Secret $zhipuSuccessKeys[0] | Out-Null
+  New-Credential -ResourcePoolID $zhipuPool.id -Name "Zhipu quota 3" -Secret $zhipuQuotaKeys[1] | Out-Null
+  New-Credential -ResourcePoolID $siliconPool.id -Name "SiliconFlow dedicated 1" -Secret $siliconKeys[0] | Out-Null
+
+  $modelCatalog = Invoke-RestMethod -Uri "$script:BaseURL/api/control/models" -WebSession $script:AdminSession -TimeoutSec 30
+  $agnesModel = @($modelCatalog.data | Where-Object { $_.provider_id -eq $agnes.id -and $_.public_name -eq "agnes-2.0-flash" }) | Select-Object -First 1
+  $zhipuModel = @($modelCatalog.data | Where-Object { $_.provider_id -eq $zhipu.id -and $_.public_name -eq "glm-5.2" }) | Select-Object -First 1
+  $siliconModel = @($modelCatalog.data | Where-Object { $_.provider_id -eq $silicon.id -and $_.public_name -eq "Qwen/Qwen3.5-9B" }) | Select-Object -First 1
+  if (@(@($agnesModel, $zhipuModel, $siliconModel) | Where-Object { $null -eq $_ }).Count -gt 0) {
+    throw "Upstream model discovery did not expose the three verified model contracts after credential import."
+  }
 
   $plan = Invoke-ControlJSON -Method Post -Path "/api/control/plans" -Idempotent -Body @{
     name = "Real Provider Plan"
@@ -358,12 +350,11 @@ try {
     routes = @(
       @{ modelId = $agnesModel.id; resourcePoolId = $agnesPool.id },
       @{ modelId = $zhipuModel.id; resourcePoolId = $zhipuPool.id },
-      @{ modelId = $geminiModel.id; resourcePoolId = $geminiPool.id },
       @{ modelId = $siliconModel.id; resourcePoolId = $siliconPool.id }
     )
   }
-  if ($plan.data.current_version.version -ne 1 -or @($plan.data.current_version.routes).Count -ne 4) {
-    throw "Real Provider plan publication did not freeze the four catalog routes."
+  if ($plan.data.current_version.version -ne 1 -or @($plan.data.current_version.routes).Count -ne 3) {
+    throw "Real Provider plan publication did not freeze the three catalog routes."
   }
   $subscription = Invoke-ControlJSON -Method Post -Path "/api/control/subscriptions" -Idempotent -Body @{
     userId = $setup.data.userId
@@ -381,7 +372,6 @@ try {
     routes = @(
       @{ modelId = $agnesModel.id; resourcePoolId = $agnesPool.id }
       @{ modelId = $zhipuModel.id; resourcePoolId = $zhipuPool.id }
-      @{ modelId = $geminiModel.id; resourcePoolId = $geminiPool.id }
       @{ modelId = $siliconModel.id; resourcePoolId = $siliconPool.id }
     )
     expiresAt = $null
@@ -445,47 +435,6 @@ try {
     throw "The dedicated Agnes thinking request did not complete with usage through the Gateway."
   }
 
-  $geminiTools = @(@{ type = "function"; function = @{
-        name = "lookup"; description = "Look up a city"
-        parameters = @{ type = "object"; properties = @{ city = @{ type = @("string", "null") } }; required = @("city", "unknown") }
-      } })
-  $geminiToolBody = @{
-    model = $geminiModel.public_name
-    messages = @(@{ role = "user"; content = "Use the lookup tool for Beijing." })
-    tools = $geminiTools
-    tool_choice = "required"
-    reasoning_effort = "low"
-    max_tokens = 256
-  } | ConvertTo-Json -Depth 12 -Compress
-  $geminiAvailability = $null
-  $geminiToolResult = Invoke-GatewayJSONWithExplicitReissue -Path "/v1/chat/completions" -Body $geminiToolBody
-  if (-not $geminiToolResult.Succeeded) {
-    $geminiAvailability = "$($geminiToolResult.HTTPStatus):$($geminiToolResult.ErrorCode)"
-  } else {
-    $geminiCall = @($geminiToolResult.Data.choices[0].message.tool_calls | Select-Object -First 1)
-    if ($geminiCall.Count -ne 1 -or -not $geminiCall[0].extra_content.google.thought_signature) {
-      throw "The Gemini adapter did not preserve the tool-call thought signature."
-    }
-    $geminiReplayBody = @{
-      model = $geminiModel.public_name
-      messages = @(
-        @{ role = "user"; content = "Use the lookup tool for Beijing." },
-        @{ role = "assistant"; content = $null; tool_calls = @($geminiCall[0]) },
-        @{ role = "tool"; tool_call_id = $geminiCall[0].id; content = "Beijing is sunny." }
-      )
-      tools = $geminiTools
-      tool_choice = "auto"
-      reasoning_effort = "low"
-      max_tokens = 256
-    } | ConvertTo-Json -Depth 14 -Compress
-    $geminiReplayResult = Invoke-GatewayJSONWithExplicitReissue -Path "/v1/chat/completions" -Body $geminiReplayBody
-    if (-not $geminiReplayResult.Succeeded) {
-      $geminiAvailability = "$($geminiReplayResult.HTTPStatus):$($geminiReplayResult.ErrorCode)"
-    } elseif (@($geminiReplayResult.Data.choices).Count -eq 0 -or $geminiReplayResult.Data.usage.total_tokens -lt 1) {
-      throw "The Gemini adapter did not complete a signed tool-call replay."
-    }
-  }
-
   $chatBody = @{
     model = $zhipuModel.public_name
     messages = @(@{ role = "user"; content = "Reply with exactly OK." })
@@ -520,7 +469,6 @@ try {
   $keyEntries = $null
   $agnesKeys = $null
   $zhipuKeys = $null
-  $geminiKeys = $null
   $siliconKeys = $null
   $zhipuQuotaKeys = $null
   $zhipuSuccessKeys = $null
@@ -545,9 +493,4 @@ if ($null -ne $failure) {
 if ($cleanupFailures.Count -gt 0) { throw "Real Provider acceptance cleanup failed: $($cleanupFailures -join '; ')" }
 if (-not $acceptancePassed) { throw "Real Provider acceptance ended without a result." }
 
-Write-Host "Real Agnes, Zhipu, OpenAI-compatible, Go SDK, Python SDK, quota exclusion, and healthy takeover acceptance passed."
-if ($geminiAvailability) {
-  Write-Host "Gemini live generation remained temporarily unavailable after bounded explicit reissue ($geminiAvailability); its retryable Gateway error contract passed."
-} else {
-  Write-Host "Gemini thought-signature and signed tool replay acceptance passed."
-}
+Write-Host "Real Agnes, Zhipu, SiliconFlow, Go SDK, Python SDK, quota exclusion, and healthy takeover acceptance passed."

@@ -78,8 +78,14 @@ func main() {
 	}
 	defer clearBytes(secret)
 
-	adapter, err := providers.DefaultCatalog().Build(providers.Kind(*kind), providers.AdapterOptions{
-		BaseURL: strings.TrimSpace(*baseURL), Capabilities: providers.NarrowOpenAICompatibleCapabilities(),
+	catalog := providers.DefaultCatalog()
+	profile, found := catalog.ModelCapabilities(providers.Kind(*kind), strings.TrimSpace(*model))
+	if !found {
+		fmt.Fprintln(os.Stderr, "provider/model capability profile is not registered")
+		os.Exit(2)
+	}
+	adapter, err := catalog.Build(providers.Kind(*kind), providers.AdapterOptions{
+		BaseURL: strings.TrimSpace(*baseURL), Capabilities: profile.Capabilities,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "could not build Provider adapter")

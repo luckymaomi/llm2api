@@ -189,7 +189,11 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 		concurrencyLimits[index] = coordination.ConcurrencyLimit{Dimension: dimensions[index], MaxInFlight: capacities[index].Concurrency}
 	}
 	startedAt := time.Now()
-	leaseDecision, err := a.coordinator.AcquireLease(ctx, request.ExecutionID.String(), a.config.LeaseTTL, concurrencyLimits)
+	leaseID, err := coordination.NewLeaseID()
+	if err != nil {
+		return nil, 0, fmt.Errorf("%w: generate concurrency lease id: %v", ErrCoordinationFailed, err)
+	}
+	leaseDecision, err := a.coordinator.AcquireLease(ctx, leaseID, a.config.LeaseTTL, concurrencyLimits)
 	wait := time.Since(startedAt)
 	if err != nil {
 		return nil, wait, fmt.Errorf("%w: acquire concurrency: %v", ErrCoordinationFailed, err)
@@ -198,13 +202,14 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 		return nil, wait, &CapacityError{RetryAt: leaseDecision.RetryAt}
 	}
 
-	rateLimits := make([]coordination.BucketLimit, 0, len(dimensions)*2+2)
+	rateLimits := make([]coordination.BucketLimit, 0, len(dimensions)*2)
+	tokenRateLimits := make([]coordination.BucketLimit, 0, len(dimensions))
 	for index, dimension := range dimensions {
 		capacity := capacities[index]
-		rateLimits = append(rateLimits,
-			minuteBucket(dimension, coordination.MetricRequests, capacity.RequestsPerMinute, 1),
-			minuteBucket(dimension, coordination.MetricTokens, capacity.TokensPerMinute, request.EstimatedTokens),
-		)
+		rateLimits = append(rateLimits, minuteBucket(dimension, coordination.MetricRequests, capacity.RequestsPerMinute, 1))
+		tokenLimit := minuteBucket(dimension, coordination.MetricTokens, capacity.TokensPerMinute, request.EstimatedTokens)
+		rateLimits = append(rateLimits, tokenLimit)
+		tokenRateLimits = append(tokenRateLimits, tokenLimit)
 	}
 	rateDecision, err := a.coordinator.AcquireRate(ctx, rateLimits)
 	if err != nil {
@@ -218,10 +223,57 @@ func (a *CoordinationAdapter) Acquire(ctx context.Context, request LeaseRequest)
 	leaseContext, cancel := context.WithCancel(ctx)
 	lease := &renewingLease{
 		context: leaseContext, cancel: cancel, coordinator: a.coordinator, reference: leaseDecision.Lease,
-		ttl: a.config.LeaseTTL, done: make(chan struct{}), stopped: make(chan struct{}),
+		ttl: a.config.LeaseTTL, tokenRateLimits: tokenRateLimits, estimatedTokens: request.EstimatedTokens,
+		rateRefundReference: leaseDecision.Lease.ID, done: make(chan struct{}), stopped: make(chan struct{}),
 	}
 	go lease.renew()
 	return lease, wait, nil
+}
+
+// InspectCredential reads only the credential-scoped buckets. Global, pool,
+// model, and Provider limits can further constrain a request, so this is
+// intentionally labelled as key-scoped gateway capacity rather than a promise
+// that the next request will be admitted.
+func (a *CoordinationAdapter) InspectCredential(ctx context.Context, input CredentialCapacityInput) (CredentialCapacity, error) {
+	if input.CredentialID == uuid.Nil {
+		return CredentialCapacity{}, fmt.Errorf("%w: credential id is required", ErrCoordinationFailed)
+	}
+	capacity := a.effectiveCredentialCapacity(input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit)
+	dimension := coordination.Dimension{Scope: coordination.ScopeCredential, SubjectID: input.CredentialID.String()}
+	observation, err := a.coordinator.InspectRate(ctx, []coordination.BucketLimit{
+		minuteBucket(dimension, coordination.MetricRequests, capacity.RequestsPerMinute, 1),
+		minuteBucket(dimension, coordination.MetricTokens, capacity.TokensPerMinute, 1),
+	})
+	if err != nil {
+		return CredentialCapacity{}, fmt.Errorf("%w: inspect credential rates: %v", ErrCoordinationFailed, err)
+	}
+	leases, err := a.coordinator.CleanupExpiredLeases(ctx, []coordination.ConcurrencyLimit{{Dimension: dimension, MaxInFlight: capacity.Concurrency}})
+	if err != nil {
+		return CredentialCapacity{}, fmt.Errorf("%w: inspect credential concurrency: %v", ErrCoordinationFailed, err)
+	}
+	if len(observation.Buckets) != 2 || len(leases.InUse) != 1 {
+		return CredentialCapacity{}, fmt.Errorf("%w: inspect credential returned incomplete state", ErrCoordinationFailed)
+	}
+	return CredentialCapacity{
+		ObservedAt:             observation.ObservedAt,
+		RequestsPerMinuteLimit: capacity.RequestsPerMinute, RequestsPerMinuteRemain: observation.Buckets[0].RemainingTokens,
+		TokensPerMinuteLimit: capacity.TokensPerMinute, TokensPerMinuteRemain: observation.Buckets[1].RemainingTokens,
+		ConcurrencyLimit: capacity.Concurrency, ConcurrencyInUse: leases.InUse[0].InUse,
+	}, nil
+}
+
+func (a *CoordinationAdapter) effectiveCredentialCapacity(rpm *int32, tpm *int64, concurrency *int32) Capacity {
+	capacity := a.config.DefaultCredential
+	if rpm != nil {
+		capacity.RequestsPerMinute = int64(*rpm)
+	}
+	if tpm != nil {
+		capacity.TokensPerMinute = *tpm
+	}
+	if concurrency != nil {
+		capacity.Concurrency = int64(*concurrency)
+	}
+	return capacity
 }
 
 func admissionGateError(err error) error {
@@ -256,17 +308,39 @@ func minuteBucket(dimension coordination.Dimension, metric coordination.BucketMe
 }
 
 type renewingLease struct {
-	context     context.Context
-	cancel      context.CancelFunc
-	coordinator *coordination.Coordinator
-	reference   coordination.LeaseRef
-	ttl         time.Duration
-	done        chan struct{}
-	stopped     chan struct{}
-	once        sync.Once
+	context             context.Context
+	cancel              context.CancelFunc
+	coordinator         *coordination.Coordinator
+	reference           coordination.LeaseRef
+	tokenRateLimits     []coordination.BucketLimit
+	estimatedTokens     int64
+	rateRefundReference string
+	ttl                 time.Duration
+	done                chan struct{}
+	stopped             chan struct{}
+	once                sync.Once
 }
 
 func (l *renewingLease) Context() context.Context { return l.context }
+
+// Reconcile returns only the difference between the token estimate and a
+// completed Provider-reported usage. The coordinator records the lease ID as
+// an idempotency marker, so a retry cannot inflate capacity.
+func (l *renewingLease) Reconcile(ctx context.Context, actualTokens int64) error {
+	if actualTokens < 0 || actualTokens >= l.estimatedTokens {
+		return nil
+	}
+	refund := l.estimatedTokens - actualTokens
+	limits := make([]coordination.BucketLimit, len(l.tokenRateLimits))
+	copy(limits, l.tokenRateLimits)
+	for index := range limits {
+		limits[index].RequestedTokens = refund
+	}
+	if _, err := l.coordinator.RefundRate(ctx, l.rateRefundReference, limits); err != nil {
+		return fmt.Errorf("reconcile request tokens: %w", err)
+	}
+	return nil
+}
 
 func (l *renewingLease) Release(ctx context.Context) error {
 	l.once.Do(func() {

@@ -49,22 +49,22 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	metricsRegistry := prometheus.NewRegistry()
 	metricsRegistry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	runtimeMetrics := observability.NewRuntimeMetrics(metricsRegistry, logger)
-	identityService, err := identity.NewService(store.NewIdentityRepository(connections.Postgres), cfg.Security.SessionPepper, cfg.Security.APIKeyPepper)
-	if err != nil {
-		connections.Close()
-		return nil, fmt.Errorf("initialize identity service: %w", err)
-	}
 	envelope, err := security.NewEnvelopeCipher(cfg.Security.ActiveMasterKeyVersion, cfg.Security.MasterKeys)
 	if err != nil {
 		connections.Close()
 		return nil, fmt.Errorf("initialize envelope cipher: %w", err)
+	}
+	identityService, err := identity.NewService(store.NewIdentityRepository(connections.Postgres), envelope, cfg.Security.SessionPepper, cfg.Security.APIKeyPepper)
+	if err != nil {
+		connections.Close()
+		return nil, fmt.Errorf("initialize identity service: %w", err)
 	}
 	urlValidator, err := security.NewURLValidator(security.SSRFPolicy{AllowedPrivatePrefixes: cfg.Security.AllowedPrivatePrefixes, AllowedResolvedPrefixes: cfg.Security.AllowedResolvedPrefixes, AllowLoopback: cfg.Profile == config.ProfileTest, MaxRedirects: 5})
 	if err != nil {
 		connections.Close()
 		return nil, fmt.Errorf("initialize outbound URL policy: %w", err)
 	}
-	registryService, err := registry.NewService(store.NewRegistryRepository(connections), envelope, urlValidator)
+	registryService, err := registry.NewService(store.NewRegistryRepository(connections), envelope, urlValidator, cfg.Security.CredentialFingerprintPepper)
 	if err != nil {
 		connections.Close()
 		return nil, fmt.Errorf("initialize registry service: %w", err)
@@ -113,12 +113,12 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return nil, fmt.Errorf("initialize operations service: %w", err)
 	}
 	controlAPI.WithOperationsAPI(controlapi.NewOperationsAPI(operationsService, logger))
-	workflow, err := newRequestWorkflow(cfg, connections, registryService, usageService, runtimeMetrics)
+	workflow, credentialCapacity, err := newRequestWorkflow(cfg, connections, registryService, usageService, runtimeMetrics)
 	if err != nil {
 		connections.Close()
 		return nil, err
 	}
-	controlAPI.WithGatewayKeyTestWorkflow(workflow)
+	controlAPI.WithGatewayKeyTestWorkflow(workflow).WithCredentialCapacityInspector(credentialCapacity)
 	responseService, err := responseowner.NewService(store.NewResponseRepository(connections), envelope)
 	if err != nil {
 		connections.Close()

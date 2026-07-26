@@ -36,6 +36,8 @@ type Error struct {
 	Parameter    string
 	Provider     string
 	ProviderType string
+	Model        string
+	Capability   string
 	RequestID    string
 	HTTPStatus   int
 	RetryAfter   *RetryAfter

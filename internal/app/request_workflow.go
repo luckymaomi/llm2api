@@ -29,29 +29,29 @@ type runtimeRandom struct{}
 func (runtimeRandom) Intn(limit int) int       { return rand.IntN(limit) }
 func (runtimeRandom) Int63n(limit int64) int64 { return rand.Int64N(limit) }
 
-func newRequestWorkflow(cfg config.Config, connections *store.Connections, registryService *registry.Service, usageService *usage.Service, runtimeMetrics *observability.RuntimeMetrics) (*requestflow.Service, error) {
+func newRequestWorkflow(cfg config.Config, connections *store.Connections, registryService *registry.Service, usageService *usage.Service, runtimeMetrics *observability.RuntimeMetrics) (*requestflow.Service, *requestflow.CoordinationAdapter, error) {
 	rootCAs, err := providerRootCAs(cfg.Security.ProviderCABundleFile)
 	if err != nil {
-		return nil, fmt.Errorf("load provider CA bundle: %w", err)
+		return nil, nil, fmt.Errorf("load provider CA bundle: %w", err)
 	}
 	coordinator, err := coordination.New(connections.Valkey, coordination.Options{
 		Prefix: "llm2api", KeyHashSecret: cfg.Security.CoordinationKeyHash,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("initialize request coordinator: %w", err)
+		return nil, nil, fmt.Errorf("initialize request coordinator: %w", err)
 	}
 	admissionCoordinator, err := coordination.New(connections.Valkey, coordination.Options{
 		Prefix: "llm2api-admission", KeyHashSecret: cfg.Security.CoordinationKeyHash,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("initialize admission coordinator: %w", err)
+		return nil, nil, fmt.Errorf("initialize admission coordinator: %w", err)
 	}
 	gate, err := admission.NewGate(admission.Config{
 		MaxQueued: cfg.RequestFlow.MaxQueued, MaxActive: cfg.RequestFlow.MaxActive,
 		MaxQueueWait: cfg.RequestFlow.MaxQueueWait,
 	}, systemClock{})
 	if err != nil {
-		return nil, fmt.Errorf("initialize request admission gate: %w", err)
+		return nil, nil, fmt.Errorf("initialize request admission gate: %w", err)
 	}
 	admitter, err := requestflow.NewAdmissionAdapter(gate, admissionCoordinator, requestflow.AdmissionCoordinationConfig{
 		MaxActive:    int64(cfg.RequestFlow.MaxActive),
@@ -59,7 +59,7 @@ func newRequestWorkflow(cfg config.Config, connections *store.Connections, regis
 		LeaseTTL: cfg.RequestFlow.LeaseTTL,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("initialize request admission adapter: %w", err)
+		return nil, nil, fmt.Errorf("initialize request admission adapter: %w", err)
 	}
 	coordinationAdapter, err := requestflow.NewCoordinationAdapter(coordinator, requestflow.CoordinationConfig{
 		Global: capacity(cfg.RequestFlow.Global), ResourcePool: capacity(cfg.RequestFlow.ResourcePool), Model: capacity(cfg.RequestFlow.Model),
@@ -67,17 +67,17 @@ func newRequestWorkflow(cfg config.Config, connections *store.Connections, regis
 		LeaseTTL: cfg.RequestFlow.LeaseTTL,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("initialize request coordination adapter: %w", err)
+		return nil, nil, fmt.Errorf("initialize request coordination adapter: %w", err)
 	}
 	accounting, err := requestflow.NewUsageAdapter(usageService)
 	if err != nil {
-		return nil, fmt.Errorf("initialize request accounting: %w", err)
+		return nil, nil, fmt.Errorf("initialize request accounting: %w", err)
 	}
 	random := runtimeRandom{}
 	clock := systemClock{}
 	router, err := routing.NewRouter(random)
 	if err != nil {
-		return nil, fmt.Errorf("initialize request router: %w", err)
+		return nil, nil, fmt.Errorf("initialize request router: %w", err)
 	}
 	retry, err := resilience.NewRetryPolicy(resilience.RetryConfig{
 		MaxAttempts: cfg.RequestFlow.RetryMaxAttempts, MaxElapsed: cfg.RequestFlow.RetryMaxElapsed,
@@ -87,7 +87,7 @@ func newRequestWorkflow(cfg config.Config, connections *store.Connections, regis
 		},
 	}, clock, random)
 	if err != nil {
-		return nil, fmt.Errorf("initialize request retry policy: %w", err)
+		return nil, nil, fmt.Errorf("initialize request retry policy: %w", err)
 	}
 	factory := requestflow.NewProviderFactory(security.SSRFPolicy{
 		AllowedPrivatePrefixes: cfg.Security.AllowedPrivatePrefixes, AllowedResolvedPrefixes: cfg.Security.AllowedResolvedPrefixes,
@@ -106,9 +106,9 @@ func newRequestWorkflow(cfg config.Config, connections *store.Connections, regis
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("initialize request workflow: %w", err)
+		return nil, nil, fmt.Errorf("initialize request workflow: %w", err)
 	}
-	return workflow.WithObserver(runtimeMetrics), nil
+	return workflow.WithObserver(runtimeMetrics), coordinationAdapter, nil
 }
 
 func providerRootCAs(path string) (*x509.CertPool, error) {

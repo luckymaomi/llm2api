@@ -13,6 +13,7 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	t.Setenv("LLM2API_MASTER_KEYS", "")
 	t.Setenv("LLM2API_SESSION_PEPPER", "")
 	t.Setenv("LLM2API_API_KEY_PEPPER", "")
+	t.Setenv("LLM2API_CREDENTIAL_FINGERPRINT_PEPPER", "")
 
 	_, err := Load()
 	if err == nil {
@@ -26,6 +27,7 @@ func TestProductionRequiresSecrets(t *testing.T) {
 	t.Setenv("LLM2API_MASTER_KEYS", "")
 	t.Setenv("LLM2API_SESSION_PEPPER", "")
 	t.Setenv("LLM2API_API_KEY_PEPPER", "")
+	t.Setenv("LLM2API_CREDENTIAL_FINGERPRINT_PEPPER", "")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected production configuration without secrets to fail")
@@ -35,12 +37,14 @@ func TestProductionRequiresSecrets(t *testing.T) {
 func TestLoadReadsProductionSecretsFromFiles(t *testing.T) {
 	t.Setenv("LLM2API_PROFILE", "production")
 	t.Setenv("LLM2API_COOKIE_SECURE", "true")
+	t.Setenv("LLM2API_PUBLIC_ORIGIN", "https://gateway.example.test")
 	t.Setenv("LLM2API_DATABASE_URL_FILE", writeSecret(t, "database-url", "postgres://llm2api:password@postgres:5432/llm2api?sslmode=require"))
 	t.Setenv("LLM2API_VALKEY_PASSWORD_FILE", writeSecret(t, "valkey-password", strings.Repeat("v", 32)))
 	masterKey := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
 	t.Setenv("LLM2API_MASTER_KEYS_FILE", writeSecret(t, "master-keys", "1:"+masterKey))
 	t.Setenv("LLM2API_SESSION_PEPPER_FILE", writeSecret(t, "session-pepper", strings.Repeat("s", 32)))
 	t.Setenv("LLM2API_API_KEY_PEPPER_FILE", writeSecret(t, "api-key-pepper", strings.Repeat("a", 32)))
+	t.Setenv("LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE", writeSecret(t, "credential-fingerprint-pepper", strings.Repeat("f", 32)))
 	t.Setenv("LLM2API_COORDINATION_KEY_HASH_SECRET_FILE", writeSecret(t, "coordination-secret", strings.Repeat("c", 32)))
 
 	cfg, err := Load()

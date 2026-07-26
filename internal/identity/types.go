@@ -147,13 +147,15 @@ type MemberChange struct {
 }
 
 type NewGatewayKey struct {
-	UserID        uuid.UUID
-	Name          string
-	Prefix        string
-	SecretDigest  []byte
-	Routes        []GatewayKeyRoute
-	ExpiresAt     *time.Time
-	ReplacesKeyID *uuid.UUID
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	Name            string
+	Prefix          string
+	SecretDigest    []byte
+	EncryptedSecret []byte
+	Routes          []GatewayKeyRoute
+	ExpiresAt       *time.Time
+	ReplacesKeyID   *uuid.UUID
 }
 
 type SessionRevocation struct {
@@ -205,6 +207,8 @@ type Repository interface {
 
 	CreateGatewayKey(context.Context, NewGatewayKey, uuid.UUID, GatewayKeyMutation) (GatewayKey, error)
 	GatewayKeyForReplacement(context.Context, uuid.UUID) (GatewayKey, error)
+	GetEncryptedGatewayKey(context.Context, uuid.UUID) ([]byte, error)
+	RecordGatewayKeyReveal(context.Context, uuid.UUID, uuid.UUID) error
 	ListGatewayKeys(context.Context, uuid.UUID) ([]GatewayKey, error)
 	DeleteGatewayKey(context.Context, uuid.UUID, uuid.UUID, bool) error
 	FindGatewayPrincipal(context.Context, []byte) (GatewayPrincipal, error)

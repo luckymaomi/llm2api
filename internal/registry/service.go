@@ -17,24 +17,29 @@ import (
 const credentialProbePersistenceTimeout = 3 * time.Second
 
 type Service struct {
-	repository Repository
-	envelope   *security.EnvelopeCipher
-	prober     CredentialProbeExecutor
-	discoverer ModelDiscoveryExecutor
-	catalog    *providers.Catalog
+	repository                  Repository
+	envelope                    *security.EnvelopeCipher
+	prober                      CredentialProbeExecutor
+	discoverer                  ModelDiscoveryExecutor
+	statusFetcher               CredentialUpstreamStatusExecutor
+	catalog                     *providers.Catalog
+	credentialFingerprintPepper []byte
 }
 
-func NewService(repository Repository, envelope *security.EnvelopeCipher, urls *security.URLValidator) (*Service, error) {
-	if repository == nil || envelope == nil || urls == nil {
+func NewService(repository Repository, envelope *security.EnvelopeCipher, urls *security.URLValidator, credentialFingerprintPepper []byte) (*Service, error) {
+	if repository == nil || envelope == nil || urls == nil || len(credentialFingerprintPepper) < security.MinimumHMACKeyBytes {
 		return nil, fmt.Errorf("registry dependencies are required")
 	}
-	return &Service{repository: repository, envelope: envelope, catalog: providers.DefaultCatalog()}, nil
+	return &Service{repository: repository, envelope: envelope, catalog: providers.DefaultCatalog(), credentialFingerprintPepper: append([]byte(nil), credentialFingerprintPepper...)}, nil
 }
 
 func (s *Service) WithCredentialProbeExecutor(prober CredentialProbeExecutor) *Service {
 	s.prober = prober
 	if discoverer, ok := prober.(ModelDiscoveryExecutor); ok {
 		s.discoverer = discoverer
+	}
+	if statusFetcher, ok := prober.(CredentialUpstreamStatusExecutor); ok {
+		s.statusFetcher = statusFetcher
 	}
 	return s
 }
@@ -93,6 +98,14 @@ func (s *Service) enrichProvider(provider *Provider) {
 	for _, info := range s.catalog.Kinds() {
 		if info.Kind == provider.Kind {
 			provider.Contract = info.Contract
+			profiles := s.catalog.ModelProfiles(provider.Kind)
+			provider.Models = make([]ProviderModelProfile, 0, len(profiles))
+			for _, profile := range profiles {
+				provider.Models = append(provider.Models, ProviderModelProfile{
+					UpstreamName: profile.UpstreamName, DisplayName: profile.UpstreamName,
+					Capabilities: ModelCapabilitiesFromProfile(profile),
+				})
+			}
 			return
 		}
 	}
@@ -176,9 +189,22 @@ func (s *Service) CreateCredential(ctx context.Context, actor identity.Principal
 	}
 	input.ID = uuid.New()
 	input.Name = strings.TrimSpace(input.Name)
+	secret = strings.TrimSpace(secret)
 	if input.ResourcePoolID == uuid.Nil || len(secret) < 8 || len(secret) > 8192 || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit) {
 		return Credential{}, ErrInvalidInput
 	}
+	secretFingerprint, err := s.credentialFingerprint(secret)
+	if err != nil {
+		return Credential{}, err
+	}
+	if existing, lookupErr := s.repository.GetCredentialBySecretFingerprint(ctx, secretFingerprint); lookupErr == nil {
+		if existing.ID != input.ID {
+			return Credential{}, ErrCredentialAlreadyManaged
+		}
+	} else if !errors.Is(lookupErr, ErrNotFound) {
+		return Credential{}, lookupErr
+	}
+	input.SecretFingerprint = secretFingerprint
 	pool, err := s.repository.GetResourcePool(ctx, input.ResourcePoolID)
 	if err != nil {
 		return Credential{}, err
@@ -187,7 +213,7 @@ func (s *Service) CreateCredential(ctx context.Context, actor identity.Principal
 	if err != nil {
 		return Credential{}, err
 	}
-	mutation, err := credentialCreateMutation(request, input, secret)
+	mutation, err := credentialCreateMutation(request, input)
 	if err != nil {
 		return Credential{}, err
 	}
@@ -210,17 +236,27 @@ func (s *Service) ImportCredentials(ctx context.Context, actor identity.Principa
 	for index, item := range items {
 		item.Name, item.Secret = strings.TrimSpace(item.Name), strings.TrimSpace(item.Secret)
 		result := CredentialBatchResult{Line: index + 1, Name: item.Name}
-		if _, duplicate := seen[item.Secret]; duplicate {
-			result.Status = "skipped"
+		secretFingerprint, fingerprintErr := s.credentialFingerprint(item.Secret)
+		if fingerprintErr != nil {
+			result.Status, result.ErrorKind = "rejected", "invalid_input"
 			results = append(results, result)
 			continue
 		}
-		seen[item.Secret] = struct{}{}
+		if _, duplicate := seen[secretFingerprint]; duplicate {
+			result.Status, result.ErrorKind = "duplicate", "credential_already_managed"
+			results = append(results, result)
+			continue
+		}
+		seen[secretFingerprint] = struct{}{}
 		childRequest := request
 		childRequest.IdempotencyKey = uuid.NewSHA1(request.IdempotencyKey, []byte(fmt.Sprintf("credential-line:%d", index+1)))
 		created, err := s.CreateCredential(ctx, actor, NewCredential{ResourcePoolID: resourcePoolID, Name: item.Name, RPMLimit: rpmLimit, TPMLimit: tpmLimit, ConcurrencyLimit: concurrencyLimit}, item.Secret, childRequest)
 		if err != nil {
-			result.Status, result.ErrorKind = "rejected", credentialImportError(err)
+			if errors.Is(err, ErrCredentialAlreadyManaged) {
+				result.Status, result.ErrorKind = "duplicate", "credential_already_managed"
+			} else {
+				result.Status, result.ErrorKind = "rejected", credentialImportError(err)
+			}
 		} else {
 			result.Status, result.Credential = "created", &created
 		}
@@ -237,6 +273,8 @@ func credentialImportError(err error) string {
 		return "conflict"
 	case errors.Is(err, ErrModelDiscovery):
 		return "model_discovery_failed"
+	case errors.Is(err, ErrCredentialAlreadyManaged):
+		return "credential_already_managed"
 	default:
 		return "persistence_failed"
 	}
@@ -246,6 +284,7 @@ func (s *Service) UpdateCredential(ctx context.Context, actor identity.Principal
 	if !activeAdministrator(actor) {
 		return Credential{}, ErrForbidden
 	}
+	secret = strings.TrimSpace(secret)
 	input.Name, input.ReplaceSecret, input.ExpectedUpdatedAt = strings.TrimSpace(input.Name), secret != "", input.ExpectedUpdatedAt.UTC()
 	if input.ID == uuid.Nil || input.ExpectedUpdatedAt.IsZero() || !validCredentialFields(input.Name, input.RPMLimit, input.TPMLimit, input.ConcurrencyLimit) || input.ReplaceSecret && (len(secret) < 8 || len(secret) > 8192) {
 		return Credential{}, ErrInvalidInput
@@ -256,13 +295,23 @@ func (s *Service) UpdateCredential(ctx context.Context, actor identity.Principal
 		if loadErr != nil {
 			return Credential{}, loadErr
 		}
+		secretFingerprint, fingerprintErr := s.credentialFingerprint(secret)
+		if fingerprintErr != nil {
+			return Credential{}, fingerprintErr
+		}
+		if existing, lookupErr := s.repository.GetCredentialBySecretFingerprint(ctx, secretFingerprint); lookupErr == nil && existing.ID != input.ID {
+			return Credential{}, ErrCredentialAlreadyManaged
+		} else if lookupErr != nil && !errors.Is(lookupErr, ErrNotFound) {
+			return Credential{}, lookupErr
+		}
+		input.SecretFingerprint = secretFingerprint
 		input.ReplaceModels = true
 		input.DiscoveredModels, input.Discovery, err = s.discoverModels(ctx, providerFromCredential(current), secret)
 		if err != nil {
 			return Credential{}, err
 		}
 	}
-	mutation, err := credentialUpdateMutation(request, input, secret)
+	mutation, err := credentialUpdateMutation(request, input)
 	if err != nil {
 		return Credential{}, err
 	}
@@ -305,12 +354,54 @@ func (s *Service) RefreshCredentialModels(ctx context.Context, actor identity.Pr
 		ConcurrencyLimit: current.ConcurrencyLimit, ReplaceModels: true, DiscoveredModels: models,
 		Discovery: execution, ExpectedUpdatedAt: expectedUpdatedAt.UTC(),
 	}
-	mutation, err := credentialUpdateMutation(request, change, "")
+	mutation, err := credentialUpdateMutation(request, change)
 	if err != nil {
 		return execution, current, err
 	}
 	updated, err := s.repository.UpdateCredential(ctx, change, actor.UserID, mutation)
 	return execution, updated, err
+}
+
+func (s *Service) RefreshAllCredentialModels(ctx context.Context, actor identity.Principal, request MutationRequest) (CredentialModelProbeBatch, error) {
+	if !activeAdministrator(actor) || request.IdempotencyKey == uuid.Nil || strings.TrimSpace(request.RequestID) == "" {
+		return CredentialModelProbeBatch{}, ErrForbidden
+	}
+	credentials, err := s.repository.ListCredentials(ctx, false)
+	if err != nil {
+		return CredentialModelProbeBatch{}, err
+	}
+	batch := CredentialModelProbeBatch{Results: make([]CredentialModelProbeResult, 0, len(credentials))}
+	for _, credential := range credentials {
+		if credential.Status != CredentialActive {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return batch, err
+		}
+		childRequest := request
+		childRequest.IdempotencyKey = uuid.NewSHA1(request.IdempotencyKey, []byte("credential-model-probe:"+credential.ID.String()))
+		execution, updated, refreshErr := s.RefreshCredentialModels(ctx, actor, credential.ID, credential.UpdatedAt, childRequest)
+		if refreshErr != nil && !errors.Is(refreshErr, ErrModelDiscovery) {
+			kind := "registry_update_failed"
+			if errors.Is(refreshErr, ErrConflict) {
+				kind = "registry_conflict"
+			}
+			execution = ModelDiscoveryExecution{Status: "uncertain", ErrorKind: &kind, Retryable: true}
+			updated = credential
+		}
+		batch.Results = append(batch.Results, CredentialModelProbeResult{Credential: updated, Execution: execution})
+		switch execution.Status {
+		case "succeeded":
+			batch.Succeeded++
+		case "failed":
+			batch.Failed++
+		case "unavailable":
+			batch.Unavailable++
+		default:
+			batch.Uncertain++
+		}
+	}
+	return batch, nil
 }
 
 func (s *Service) discoverModels(ctx context.Context, provider Provider, secret string) ([]DiscoveredModel, ModelDiscoveryExecution, error) {
@@ -321,36 +412,18 @@ func (s *Service) discoverModels(ctx context.Context, provider Provider, secret 
 	if execution.Status != "succeeded" {
 		return nil, execution, ErrModelDiscovery
 	}
-	capabilities, err := s.discoveredModelCapabilities(provider)
-	if err != nil {
-		return nil, execution, err
-	}
 	models := make([]DiscoveredModel, 0, len(execution.Models))
 	for _, upstreamName := range execution.Models {
-		models = append(models, DiscoveredModel{UpstreamName: upstreamName, Capabilities: capabilities})
+		profile, found := s.catalog.ModelCapabilities(provider.Kind, upstreamName)
+		if !found {
+			continue
+		}
+		models = append(models, DiscoveredModel{UpstreamName: upstreamName, Capabilities: ModelCapabilitiesFromProfile(profile)})
+	}
+	if len(models) == 0 {
+		return nil, execution, fmt.Errorf("%w: no discovered model has a verified capability profile", ErrModelDiscovery)
 	}
 	return models, execution, nil
-}
-
-func (s *Service) discoveredModelCapabilities(provider Provider) (ModelCapabilities, error) {
-	adapter, err := s.catalog.Build(provider.Kind, providers.AdapterOptions{BaseURL: provider.BaseURL, Capabilities: providers.NarrowOpenAICompatibleCapabilities()})
-	if err != nil {
-		return ModelCapabilities{}, err
-	}
-	capability := adapter.Capabilities()
-	reasoningMode := ReasoningMode("")
-	if capability.ReasoningToggle && capability.ReasoningEffort {
-		reasoningMode = ReasoningHybrid
-	} else if capability.ReasoningToggle {
-		reasoningMode = ReasoningToggle
-	} else if capability.ReasoningEffort {
-		reasoningMode = ReasoningEffort
-	}
-	return ModelCapabilities{
-		Chat: capability.Chat, Streaming: capability.Streaming, Tools: capability.Tools,
-		Reasoning:     capability.ReasoningToggle || capability.ReasoningEffort || capability.ReasoningContent,
-		ReasoningMode: reasoningMode, StructuredOutput: capability.JSONOutput,
-	}, nil
 }
 
 func providerFromPool(pool ResourcePool) Provider {
@@ -429,6 +502,60 @@ func (s *Service) ProbeCredential(ctx context.Context, actor identity.Principal,
 	return execution, credential, err
 }
 
+// FetchCredentialUpstreamStatus only calls a documented status endpoint. A
+// missing endpoint is itself an explicit unknown observation, never a fake
+// probe through a billable chat request.
+func (s *Service) FetchCredentialUpstreamStatus(ctx context.Context, actor identity.Principal, credentialID uuid.UUID, requestID string) (providers.UpstreamStatusObservation, Credential, error) {
+	if !activeAdministrator(actor) || credentialID == uuid.Nil || strings.TrimSpace(requestID) == "" || len(requestID) > 128 {
+		return providers.UpstreamStatusObservation{}, Credential{}, ErrForbidden
+	}
+	credential, err := s.repository.GetCredential(ctx, credentialID)
+	if err != nil {
+		return providers.UpstreamStatusObservation{}, Credential{}, err
+	}
+	if credential.Status == CredentialRetired {
+		return providers.UpstreamStatusObservation{}, Credential{}, ErrInvalidInput
+	}
+	now := time.Now().UTC()
+	execution := CredentialUpstreamStatusExecution{Observation: providers.UpstreamStatusObservation{
+		State: providers.UpstreamStatusUnknown, Scope: providers.UpstreamStatusScopeUnknown,
+		ObservedAt: now, Source: "official_endpoint_unavailable", Reason: "该 Provider 未公开可读取的上游状态端点",
+	}}
+	if s.statusFetcher != nil {
+		secret, secretErr := s.CredentialSecret(ctx, credentialID)
+		if secretErr != nil {
+			return providers.UpstreamStatusObservation{}, Credential{}, secretErr
+		}
+		execution = s.statusFetcher.FetchUpstreamStatus(ctx, CredentialUpstreamStatusTarget{
+			Provider: providerFromCredential(credential), CredentialID: credentialID, Secret: secret, RequestID: requestID,
+		})
+		secret = ""
+	}
+	observation := normalizeUpstreamStatus(execution.Observation, now)
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), credentialProbePersistenceTimeout)
+	defer cancel()
+	credential, err = s.repository.RecordCredentialUpstreamStatus(persistCtx, credentialID, observation, actor.UserID, requestID)
+	if err != nil {
+		return observation, credential, err
+	}
+	credential.UpstreamStatus = &observation
+	return observation, credential, nil
+}
+
+func normalizeUpstreamStatus(observation providers.UpstreamStatusObservation, observedAt time.Time) providers.UpstreamStatusObservation {
+	if observation.State != providers.UpstreamStatusObserved && observation.State != providers.UpstreamStatusUnknown && observation.State != providers.UpstreamStatusUnavailable {
+		observation.State = providers.UpstreamStatusUnavailable
+	}
+	if observation.Scope != providers.UpstreamStatusScopeAccount && observation.Scope != providers.UpstreamStatusScopeProject && observation.Scope != providers.UpstreamStatusScopeCredential {
+		observation.Scope = providers.UpstreamStatusScopeUnknown
+	}
+	if strings.TrimSpace(observation.Source) == "" {
+		observation.Source = "manual_status_fetch_failed"
+	}
+	observation.ObservedAt = observedAt.UTC()
+	return observation
+}
+
 func (s *Service) credentialProbeModel(ctx context.Context, credential Credential, modelID uuid.UUID) (Model, error) {
 	for _, binding := range credential.ModelBindings {
 		if binding.ModelID == modelID {
@@ -467,6 +594,10 @@ func (s *Service) CredentialSecret(ctx context.Context, credentialID uuid.UUID) 
 
 func activeAdministrator(actor identity.Principal) bool {
 	return actor.Status == identity.StatusActive && actor.Role == identity.RoleAdministrator
+}
+
+func (s *Service) credentialFingerprint(secret string) (string, error) {
+	return security.DigestToken("provider-credential\x00"+secret, s.credentialFingerprintPepper)
 }
 
 func validCredentialFields(name string, rpmLimit *int32, tpmLimit *int64, concurrencyLimit *int32) bool {

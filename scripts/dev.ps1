@@ -362,6 +362,7 @@ try {
     Clear-LLM2APIProcessEnvironment
     $env:LLM2API_PROFILE = "development"
     $env:LLM2API_HTTP_ADDRESS = "127.0.0.1:$GatewayPort"
+	$env:LLM2API_PUBLIC_ORIGIN = "http://127.0.0.1:$GatewayPort"
     $env:LLM2API_DATABASE_URL = $databaseURL
     $env:LLM2API_DATABASE_MIGRATE_ON_START = "true"
     $env:LLM2API_VALKEY_ADDRESS = $valkeyAddress

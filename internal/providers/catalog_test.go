@@ -17,7 +17,7 @@ func TestDefaultCatalogBuildsEveryPublishedProviderKind(t *testing.T) {
 			t.Fatalf("Provider kind %q has incomplete contract metadata: %#v", info.Kind, info.Contract)
 		}
 		adapter, err := catalog.Build(info.Kind, AdapterOptions{
-			BaseURL: "https://provider.example.test/v1", Capabilities: NarrowOpenAICompatibleCapabilities(),
+			BaseURL: "https://provider.example.test/v1", Capabilities: SiliconFlowCapabilities(),
 		})
 		if err != nil {
 			t.Fatalf("Build(%q) error = %v", info.Kind, err)
@@ -29,9 +29,9 @@ func TestDefaultCatalogBuildsEveryPublishedProviderKind(t *testing.T) {
 	if kinds[0].Kind != KindAgnes || kinds[0].Contract.Status != VerificationVerified {
 		t.Fatalf("Agnes contract = %#v", kinds[0])
 	}
-	gemini := kinds[1]
-	if gemini.Kind != KindGemini || gemini.Contract.Status != VerificationVerified {
-		t.Fatalf("Gemini contract must preserve the live verified fact: %#v", gemini)
+	silicon := kinds[2]
+	if silicon.Kind != KindSiliconFlow || silicon.Contract.Status != VerificationVerified {
+		t.Fatalf("SiliconFlow contract must preserve the live verified fact: %#v", silicon)
 	}
 	kinds[0].Contract.VerifiedModels[0] = "mutated"
 	if DefaultCatalog().Kinds()[0].Contract.VerifiedModels[0] == "mutated" {

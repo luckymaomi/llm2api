@@ -35,8 +35,8 @@ VALUES ($1, $2, $3, 'Dynamic Pool')`, resourcePoolID, providerID, "dynamic-pool-
 		t.Fatalf("insert resource pool: %v", err)
 	}
 	for _, credentialID := range []uuid.UUID{firstCredentialID, secondCredentialID} {
-		if _, err := tx.Exec(ctx, `INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret)
-VALUES ($1, $2, $3, $4)`, credentialID, resourcePoolID, "Key "+credentialID.String()[:4], []byte("encrypted-fixture")); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret, secret_fingerprint)
+VALUES ($1, $2, $3, $4, $5)`, credentialID, resourcePoolID, "Key "+credentialID.String()[:4], []byte("encrypted-fixture"), credentialFixtureFingerprint(t, credentialID)); err != nil {
 			t.Fatalf("insert credential: %v", err)
 		}
 	}

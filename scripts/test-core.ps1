@@ -111,6 +111,7 @@ try {
   $env:LLM2API_ACTIVE_MASTER_KEY_VERSION = "1"
   $env:LLM2API_SESSION_PEPPER = "llm2api-core-session-pepper-00000"
   $env:LLM2API_API_KEY_PEPPER = "llm2api-core-api-key-pepper-00000"
+  $env:LLM2API_CREDENTIAL_FINGERPRINT_PEPPER = "llm2api-core-credential-fingerprint-pepper"
   $env:LLM2API_COOKIE_SECURE = "false"
   $env:LLM2API_ALLOWED_RESOLVED_NETWORKS = "198.18.0.0/15"
   $env:LLM2API_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
@@ -224,15 +225,34 @@ try {
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
     -Body (@{ resourcePoolId = $pool.data.id; items = @(@{ name = "Core Upstream Key"; secret = $credentialSecret }); rpmLimit = 60; tpmLimit = 50000; concurrencyLimit = 2 } | ConvertTo-Json -Depth 6)
   $credential = @($credentialBatch.data | Select-Object -First 1)[0]
-  if ($credential.status -ne "created" -or $credential.credential.status -ne "active" -or $credential.credential.model_bindings.Count -ne 1) { throw "Upstream API Key creation did not persist routing eligibility." }
-  $model = @($credential.credential.model_bindings | Where-Object { $_.model_name -eq "fixture-chat" }) | Select-Object -First 1
-  if ($null -eq $model) { throw "Upstream API Key discovery did not persist the fixture model." }
-  $probe = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/credentials/$($credential.credential.id)/probe" -WebSession $adminSession `
-    -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
-    -Body (@{ expectedUpdatedAt = $credential.credential.updated_at } | ConvertTo-Json)
-  if ($probe.data.execution.status -ne "succeeded" -or -not @($probe.data.credential.model_bindings.model_name).Contains("fixture-chat")) {
-    throw "Upstream API Key model discovery did not retain the fixture model."
+  if ($credential.status -ne "created" -or $credential.credential.status -ne "active" -or $credential.credential.model_bindings.Count -ne 1 -or
+       $credential.credential.capacity.state -ne "observed" -or $credential.credential.capacity.scope -ne "gateway_credential") {
+    $credentialBatchSummary = $credentialBatch.data | ConvertTo-Json -Compress -Depth 4
+    throw "Upstream API Key creation did not return the complete routing and capacity contract: $credentialBatchSummary"
   }
+  $duplicateCredential = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/credentials/batch" -WebSession $adminSession `
+    -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
+    -Body (@{ resourcePoolId = $pool.data.id; items = @(@{ name = "Duplicate Core Upstream Key"; secret = $credentialSecret }); rpmLimit = 60; tpmLimit = 50000; concurrencyLimit = 2 } | ConvertTo-Json -Depth 6)
+  if ($duplicateCredential.data.Count -ne 1 -or $duplicateCredential.data[0].status -ne "duplicate" -or
+      $duplicateCredential.data[0].error_kind -ne "credential_already_managed") {
+    throw "A repeated upstream API Key was not reported as the same managed credential."
+  }
+  $credentialCount = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_core -Atc `
+    "SELECT count(*) FROM provider_credentials WHERE resource_pool_id = '$($pool.data.id)'"
+  if ($LASTEXITCODE -ne 0 -or $credentialCount -ne "1") {
+    throw "A repeated upstream API Key created a second credential record: $credentialCount"
+  }
+  $model = @($credential.credential.model_bindings | Where-Object { $_.model_name -eq "Qwen/Qwen3.5-9B" }) | Select-Object -First 1
+  if ($null -eq $model) { throw "Upstream API Key discovery did not persist the fixture model." }
+  $probe = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/credentials/probe" -WebSession $adminSession `
+    -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json"
+  $probeResult = @($probe.data.results | Where-Object { $_.credential.id -eq $credential.credential.id }) | Select-Object -First 1
+  if ($probe.data.succeeded -ne 1 -or $probe.data.failed -ne 0 -or $probe.data.unavailable -ne 0 -or $probe.data.uncertain -ne 0 -or
+      $null -eq $probeResult -or $probeResult.execution.status -ne "succeeded" -or
+      -not @($probeResult.credential.model_bindings.model_name).Contains("Qwen/Qwen3.5-9B")) {
+    throw "Server-side upstream API Key probing did not return one persisted successful discovery result."
+  }
+  $credential = $probeResult.credential
 
   $models = Invoke-RestMethod -Uri "$baseURL/api/control/models" -WebSession $adminSession
   $model = @($models.data | Where-Object { $_.id -eq $model.model_id }) | Select-Object -First 1
@@ -279,7 +299,10 @@ try {
     -Headers (New-MutationHeaders -CSRF $memberCSRF) -ContentType "application/json" `
     -Body (@{ ownerId = $member.id; name = "Core Member Key"; routes = @(@{ modelId = $model.id; resourcePoolId = $pool.data.id }) } | ConvertTo-Json -Depth 5)
   $gatewayKeySecret = [string]$createdKey.data.secret
-  if ($gatewayKeySecret -notmatch '^llmg_[A-Za-z0-9_-]+$') { throw "Member API key creation did not return the one-time secret." }
+  if ($gatewayKeySecret -notmatch '^llmg_[A-Za-z0-9_-]+$') { throw "Member API key creation did not return a valid secret." }
+  $revealedKey = Invoke-RestMethod -Method Post -Uri "$baseURL/api/control/keys/$($createdKey.data.key.id)/reveal" -WebSession $memberSession `
+    -Headers @{ "X-CSRF-Token" = $memberCSRF }
+  if ([string]$revealedKey.data.secret -cne $gatewayKeySecret) { throw "API key reveal did not return the created key." }
 
   $publicModels = Invoke-RestMethod -Uri "$baseURL/v1/models" -Headers @{ Authorization = "Bearer $gatewayKeySecret" }
   if (-not @($publicModels.data.id).Contains([string]$model.public_name)) { throw "Authorized model was absent from the public catalog." }
@@ -318,14 +341,20 @@ try {
   $disabledCredential = Invoke-RestMethod -Method Put -Uri "$baseURL/api/control/credentials/$($credential.id)/status" -WebSession $adminSession `
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
     -Body (@{ status = "disabled"; expectedUpdatedAt = $credential.updated_at } | ConvertTo-Json)
+  if ($disabledCredential.data.id -ne $credential.id -or $disabledCredential.data.status -ne "disabled") {
+    throw "The selected upstream API Key did not enter the disabled state."
+  }
   Assert-HTTPFailureStatus -ExpectedStatus 503 -FailureMessage "A request bypassed the disabled upstream API Key." -Action {
     Invoke-RestMethod -Method Post -Uri "$baseURL/v1/chat/completions" `
       -Headers @{ Authorization = "Bearer $gatewayKeySecret"; "Idempotency-Key" = [guid]::NewGuid().ToString() } `
       -ContentType "application/json" -Body $chatBody
   }
-  $null = Invoke-RestMethod -Method Put -Uri "$baseURL/api/control/credentials/$($credential.id)/status" -WebSession $adminSession `
+  $enabledCredential = Invoke-RestMethod -Method Put -Uri "$baseURL/api/control/credentials/$($credential.id)/status" -WebSession $adminSession `
     -Headers (New-MutationHeaders -CSRF $adminCSRF) -ContentType "application/json" `
     -Body (@{ status = "active"; expectedUpdatedAt = $disabledCredential.data.updated_at } | ConvertTo-Json)
+  if ($enabledCredential.data.id -ne $credential.id -or $enabledCredential.data.status -ne "active") {
+    throw "The selected upstream API Key did not return to the active state."
+  }
 
   $requestFacts = & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_core -Atc `
     "SELECT request.status || '|' || request.input_tokens || '|' || request.output_tokens || '|' || (SELECT count(*) FROM request_attempts attempt WHERE attempt.request_id = request.id AND attempt.status = 'completed') FROM requests request WHERE request.gateway_key_id = '$($createdKey.data.key.id)' AND request.idempotency_key = '$requestIdempotencyKey'"

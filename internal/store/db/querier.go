@@ -65,10 +65,12 @@ type Querier interface {
 	GetApplicableSubscriptionRoutesForUpdate(ctx context.Context, arg GetApplicableSubscriptionRoutesForUpdateParams) ([]GetApplicableSubscriptionRoutesForUpdateRow, error)
 	GetAttemptLatencySummary(ctx context.Context, arg GetAttemptLatencySummaryParams) (GetAttemptLatencySummaryRow, error)
 	GetCredential(ctx context.Context, id uuid.UUID) (GetCredentialRow, error)
+	GetCredentialBySecretFingerprint(ctx context.Context, secretFingerprint string) (GetCredentialBySecretFingerprintRow, error)
 	GetCredentialForUpdate(ctx context.Context, id uuid.UUID) (ProviderCredential, error)
 	GetCredentialMutation(ctx context.Context, arg GetCredentialMutationParams) (CredentialMutation, error)
 	GetCurrentServicePlanVersion(ctx context.Context, servicePlanID uuid.UUID) (ServicePlanVersion, error)
 	GetEncryptedCredential(ctx context.Context, id uuid.UUID) ([]byte, error)
+	GetEncryptedGatewayKey(ctx context.Context, id uuid.UUID) ([]byte, error)
 	GetGatewayKeyByDigest(ctx context.Context, secretDigest []byte) (GetGatewayKeyByDigestRow, error)
 	GetGatewayKeyDeletionState(ctx context.Context, id uuid.UUID) (GetGatewayKeyDeletionStateRow, error)
 	GetGatewayKeyForDeletion(ctx context.Context, id uuid.UUID) (GetGatewayKeyForDeletionRow, error)
@@ -168,6 +170,7 @@ type Querier interface {
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (User, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (User, error)
+	UpsertCredentialUpstreamObservation(ctx context.Context, arg UpsertCredentialUpstreamObservationParams) error
 	// Models are discovered from a concrete upstream API Key, never projected from the code catalog.
 	UpsertDiscoveredModel(ctx context.Context, arg UpsertDiscoveredModelParams) (Model, error)
 	// Provider rows are deterministic projections of the validated code catalog.

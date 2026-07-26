@@ -16,6 +16,7 @@ try {
   $env:LLM2API_MASTER_KEYS = "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
   $env:LLM2API_SESSION_PEPPER = "llm2api-test-session-pepper-000000"
   $env:LLM2API_API_KEY_PEPPER = "llm2api-test-api-key-pepper-000000"
+  $env:LLM2API_CREDENTIAL_FINGERPRINT_PEPPER = "llm2api-test-credential-fingerprint-pepper"
 
   & go run .\cmd\dbtool --action up
   if ($LASTEXITCODE -ne 0) {

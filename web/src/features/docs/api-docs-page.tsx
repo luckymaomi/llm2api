@@ -2,9 +2,10 @@ import { useQuery } from '@tanstack/react-query'
 import { Check, Copy, ExternalLink } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
-import { accessApi } from '@/api'
+import { accessApi, gatewayDocumentationApi } from '@/api'
 import { Page, PageHeader } from '@/components/layout'
 import { Button } from '@/components/ui/button'
+import { FormProblem } from '@/features/auth/form-problem'
 import { formatNumber } from '@/lib/format'
 
 type ExampleLanguage = 'curl' | 'python' | 'node'
@@ -12,8 +13,10 @@ type ExampleLanguage = 'curl' | 'python' | 'node'
 export function APIDocsPage() {
   const [language, setLanguage] = useState<ExampleLanguage>('curl')
   const [copied, setCopied] = useState<string>()
-  const baseURL = `${window.location.origin}/v1`
-  const agentIndexURL = `${window.location.origin}/llms.txt`
+  const gatewayDocumentation = useQuery({
+    queryKey: ['gateway-documentation'],
+    queryFn: ({ signal }) => gatewayDocumentationApi.get(signal),
+  })
   const keys = useQuery({
     queryKey: ['gateway-keys', 'api-docs'],
     queryFn: ({ signal }) => accessApi.keys({ page: 1, pageSize: 100, status: 'active' }, signal),
@@ -28,11 +31,32 @@ export function APIDocsPage() {
     )
   }, [keys.data?.items])
   const model = models[0]?.name ?? 'your-model'
-  const examples = exampleSource(baseURL, model)
+  const endpoint = gatewayDocumentation.data
+  const examples = endpoint ? exampleSource(endpoint.baseURL, model) : undefined
 
   async function copy(value: string, id: string) {
     await navigator.clipboard.writeText(value)
     setCopied(id)
+  }
+
+  if (!endpoint || !examples) {
+    return (
+      <Page className="api-docs-page">
+        <PageHeader
+          title="接口文档"
+          description="正在读取 Gateway 的真实 OpenAI-compatible 地址。"
+        />
+        <FormProblem error={gatewayDocumentation.error} />
+        {gatewayDocumentation.isLoading ? (
+          <p className="api-docs-muted">正在读取 Gateway 文档。</p>
+        ) : null}
+        {gatewayDocumentation.error ? (
+          <Button variant="secondary" onClick={() => void gatewayDocumentation.refetch()}>
+            重新读取
+          </Button>
+        ) : null}
+      </Page>
+    )
   }
 
   return (
@@ -44,7 +68,7 @@ export function APIDocsPage() {
           <Button
             variant="secondary"
             icon={<ExternalLink size={16} />}
-            onClick={() => window.open(agentIndexURL, '_blank', 'noopener,noreferrer')}
+            onClick={() => window.open(endpoint.agentIndexURL, '_blank', 'noopener,noreferrer')}
           >
             Agent 文档索引
           </Button>
@@ -69,7 +93,7 @@ export function APIDocsPage() {
               <div>
                 <dt>Base URL</dt>
                 <dd>
-                  <code>{baseURL}</code>
+                  <code>{endpoint.baseURL}</code>
                 </dd>
               </div>
               <div>
@@ -161,8 +185,8 @@ export function APIDocsPage() {
             </p>
             <CodeBlock id="agent-config" value={examples.agent} copied={copied} onCopy={copy} />
             <p className="api-docs-muted">
-              机器可读索引：<code>{agentIndexURL}</code>。OpenAPI：
-              <code>{window.location.origin}/openapi.json</code>。
+              机器可读索引：<code>{endpoint.agentIndexURL}</code>。OpenAPI：
+              <code>{endpoint.openAPIURL}</code>。
             </p>
           </section>
 

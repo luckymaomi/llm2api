@@ -124,6 +124,8 @@ try {
   $env:LLM2API_ACTIVE_MASTER_KEY_VERSION = "1"
   $env:LLM2API_SESSION_PEPPER = "llm2api-capacity-session-pepper-00000"
   $env:LLM2API_API_KEY_PEPPER = $apiKeyPepper
+
+  $env:LLM2API_CREDENTIAL_FINGERPRINT_PEPPER = "llm2api-capacity-credential-fingerprint-pepper"
   $env:LLM2API_COORDINATION_KEY_HASH_SECRET = "llm2api-capacity-coordination-hash-000"
   $env:LLM2API_COOKIE_SECURE = "false"
   $env:LLM2API_PROVIDER_CA_BUNDLE_FILE = $providerCertificatePath
@@ -143,7 +145,7 @@ try {
 
   $docker = Get-LLM2APIDockerCommand
   & $docker exec $postgres.Container psql -v ON_ERROR_STOP=1 -U llm2api -d llm2api_capacity -c `
-    "UPDATE providers SET base_url = '$providerBaseURL' WHERE catalog_id = 'siliconflow'; UPDATE models SET upstream_name = 'fixture-chat' WHERE provider_id = (SELECT id FROM providers WHERE catalog_id = 'siliconflow');" | Out-Null
+    "UPDATE providers SET base_url = '$providerBaseURL' WHERE catalog_id = 'siliconflow';" | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Could not redirect the capacity Provider catalog to the fixture." }
 
   $adminSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
@@ -165,7 +167,7 @@ try {
   foreach ($credentialIndex in 1..6) {
     $credential = Invoke-CapacityControl -Method Post -Uri "$($gatewayURLs[0])/api/control/credentials/batch" -Session $adminSession -CSRF $csrf `
       -IdempotencyKey ([guid]::NewGuid().ToString()) -Body @{
-        resourcePoolId = $resourcePool.data.id; items = @(@{ name = "Capacity fixture credential $credentialIndex"; secret = "core-upstream-secret" })
+        resourcePoolId = $resourcePool.data.id; items = @(@{ name = "Capacity fixture credential $credentialIndex"; secret = "capacity-upstream-secret-$credentialIndex" })
         modelBindings = @(@{ model_id = $model.id })
         rpmLimit = 100000; tpmLimit = 100000000; concurrencyLimit = 128
       }
@@ -244,7 +246,7 @@ try {
   Copy-Item -LiteralPath $recoveryReportPath -Destination (Join-Path $evidenceDirectory "recovery-report.json") -Force
 
   $logFiles = @(Get-ChildItem -LiteralPath $buildDirectory -File -Filter "*.log" | Select-Object -ExpandProperty FullName)
-  if ($logFiles.Count -gt 0 -and (Select-String -LiteralPath $logFiles -SimpleMatch -Quiet -Pattern "llmg_capacity_", $apiKeyPepper, "core-upstream-secret")) {
+  if ($logFiles.Count -gt 0 -and (Select-String -LiteralPath $logFiles -SimpleMatch -Quiet -Pattern "llmg_capacity_", $apiKeyPepper, "capacity-upstream-secret-")) {
     throw "A capacity fixture secret appeared in runtime logs."
   }
   if ($logFiles.Count -gt 0 -and (Select-String -LiteralPath $logFiles -SimpleMatch -Quiet -Pattern '"level":"ERROR"')) {

@@ -202,6 +202,9 @@ func translateRegistryError(err error) error {
 	}
 	var databaseError *pgconn.PgError
 	if errors.As(err, &databaseError) {
+		if databaseError.Code == "23505" && databaseError.ConstraintName == "provider_credentials_secret_fingerprint_key" {
+			return registry.ErrCredentialAlreadyManaged
+		}
 		switch databaseError.Code {
 		case "23503":
 			return registry.ErrNotFound

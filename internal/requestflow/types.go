@@ -170,11 +170,38 @@ type LeaseRequest struct {
 
 type Lease interface {
 	Context() context.Context
+	Reconcile(context.Context, int64) error
 	Release(context.Context) error
 }
 
 type Coordinator interface {
 	Acquire(context.Context, LeaseRequest) (Lease, time.Duration, error)
+}
+
+// CredentialCapacityInput contains only the routing identity and configured
+// gateway limits needed to inspect one upstream API key. It never contains the
+// upstream secret or an upstream balance.
+type CredentialCapacityInput struct {
+	CredentialID     uuid.UUID
+	RPMLimit         *int32
+	TPMLimit         *int64
+	ConcurrencyLimit *int32
+}
+
+// CredentialCapacity is the current key-scoped gateway admission state. It is
+// not a Provider account balance: Provider limits can be shared across keys.
+type CredentialCapacity struct {
+	ObservedAt              time.Time
+	RequestsPerMinuteLimit  int64
+	RequestsPerMinuteRemain int64
+	TokensPerMinuteLimit    int64
+	TokensPerMinuteRemain   int64
+	ConcurrencyLimit        int64
+	ConcurrencyInUse        int64
+}
+
+type CredentialCapacityInspector interface {
+	InspectCredential(context.Context, CredentialCapacityInput) (CredentialCapacity, error)
 }
 
 type Observer interface {

@@ -1,6 +1,7 @@
 package controlapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -8,7 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/luckymaomi/llm2api/internal/httpserver"
+	"github.com/luckymaomi/llm2api/internal/providers"
 	"github.com/luckymaomi/llm2api/internal/registry"
+	"github.com/luckymaomi/llm2api/internal/requestflow"
 )
 
 func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +135,44 @@ type credentialInput struct {
 	ExpectedUpdatedAt time.Time `json:"expectedUpdatedAt"`
 }
 
+type credentialCapacityView struct {
+	State                   string     `json:"state"`
+	Scope                   string     `json:"scope"`
+	ObservedAt              *time.Time `json:"observed_at,omitempty"`
+	RequestsPerMinuteLimit  int64      `json:"requests_per_minute_limit,omitempty"`
+	RequestsPerMinuteRemain int64      `json:"requests_per_minute_remaining,omitempty"`
+	TokensPerMinuteLimit    int64      `json:"tokens_per_minute_limit,omitempty"`
+	TokensPerMinuteRemain   int64      `json:"tokens_per_minute_remaining,omitempty"`
+	ConcurrencyLimit        int64      `json:"concurrency_limit,omitempty"`
+	ConcurrencyInUse        int64      `json:"concurrency_in_use,omitempty"`
+}
+
+type credentialView struct {
+	registry.Credential
+	Capacity credentialCapacityView `json:"capacity"`
+}
+
+type credentialBatchResultView struct {
+	Line       int             `json:"line"`
+	Name       string          `json:"name"`
+	Status     string          `json:"status"`
+	Credential *credentialView `json:"credential,omitempty"`
+	ErrorKind  string          `json:"error_kind,omitempty"`
+}
+
+type credentialModelProbeView struct {
+	Credential credentialView                   `json:"credential"`
+	Execution  registry.ModelDiscoveryExecution `json:"execution"`
+}
+
+type credentialModelProbeBatchView struct {
+	Results     []credentialModelProbeView `json:"results"`
+	Succeeded   int                        `json:"succeeded"`
+	Failed      int                        `json:"failed"`
+	Unavailable int                        `json:"unavailable"`
+	Uncertain   int                        `json:"uncertain"`
+}
+
 func (a *API) listCredentials(w http.ResponseWriter, r *http.Request) {
 	includeRetired, _ := strconv.ParseBool(r.URL.Query().Get("includeRetired"))
 	items, err := a.registry.ListCredentials(r.Context(), principalFromContext(r.Context()), includeRetired)
@@ -139,7 +180,7 @@ func (a *API) listCredentials(w http.ResponseWriter, r *http.Request) {
 		a.writeRegistryError(w, r, err)
 		return
 	}
-	writeData(w, http.StatusOK, items)
+	writeData(w, http.StatusOK, a.presentCredentials(r.Context(), items))
 }
 
 func (a *API) importCredentials(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +214,20 @@ func (a *API) importCredentials(w http.ResponseWriter, r *http.Request) {
 		a.writeRegistryError(w, r, err)
 		return
 	}
-	writeData(w, http.StatusOK, items)
+	writeData(w, http.StatusOK, a.presentCredentialBatch(r.Context(), items))
+}
+
+func (a *API) probeAllCredentials(w http.ResponseWriter, r *http.Request) {
+	mutation, ok := registryMutationRequest(w, r)
+	if !ok {
+		return
+	}
+	batch, err := a.registry.RefreshAllCredentialModels(r.Context(), principalFromContext(r.Context()), mutation)
+	if err != nil {
+		a.writeRegistryError(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, a.presentCredentialModelProbeBatch(r.Context(), batch))
 }
 
 func (a *API) updateCredential(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +251,7 @@ func (a *API) updateCredential(w http.ResponseWriter, r *http.Request) {
 		a.writeRegistryError(w, r, err)
 		return
 	}
-	writeData(w, http.StatusOK, item)
+	writeData(w, http.StatusOK, a.presentCredential(r.Context(), item))
 }
 
 func (a *API) setCredentialStatus(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +276,7 @@ func (a *API) setCredentialStatus(w http.ResponseWriter, r *http.Request) {
 		a.writeRegistryError(w, r, err)
 		return
 	}
-	writeData(w, http.StatusOK, item)
+	writeData(w, http.StatusOK, a.presentCredential(r.Context(), item))
 }
 
 func (a *API) retireCredential(w http.ResponseWriter, r *http.Request) {
@@ -244,7 +298,7 @@ func (a *API) retireCredential(w http.ResponseWriter, r *http.Request) {
 		a.writeRegistryError(w, r, err)
 		return
 	}
-	writeData(w, http.StatusOK, item)
+	writeData(w, http.StatusOK, a.presentCredential(r.Context(), item))
 }
 
 func (a *API) probeCredential(w http.ResponseWriter, r *http.Request) {
@@ -270,8 +324,24 @@ func (a *API) probeCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	writeData(w, http.StatusOK, struct {
 		Execution  registry.ModelDiscoveryExecution `json:"execution"`
-		Credential registry.Credential              `json:"credential"`
-	}{execution, credential})
+		Credential credentialView                   `json:"credential"`
+	}{execution, a.presentCredential(r.Context(), credential)})
+}
+
+func (a *API) fetchCredentialUpstreamStatus(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "credentialID")
+	if !ok {
+		return
+	}
+	observation, credential, err := a.registry.FetchCredentialUpstreamStatus(r.Context(), principalFromContext(r.Context()), id, httpserver.RequestIDFromContext(r.Context()))
+	if err != nil {
+		a.writeRegistryError(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, struct {
+		Observation providers.UpstreamStatusObservation `json:"observation"`
+		Credential  credentialView                      `json:"credential"`
+	}{Observation: observation, Credential: a.presentCredential(r.Context(), credential)})
 }
 
 func (a *API) deepTestCredential(w http.ResponseWriter, r *http.Request) {
@@ -293,8 +363,67 @@ func (a *API) deepTestCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	writeData(w, http.StatusOK, struct {
 		Execution  registry.CredentialProbeExecution `json:"execution"`
-		Credential registry.Credential               `json:"credential"`
-	}{execution, credential})
+		Credential credentialView                    `json:"credential"`
+	}{execution, a.presentCredential(r.Context(), credential)})
+}
+
+func (a *API) presentCredentials(ctx context.Context, credentials []registry.Credential) []credentialView {
+	result := make([]credentialView, 0, len(credentials))
+	for _, credential := range credentials {
+		result = append(result, a.presentCredential(ctx, credential))
+	}
+	return result
+}
+
+func (a *API) presentCredentialBatch(ctx context.Context, results []registry.CredentialBatchResult) []credentialBatchResultView {
+	views := make([]credentialBatchResultView, 0, len(results))
+	for _, result := range results {
+		view := credentialBatchResultView{Line: result.Line, Name: result.Name, Status: result.Status, ErrorKind: result.ErrorKind}
+		if result.Credential != nil {
+			credential := a.presentCredential(ctx, *result.Credential)
+			view.Credential = &credential
+		}
+		views = append(views, view)
+	}
+	return views
+}
+
+func (a *API) presentCredentialModelProbeBatch(ctx context.Context, batch registry.CredentialModelProbeBatch) credentialModelProbeBatchView {
+	results := make([]credentialModelProbeView, 0, len(batch.Results))
+	for _, result := range batch.Results {
+		results = append(results, credentialModelProbeView{
+			Credential: a.presentCredential(ctx, result.Credential),
+			Execution:  result.Execution,
+		})
+	}
+	return credentialModelProbeBatchView{
+		Results: results, Succeeded: batch.Succeeded, Failed: batch.Failed,
+		Unavailable: batch.Unavailable, Uncertain: batch.Uncertain,
+	}
+}
+
+func (a *API) presentCredential(ctx context.Context, credential registry.Credential) credentialView {
+	view := credentialView{
+		Credential: credential,
+		Capacity:   credentialCapacityView{State: "unavailable", Scope: "gateway_credential"},
+	}
+	if a.credentialCapacity == nil {
+		return view
+	}
+	capacity, err := a.credentialCapacity.InspectCredential(ctx, requestflow.CredentialCapacityInput{
+		CredentialID: credential.ID, RPMLimit: credential.RPMLimit, TPMLimit: credential.TPMLimit, ConcurrencyLimit: credential.ConcurrencyLimit,
+	})
+	if err != nil {
+		return view
+	}
+	observedAt := capacity.ObservedAt
+	view.Capacity = credentialCapacityView{
+		State: "observed", Scope: "gateway_credential", ObservedAt: &observedAt,
+		RequestsPerMinuteLimit: capacity.RequestsPerMinuteLimit, RequestsPerMinuteRemain: capacity.RequestsPerMinuteRemain,
+		TokensPerMinuteLimit: capacity.TokensPerMinuteLimit, TokensPerMinuteRemain: capacity.TokensPerMinuteRemain,
+		ConcurrencyLimit: capacity.ConcurrencyLimit, ConcurrencyInUse: capacity.ConcurrencyInUse,
+	}
+	return view
 }
 
 func registryMutationRequest(w http.ResponseWriter, r *http.Request) (registry.MutationRequest, bool) {

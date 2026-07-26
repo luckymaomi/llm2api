@@ -751,6 +751,8 @@ input[role='switch'] {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
+  gap: 3px;
+  text-align: center;
 }
 
 .data-table-desktop tbody tr:last-child td {

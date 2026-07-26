@@ -45,43 +45,6 @@ function New-RandomHex {
   return (($buffer | ForEach-Object { $_.ToString("x2") }) -join "")
 }
 
-function Select-FreeEdgeNetwork {
-  param(
-    [Parameter(Mandatory = $true)][string] $Docker,
-    [Parameter(Mandatory = $true)][string] $RunID
-  )
-
-  $octets = @(22, 23, 24, 25, 26, 27, 28, 29, 30, 31) | Sort-Object { Get-Random }
-  foreach ($octet in $octets) {
-    $subnet = "172.$octet.0.0/24"
-    $probeName = "llm2api-edge-probe-$RunID-$octet"
-    $probeOutput = @(& $Docker network create --internal `
-      --label "llm2api.test.owner=deployment-network-probe" `
-      --label "llm2api.test.run=$RunID" `
-      --subnet $subnet $probeName 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $probeOutput.Count -eq 0) { continue }
-
-    try {
-      $inspection = @(& $Docker network inspect $probeName 2>$null | ConvertFrom-Json)
-      if ($LASTEXITCODE -ne 0 -or $inspection.Count -ne 1 -or
-          $inspection[0].Labels.'llm2api.test.owner' -ne 'deployment-network-probe' -or
-          $inspection[0].Labels.'llm2api.test.run' -ne $RunID) {
-        throw "Docker returned an invalid ownership record for the edge network probe."
-      }
-    } finally {
-      & $Docker network rm $probeName *> $null
-      if ($LASTEXITCODE -ne 0) { throw "Could not remove the edge network probe $probeName." }
-    }
-
-    return [pscustomobject]@{
-      Subnet       = $subnet
-      ProxyAddress = "172.$octet.0.10"
-    }
-  }
-
-  throw "Could not find a free Docker edge subnet in the isolated deployment pool."
-}
-
 function Write-SecretFile {
   param([string] $Name, [string] $Value)
   $path = Join-Path $buildDirectory $Name
@@ -166,6 +129,7 @@ try {
     $masterKey,
     (New-RandomHex -Bytes 32),
     (New-RandomHex -Bytes 32),
+    (New-RandomHex -Bytes 32),
     (New-RandomHex -Bytes 32)
   )
   $env:LLM2API_POSTGRES_PASSWORD_FILE = Write-SecretFile "postgres-password" $databasePassword
@@ -176,7 +140,8 @@ try {
   $env:LLM2API_MASTER_KEYS_FILE = Write-SecretFile "master-keys" "1:$masterKey"
   $env:LLM2API_SESSION_PEPPER_FILE = Write-SecretFile "session-pepper" $secretValues[3]
   $env:LLM2API_API_KEY_PEPPER_FILE = Write-SecretFile "api-key-pepper" $secretValues[4]
-  $env:LLM2API_COORDINATION_KEY_HASH_SECRET_FILE = Write-SecretFile "coordination-secret" $secretValues[5]
+  $env:LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE = Write-SecretFile "credential-fingerprint-pepper" $secretValues[5]
+  $env:LLM2API_COORDINATION_KEY_HASH_SECRET_FILE = Write-SecretFile "coordination-secret" $secretValues[6]
   $env:LLM2API_ACTIVE_MASTER_KEY_VERSION = "1"
   $env:LLM2API_GATEWAY_IMAGE = $ReleaseImage
   $env:LLM2API_POSTGRES_IMAGE = "postgres:18.4-alpine"
@@ -187,8 +152,10 @@ try {
   $env:LLM2API_HTTP_PORT = [string](Get-LLM2APIFreeLoopbackPort)
   $env:LLM2API_HTTPS_PORT = [string](Get-LLM2APIFreeLoopbackPort)
   $env:LLM2API_DEPLOYMENT_URL = "https://localhost:$($env:LLM2API_HTTPS_PORT)"
-  $edgeNetwork = Select-FreeEdgeNetwork -Docker $docker -RunID $runID
-  $env:LLM2API_EDGE_SUBNET = $edgeNetwork.Subnet
+  $env:LLM2API_PUBLIC_ORIGIN = $env:LLM2API_DEPLOYMENT_URL
+  $edgeNetwork = Get-LLM2APIAcceptanceNetworkAllocation -Docker $docker -RunID $runID
+  $env:LLM2API_ACCEPTANCE_BACKEND_SUBNET = $edgeNetwork.BackendSubnet
+  $env:LLM2API_EDGE_SUBNET = $edgeNetwork.EdgeSubnet
   $env:LLM2API_TRUSTED_PROXY = $edgeNetwork.ProxyAddress
 
   if (-not $SkipBuild) {

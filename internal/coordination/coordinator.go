@@ -61,6 +61,10 @@ func (c *Coordinator) rateKey(limit BucketLimit) string {
 	return c.prefix + ":{coordination}:rate:" + string(limit.Metric) + ":" + string(limit.Dimension.Scope) + ":" + c.digest("dimension", string(limit.Dimension.Scope), limit.Dimension.SubjectID)
 }
 
+func (c *Coordinator) rateRefundKey(reference string) string {
+	return c.prefix + ":{coordination}:rate-refund:" + c.digest("rate-refund", reference)
+}
+
 func (c *Coordinator) leaseKey(dimension Dimension) string {
 	return c.prefix + ":{coordination}:lease:" + string(dimension.Scope) + ":" + c.digest("dimension", string(dimension.Scope), dimension.SubjectID)
 }

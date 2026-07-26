@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/luckymaomi/llm2api/internal/canonical"
 	"github.com/luckymaomi/llm2api/internal/identity"
+	"github.com/luckymaomi/llm2api/internal/providers"
+	"github.com/luckymaomi/llm2api/internal/registry"
 	"github.com/luckymaomi/llm2api/internal/requestflow"
 )
 
@@ -61,7 +63,13 @@ func (f fakeWorkflow) Stream(_ context.Context, _ requestflow.ChatCommand, sink 
 
 func TestModelsRequireGatewayKeyAndExposeOnlyWorkflowCatalog(t *testing.T) {
 	userID := uuid.New()
-	api := New(fakeIdentity{principal: identity.GatewayPrincipal{UserID: userID}}, fakeWorkflow{models: []requestflow.Model{{PublicName: "glm-free", ProviderSlug: "zhipu", CreatedAt: time.Unix(42, 0)}}}, testLogger())
+	api := New(fakeIdentity{principal: identity.GatewayPrincipal{UserID: userID}}, fakeWorkflow{models: []requestflow.Model{{
+		PublicName: "glm-free", ProviderSlug: "zhipu", CreatedAt: time.Unix(42, 0),
+		Capabilities: registry.ModelCapabilities{
+			Chat: true, Streaming: true, Tools: true, ToolChoiceModes: []string{"auto"}, ToolStreaming: true, Reasoning: true, ReasoningEfforts: []string{"high"}, ContextTokens: 200_000, OutputTokens: 8_192,
+			Parameters: providers.ParameterCapabilities{N: providers.IntegerParameterLimit{Supported: true, ExactValues: []int64{1}}},
+		},
+	}}}, testLogger())
 
 	unauthorized := httptest.NewRecorder()
 	api.Routes().ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/models", nil))
@@ -73,7 +81,8 @@ func TestModelsRequireGatewayKeyAndExposeOnlyWorkflowCatalog(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer llmg_test")
 	response := httptest.NewRecorder()
 	api.Routes().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"glm-free"`) || !strings.Contains(response.Body.String(), `"owned_by":"zhipu"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"glm-free"`) || !strings.Contains(response.Body.String(), `"owned_by":"zhipu"`) ||
+		!strings.Contains(response.Body.String(), `"streaming_tool_calls":true`) || !strings.Contains(response.Body.String(), `"context_tokens":200000`) || !strings.Contains(response.Body.String(), `"parameters":{"max_completion_tokens"`) || !strings.Contains(response.Body.String(), `"n":{"supported":true,"exact_values":[1]}`) {
 		t.Fatalf("unexpected models response: %d %s", response.Code, response.Body.String())
 	}
 }

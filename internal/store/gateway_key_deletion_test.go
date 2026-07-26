@@ -190,8 +190,9 @@ func insertGatewayKeyDeletionKey(t *testing.T, pool *pgxpool.Pool, ownerID uuid.
 	t.Helper()
 	id := uuid.New()
 	digest := []byte("gateway-key-deletion-" + id.String())
-	if _, err := pool.Exec(context.Background(), `INSERT INTO gateway_keys (id, user_id, name, prefix, secret_digest)
-VALUES ($1, $2, 'Deletion Fixture', $3, $4)`, id, ownerID, "llmg_"+id.String()[:12], digest); err != nil {
+	encryptedSecret := []byte("gateway-key-deletion-fixture-" + id.String())
+	if _, err := pool.Exec(context.Background(), `INSERT INTO gateway_keys (id, user_id, name, prefix, secret_digest, encrypted_secret)
+VALUES ($1, $2, 'Deletion Fixture', $3, $4, $5)`, id, ownerID, "llmg_"+id.String()[:12], digest, encryptedSecret); err != nil {
 		t.Fatalf("insert gateway key deletion fixture: %v", err)
 	}
 	t.Cleanup(func() {

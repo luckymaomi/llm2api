@@ -20,11 +20,11 @@ func TestRuntimeMetricsExposeBoundedDomainOutcomes(t *testing.T) {
 	registry := prometheus.NewRegistry()
 	var logs bytes.Buffer
 	metrics := NewRuntimeMetrics(registry, slog.New(slog.NewJSONHandler(&logs, nil)))
-	metrics.ProviderAttempt(providers.KindGemini, "uncertain", "uncertain")
+	metrics.ProviderAttempt(providers.KindSiliconFlow, "uncertain", "uncertain")
 	metrics.BackgroundResponse("completed")
 	metrics.RequestRecovery(requestflow.RecoveryResult{Completed: 2, FailedAccepted: 1, Uncertain: 1})
 
-	if got := testutil.ToFloat64(metrics.providerAttempts.WithLabelValues("gemini", "uncertain", "uncertain")); got != 1 {
+	if got := testutil.ToFloat64(metrics.providerAttempts.WithLabelValues("siliconflow", "uncertain", "uncertain")); got != 1 {
 		t.Fatalf("Provider attempts = %v", got)
 	}
 	if got := testutil.ToFloat64(metrics.requestRecovery.WithLabelValues("completed")); got != 2 {
@@ -91,5 +91,6 @@ type leaseStub struct {
 	ctx context.Context
 }
 
-func (l leaseStub) Context() context.Context    { return l.ctx }
-func (leaseStub) Release(context.Context) error { return nil }
+func (l leaseStub) Context() context.Context             { return l.ctx }
+func (leaseStub) Reconcile(context.Context, int64) error { return nil }
+func (leaseStub) Release(context.Context) error          { return nil }

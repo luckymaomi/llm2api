@@ -43,6 +43,8 @@ func (a *API) writeRegistryError(w http.ResponseWriter, r *http.Request, err err
 		value.Status, value.Code, value.Message, value.Retryable = http.StatusNotFound, "not_found", "Registry record was not found.", false
 	case errors.Is(err, registry.ErrConflict):
 		value.Status, value.Code, value.Message, value.Retryable = http.StatusConflict, "conflict", "Registry facts changed.", false
+	case errors.Is(err, registry.ErrCredentialAlreadyManaged):
+		value.Status, value.Code, value.Message, value.Retryable = http.StatusConflict, "credential_already_managed", "This upstream API key is already managed.", false
 	case errors.Is(err, registry.ErrIdempotencyConflict):
 		value.Status, value.Code, value.Message, value.Retryable = http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used for different registry input.", false
 	case errors.Is(err, registry.ErrOutcomeUnknown):

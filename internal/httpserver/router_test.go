@@ -23,7 +23,7 @@ func (s readinessStub) Ready(context.Context) error { return s.err }
 
 func TestHealthEndpointsExposeRuntimeState(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := config.Config{HTTP: config.HTTP{MaxBodyBytes: 1024}}
+	cfg := config.Config{HTTP: config.HTTP{MaxBodyBytes: 1024, PublicOrigin: "https://gateway.example"}}
 	router := NewRouter(cfg, logger, readinessStub{}, prometheus.NewRegistry(), nil, nil)
 
 	for _, path := range []string{"/health/live", "/health/ready"} {
@@ -41,7 +41,7 @@ func TestHealthEndpointsExposeRuntimeState(t *testing.T) {
 
 func TestReadinessReportsDependencyFailure(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := config.Config{HTTP: config.HTTP{MaxBodyBytes: 1024}}
+	cfg := config.Config{HTTP: config.HTTP{MaxBodyBytes: 1024, PublicOrigin: "https://gateway.example"}}
 	router := NewRouter(cfg, logger, readinessStub{err: errors.New("database offline")}, prometheus.NewRegistry(), nil, nil)
 
 	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
@@ -70,11 +70,10 @@ func TestRequestIDRejectsUnsafeInput(t *testing.T) {
 
 func TestDocumentationEndpointsExposeStableMachineReadableEntryPoints(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := config.Config{HTTP: config.HTTP{MaxBodyBytes: 1024}}
+	cfg := config.Config{HTTP: config.HTTP{MaxBodyBytes: 1024, PublicOrigin: "https://gateway.example"}}
 	router := NewRouter(cfg, logger, readinessStub{}, prometheus.NewRegistry(), nil, nil)
 
-	request := httptest.NewRequest(http.MethodGet, "https://gateway.example/llms.txt", nil)
-	request.Header.Set("X-Forwarded-Proto", "https")
+	request := httptest.NewRequest(http.MethodGet, "http://internal.example/llms.txt", nil)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -87,7 +86,7 @@ func TestDocumentationEndpointsExposeStableMachineReadableEntryPoints(t *testing
 		t.Fatalf("llms.txt did not contain the public models endpoint: %s", body)
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "https://gateway.example/openapi.json", nil)
+	request = httptest.NewRequest(http.MethodGet, "http://internal.example/openapi.json", nil)
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -103,5 +102,13 @@ func TestDocumentationEndpointsExposeStableMachineReadableEntryPoints(t *testing
 	paths, ok := document["paths"].(map[string]any)
 	if !ok || paths["/models"] == nil || paths["/chat/completions"] == nil || paths["/responses"] == nil {
 		t.Fatalf("openapi paths are incomplete: %v", document["paths"])
+	}
+	components, ok := document["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("openapi components are missing: %v", document)
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok || schemas["ModelParameters"] == nil || schemas["SamplingCondition"] == nil {
+		t.Fatalf("openapi parameter capability schemas are missing: %v", components)
 	}
 }

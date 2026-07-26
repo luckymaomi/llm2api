@@ -2,8 +2,6 @@ package canonical
 
 import "encoding/json"
 
-const MaxToolCallProviderMetadataBytes = 64 << 10
-
 type ToolDefinition struct {
 	Name        string
 	Description string
@@ -12,17 +10,9 @@ type ToolDefinition struct {
 }
 
 type ToolCall struct {
-	ID               string
-	Type             string
-	Function         ToolFunctionCall
-	ProviderMetadata *ToolCallProviderMetadata
-}
-
-// ToolCallProviderMetadata carries opaque Provider facts that a client must
-// replay with an assistant tool call. Public protocol and Provider adapters
-// own the wire shape; the canonical layer only preserves the bounded value.
-type ToolCallProviderMetadata struct {
-	GoogleThoughtSignature string
+	ID       string
+	Type     string
+	Function ToolFunctionCall
 }
 
 type ToolFunctionCall struct {
@@ -36,7 +26,6 @@ type ToolCallDelta struct {
 	Type              string
 	FunctionName      string
 	ArgumentsFragment string
-	ProviderMetadata  *ToolCallProviderMetadata
 }
 
 type ToolChoiceMode string

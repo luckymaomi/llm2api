@@ -22,25 +22,32 @@ type openAIAdapter struct {
 }
 
 type wireChatRequest struct {
-	Model              string                  `json:"model"`
-	Messages           []wireMessage           `json:"messages"`
-	Stream             bool                    `json:"stream"`
-	MaxTokens          *int64                  `json:"max_tokens,omitempty"`
-	Temperature        *float64                `json:"temperature,omitempty"`
-	TopP               *float64                `json:"top_p,omitempty"`
-	PresencePenalty    *float64                `json:"presence_penalty,omitempty"`
-	FrequencyPenalty   *float64                `json:"frequency_penalty,omitempty"`
-	Stop               []string                `json:"stop,omitempty"`
-	ResponseFormat     *wireResponseFormat     `json:"response_format,omitempty"`
-	Tools              []wireTool              `json:"tools,omitempty"`
-	ToolChoice         any                     `json:"tool_choice,omitempty"`
-	StreamOptions      *wireStreamOptions      `json:"stream_options,omitempty"`
-	Thinking           *wireThinking           `json:"thinking,omitempty"`
-	ReasoningEffort    string                  `json:"reasoning_effort,omitempty"`
-	EnableThinking     *bool                   `json:"enable_thinking,omitempty"`
-	ToolStream         *bool                   `json:"tool_stream,omitempty"`
-	RequestID          string                  `json:"request_id,omitempty"`
-	ChatTemplateKwargs *wireChatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
+	Model               string                  `json:"model"`
+	Messages            []wireMessage           `json:"messages"`
+	Stream              bool                    `json:"stream"`
+	MaxTokens           *int64                  `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int64                  `json:"max_completion_tokens,omitempty"`
+	N                   *int64                  `json:"n,omitempty"`
+	Temperature         *float64                `json:"temperature,omitempty"`
+	TopP                *float64                `json:"top_p,omitempty"`
+	TopK                *float64                `json:"top_k,omitempty"`
+	PresencePenalty     *float64                `json:"presence_penalty,omitempty"`
+	FrequencyPenalty    *float64                `json:"frequency_penalty,omitempty"`
+	ThinkingBudget      *int64                  `json:"thinking_budget,omitempty"`
+	Stop                []string                `json:"stop,omitempty"`
+	ResponseFormat      *wireResponseFormat     `json:"response_format,omitempty"`
+	Tools               []wireTool              `json:"tools,omitempty"`
+	ToolChoice          any                     `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool                   `json:"parallel_tool_calls,omitempty"`
+	StreamOptions       *wireStreamOptions      `json:"stream_options,omitempty"`
+	Thinking            *wireThinking           `json:"thinking,omitempty"`
+	ReasoningEffort     string                  `json:"reasoning_effort,omitempty"`
+	EnableThinking      *bool                   `json:"enable_thinking,omitempty"`
+	ToolStream          *bool                   `json:"tool_stream,omitempty"`
+	RequestID           string                  `json:"request_id,omitempty"`
+	PromptCacheKey      string                  `json:"prompt_cache_key,omitempty"`
+	SafetyIdentifier    string                  `json:"safety_identifier,omitempty"`
+	ChatTemplateKwargs  *wireChatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
 }
 
 type wireMessage struct {
@@ -50,17 +57,23 @@ type wireMessage struct {
 	ToolCalls        []wireToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Partial          bool           `json:"partial,omitempty"`
 }
 
 type wireContentPart struct {
 	Type     canonical.ContentPartType `json:"type"`
 	Text     string                    `json:"text,omitempty"`
 	ImageURL *wireImageURL             `json:"image_url,omitempty"`
+	VideoURL *wireVideoURL             `json:"video_url,omitempty"`
 }
 
 type wireImageURL struct {
 	URL    string `json:"url"`
 	Detail string `json:"detail,omitempty"`
+}
+
+type wireVideoURL struct {
+	URL string `json:"url"`
 }
 
 type wireTool struct {
@@ -76,18 +89,9 @@ type wireToolFunction struct {
 }
 
 type wireToolCall struct {
-	ID           string                `json:"id"`
-	Type         string                `json:"type"`
-	Function     wireFunctionCall      `json:"function"`
-	ExtraContent *toolCallExtraContent `json:"extra_content,omitempty"`
-}
-
-type toolCallExtraContent struct {
-	Google *googleToolCallMetadata `json:"google,omitempty"`
-}
-
-type googleToolCallMetadata struct {
-	ThoughtSignature string `json:"thought_signature"`
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function wireFunctionCall `json:"function"`
 }
 
 type wireFunctionCall struct {
@@ -96,7 +100,15 @@ type wireFunctionCall struct {
 }
 
 type wireResponseFormat struct {
-	Type canonical.ResponseFormatType `json:"type"`
+	Type       canonical.ResponseFormatType `json:"type"`
+	JSONSchema *wireJSONSchema              `json:"json_schema,omitempty"`
+}
+
+type wireJSONSchema struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Schema      json.RawMessage `json:"schema"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type wireStreamOptions struct {
@@ -106,29 +118,30 @@ type wireStreamOptions struct {
 type wireThinking struct {
 	Type          string `json:"type"`
 	ClearThinking *bool  `json:"clear_thinking,omitempty"`
+	Keep          string `json:"keep,omitempty"`
 }
 
 type wireChatTemplateKwargs struct {
 	EnableThinking bool `json:"enable_thinking"`
 }
 
-type OpenAICompatibleOptions struct {
+type SiliconFlowOptions struct {
 	BaseURL         string
 	Capabilities    Capabilities
 	RequestIDHeader string
 }
 
-func NewOpenAICompatible(options OpenAICompatibleOptions) (Adapter, error) {
+func NewSiliconFlow(options SiliconFlowOptions) (Adapter, error) {
 	if !options.Capabilities.Chat {
-		return nil, fmt.Errorf("openai-compatible chat capability is required")
+		return nil, fmt.Errorf("SiliconFlow chat capability is required")
 	}
 	if options.Capabilities.Responses {
-		return nil, fmt.Errorf("openai-compatible chat adapter cannot declare Responses capability")
+		return nil, fmt.Errorf("SiliconFlow chat adapter cannot declare Responses capability")
 	}
 	if options.RequestIDHeader != "" {
 		options.Capabilities.ResponseRequestID = true
 	}
-	return newAdapter(options.BaseURL, openAICompatiblePolicy(options.Capabilities, options.RequestIDHeader))
+	return newAdapter(options.BaseURL, siliconFlowPolicy(options.Capabilities, options.RequestIDHeader))
 }
 
 func mustNewAdapter(baseURL string, policy wirePolicy) Adapter {
@@ -212,20 +225,36 @@ func (a *openAIAdapter) buildWireRequest(request canonical.ChatRequest) (wireCha
 	}
 
 	wireRequest := wireChatRequest{
-		Model:            request.Model,
-		Messages:         messages,
-		Stream:           request.Stream,
-		MaxTokens:        request.MaxOutputTokens,
-		Temperature:      request.Temperature,
-		TopP:             request.TopP,
-		PresencePenalty:  request.PresencePenalty,
-		FrequencyPenalty: request.FrequencyPenalty,
-		Stop:             request.Stop,
-		Tools:            tools,
-		ToolChoice:       toolChoice,
+		Model:             request.Model,
+		Messages:          messages,
+		Stream:            request.Stream,
+		N:                 request.N,
+		Temperature:       request.Temperature,
+		TopP:              request.TopP,
+		TopK:              request.TopK,
+		PresencePenalty:   request.PresencePenalty,
+		FrequencyPenalty:  request.FrequencyPenalty,
+		ThinkingBudget:    request.ThinkingBudget,
+		Stop:              request.Stop,
+		Tools:             tools,
+		ToolChoice:        toolChoice,
+		ParallelToolCalls: request.ParallelToolCalls,
+		PromptCacheKey:    request.PromptCacheKey,
+		SafetyIdentifier:  request.SafetyIdentifier,
 	}
-	if request.ResponseFormat != nil {
+	if a.policy.outputTokens == outputTokenWireMaxCompletionTokens {
+		wireRequest.MaxCompletionTokens = request.MaxOutputTokens
+	} else {
+		wireRequest.MaxTokens = request.MaxOutputTokens
+	}
+	if request.ResponseFormat != nil && request.ResponseFormat.Type != canonical.ResponseFormatText {
 		wireRequest.ResponseFormat = &wireResponseFormat{Type: request.ResponseFormat.Type}
+		if request.ResponseFormat.JSONSchema != nil {
+			wireRequest.ResponseFormat.JSONSchema = &wireJSONSchema{
+				Name: request.ResponseFormat.JSONSchema.Name, Description: request.ResponseFormat.JSONSchema.Description,
+				Schema: request.ResponseFormat.JSONSchema.Schema, Strict: request.ResponseFormat.JSONSchema.Strict,
+			}
+		}
 	}
 	if request.Stream && a.policy.includeStreamUsage {
 		wireRequest.StreamOptions = &wireStreamOptions{IncludeUsage: true}

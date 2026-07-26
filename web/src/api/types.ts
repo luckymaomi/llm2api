@@ -120,11 +120,60 @@ export interface ModelCapabilities {
   chat: boolean
   streaming: boolean
   tools: boolean
+  toolChoiceModes: string[]
+  strictTools: boolean
+  parallelToolCalls: boolean
+  toolStreaming: boolean
+  imageInput: boolean
+  videoInput: boolean
+  partialMode: boolean
   reasoning: boolean
-  reasoningMode?: 'toggle' | 'effort' | 'hybrid'
+  reasoningMode?: 'toggle' | 'effort' | 'hybrid' | 'always_on'
+  reasoningAlwaysOn: boolean
+  reasoningDefaultEnabled: boolean
+  reasoningPreserve: boolean
+  reasoningEfforts: string[]
+  toolChoiceModesWithReasoning: string[]
   structuredOutput: boolean
+  jsonSchemaOutput: boolean
+  promptCacheKey: boolean
+  safetyIdentifier: boolean
   contextTokens: number
   outputTokens: number
+  parameters: ModelParameterCapabilities
+}
+
+export interface IntegerParameterLimit {
+  supported: boolean
+  minimum?: number
+  maximum?: number
+  exactValues: number[]
+}
+
+export interface NumberParameterLimit {
+  supported: boolean
+  minimum?: number
+  maximum?: number
+  exactValues: number[]
+}
+
+export interface SamplingCondition {
+  thinkingEnabled?: boolean
+  temperatureExact?: number
+  temperatureAtMost?: number
+  nMaximum?: number
+}
+
+export interface ModelParameterCapabilities {
+  maxCompletionTokens: IntegerParameterLimit
+  temperature: NumberParameterLimit
+  topP: NumberParameterLimit
+  presencePenalty: NumberParameterLimit
+  frequencyPenalty: NumberParameterLimit
+  n: IntegerParameterLimit
+  topK: NumberParameterLimit
+  thinkingBudget: IntegerParameterLimit
+  samplingConditions: SamplingCondition[]
 }
 
 export interface Model {
@@ -138,6 +187,12 @@ export interface Model {
   capabilities: ModelCapabilities
   createdAt: string
   updatedAt: string
+}
+
+export interface ProviderModelProfile {
+  upstreamName: string
+  displayName: string
+  capabilities: ModelCapabilities
 }
 
 export interface Provider {
@@ -158,6 +213,7 @@ export interface Provider {
     liveCapabilities: string[]
     status: 'verified' | 'degraded'
   }
+  models: ProviderModelProfile[]
   resourcePoolCount: number
   activeCredentialCount: number
   createdAt: string
@@ -197,6 +253,38 @@ export interface CredentialModelBinding {
 }
 
 export type CredentialStatus = 'active' | 'disabled' | 'retired'
+export type CredentialHealthStatus = 'healthy' | 'cooling' | 'probing' | 'repair_required'
+
+export interface CredentialCapacity {
+  state: 'observed' | 'unavailable'
+  scope: 'gateway_credential'
+  observedAt?: string
+  requestsPerMinuteLimit?: number
+  requestsPerMinuteRemaining?: number
+  tokensPerMinuteLimit?: number
+  tokensPerMinuteRemaining?: number
+  concurrencyLimit?: number
+  concurrencyInUse?: number
+}
+
+export type UpstreamStatusState = 'observed' | 'unknown' | 'unavailable'
+export type UpstreamStatusScope = 'account' | 'project' | 'credential' | 'unknown'
+
+export interface UpstreamStatusBalance {
+  currency: string
+  available: string
+  voucher: string
+  cash: string
+}
+
+export interface UpstreamStatusObservation {
+  state: UpstreamStatusState
+  scope: UpstreamStatusScope
+  observedAt: string
+  source: string
+  reason?: string
+  balance?: UpstreamStatusBalance
+}
 
 export interface Credential {
   id: string
@@ -209,6 +297,9 @@ export interface Credential {
   providerBaseUrl: string
   name: string
   status: CredentialStatus
+  healthStatus: CredentialHealthStatus
+  capacity: CredentialCapacity
+  upstreamStatus?: UpstreamStatusObservation
   rpmLimit?: number
   tpmLimit?: number
   concurrencyLimit?: number
@@ -257,10 +348,18 @@ export interface ModelDiscoveryResult {
   models: string[]
 }
 
+export interface CredentialModelProbeBatchResult {
+  results: ModelDiscoveryResult[]
+  succeeded: number
+  failed: number
+  unavailable: number
+  uncertain: number
+}
+
 export interface CredentialBatchResult {
   line: number
   name: string
-  status: 'created' | 'skipped' | 'rejected'
+  status: 'created' | 'duplicate' | 'rejected'
   credential?: Credential
   errorKind?: string
 }

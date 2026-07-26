@@ -1,5 +1,7 @@
 package canonical
 
+import "encoding/json"
+
 import "time"
 
 type Role string
@@ -16,6 +18,7 @@ type Message struct {
 	Role       Role
 	Name       string
 	Content    []ContentPart
+	Partial    bool
 	ToolCalls  []ToolCall
 	ToolCallID string
 	Reasoning  *ReasoningContent
@@ -26,27 +29,44 @@ type ResponseFormatType string
 const (
 	ResponseFormatText       ResponseFormatType = "text"
 	ResponseFormatJSONObject ResponseFormatType = "json_object"
+	ResponseFormatJSONSchema ResponseFormatType = "json_schema"
 )
 
 type ResponseFormat struct {
-	Type ResponseFormatType
+	Type       ResponseFormatType
+	JSONSchema *JSONSchema
+}
+
+// JSONSchema preserves the OpenAI-compatible structured-output contract. The
+// provider adapter owns any vendor-specific representation or rejection.
+type JSONSchema struct {
+	Name        string
+	Description string
+	Schema      json.RawMessage
+	Strict      *bool
 }
 
 type ChatRequest struct {
-	RequestID        string
-	Model            string
-	Messages         []Message
-	Tools            []ToolDefinition
-	ToolChoice       *ToolChoice
-	Stream           bool
-	MaxOutputTokens  *int64
-	Temperature      *float64
-	TopP             *float64
-	PresencePenalty  *float64
-	FrequencyPenalty *float64
-	Stop             []string
-	ResponseFormat   *ResponseFormat
-	Reasoning        *ReasoningConfig
+	RequestID         string
+	Model             string
+	Messages          []Message
+	Tools             []ToolDefinition
+	ToolChoice        *ToolChoice
+	ParallelToolCalls *bool
+	Stream            bool
+	MaxOutputTokens   *int64
+	N                 *int64
+	Temperature       *float64
+	TopP              *float64
+	TopK              *float64
+	PresencePenalty   *float64
+	FrequencyPenalty  *float64
+	ThinkingBudget    *int64
+	Stop              []string
+	ResponseFormat    *ResponseFormat
+	Reasoning         *ReasoningConfig
+	PromptCacheKey    string
+	SafetyIdentifier  string
 }
 
 type FinishReason string

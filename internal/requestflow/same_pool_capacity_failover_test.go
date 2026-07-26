@@ -25,11 +25,14 @@ func TestChatUsesEverySafeSamePoolCandidateBeforeReturning(t *testing.T) {
 	modelID := uuid.New()
 	poolID := uuid.New()
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	minimumOutputTokens := int64(1)
 	repository := &capacityFailoverRepository{
 		model: Model{
 			ID: modelID, PublicName: "public-model", UpstreamName: "upstream-model", ProviderID: uuid.New(),
-			ProviderKind: providers.KindOpenAICompatible, ProviderBaseURL: "https://provider.example/v1",
-			Capabilities: registry.ModelCapabilities{Chat: true, ContextTokens: 8192, OutputTokens: 2048},
+			ProviderKind: providers.KindSiliconFlow, ProviderBaseURL: "https://provider.example/v1",
+			Capabilities: registry.ModelCapabilities{Chat: true, ContextTokens: 8192, OutputTokens: 2048, Parameters: providers.ParameterCapabilities{
+				MaxOutputTokens: providers.IntegerParameterLimit{Supported: true, Minimum: &minimumOutputTokens},
+			}},
 		},
 		candidates: []Candidate{{ID: firstID}, {ID: secondID}, {ID: thirdID}},
 	}
@@ -54,8 +57,8 @@ func TestChatUsesEverySafeSamePoolCandidateBeforeReturning(t *testing.T) {
 			)),
 		}, nil
 	})}
-	adapter, err := providers.NewOpenAICompatible(providers.OpenAICompatibleOptions{
-		BaseURL: "https://provider.example/v1", Capabilities: providers.NarrowOpenAICompatibleCapabilities(),
+	adapter, err := providers.NewSiliconFlow(providers.SiliconFlowOptions{
+		BaseURL: "https://provider.example/v1", Capabilities: providers.SiliconFlowCapabilities(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +115,9 @@ func TestChatUsesEverySafeSamePoolCandidateBeforeReturning(t *testing.T) {
 	}
 	if len(accounting.completedUsage) != 1 || accounting.completedUsage[0].InputTokens != 2 || accounting.completedUsage[0].OutputTokens != 1 {
 		t.Fatalf("completed usage = %#v", accounting.completedUsage)
+	}
+	if len(coordinator.reconciledTokens) != 1 || coordinator.reconciledTokens[0] != 3 {
+		t.Fatalf("authoritative usage was not reconciled to the reservation: %#v", coordinator.reconciledTokens)
 	}
 }
 
@@ -207,6 +213,7 @@ type capacityFailoverCoordinator struct {
 	fullCredentialID uuid.UUID
 	retryAt          time.Time
 	requests         []LeaseRequest
+	reconciledTokens []int64
 }
 
 func (c *capacityFailoverCoordinator) Acquire(ctx context.Context, request LeaseRequest) (Lease, time.Duration, error) {
@@ -214,12 +221,19 @@ func (c *capacityFailoverCoordinator) Acquire(ctx context.Context, request Lease
 	if request.CredentialID == c.fullCredentialID {
 		return nil, 0, &CapacityError{RetryAt: c.retryAt}
 	}
-	return capacityFailoverLease{ctx: ctx}, 0, nil
+	return capacityFailoverLease{ctx: ctx, coordinator: c}, 0, nil
 }
 
-type capacityFailoverLease struct{ ctx context.Context }
+type capacityFailoverLease struct {
+	ctx         context.Context
+	coordinator *capacityFailoverCoordinator
+}
 
-func (l capacityFailoverLease) Context() context.Context    { return l.ctx }
+func (l capacityFailoverLease) Context() context.Context { return l.ctx }
+func (l capacityFailoverLease) Reconcile(_ context.Context, tokens int64) error {
+	l.coordinator.reconciledTokens = append(l.coordinator.reconciledTokens, tokens)
+	return nil
+}
 func (capacityFailoverLease) Release(context.Context) error { return nil }
 func (capacityFailoverSecrets) CredentialSecret(context.Context, uuid.UUID) (string, error) {
 	return "upstream-secret", nil

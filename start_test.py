@@ -8,6 +8,9 @@ r"""LLM2API 唯一人工测试入口。
     python .\start_test.py daily
         日常确定性检查：格式、静态分析、全部 Go 测试、sqlc 漂移、前端测试/构建。
 
+    python .\start_test.py core
+        隔离核心 HTTP 主旅程：资源池、上游 API Key、模型发现、公开路由、恢复与权限。
+
     python .\start_test.py full
         完整本机验收：daily 加真实 HTTP 合同、Docker 集成、强杀恢复、Windows SCM、
         TLS 滚动升级、加密灾备和跨平台构建。通常需要 15 分钟左右。
@@ -45,9 +48,10 @@ from typing import BinaryIO, Sequence
 
 ROOT = Path(__file__).resolve().parent
 LOG_DIRECTORY = ROOT / ".build" / "test-logs"
-MODES = ("daily", "full", "provider", "capacity", "release", "everything")
+MODES = ("daily", "core", "full", "provider", "capacity", "release", "everything")
 MODE_MENU = (
     ("daily", "日常确定性检查", "约 2 分钟"),
+    ("core", "隔离核心 HTTP 主旅程", "约 2 分钟"),
     ("full", "完整本机验收", "约 15 分钟"),
     ("provider", "真实 Provider 与标准 SDK", "取决于外部网络"),
     ("capacity", "300 用户容量与强杀恢复", "默认约 2 分钟"),
@@ -71,7 +75,7 @@ def select_mode() -> str:
     print("  0. 退出，不运行测试")
     while True:
         try:
-            choice = input("请输入编号 [0-6]：").strip()
+            choice = input("请输入编号 [0-7]：").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n已取消，没有启动测试。")
             raise SystemExit(0) from None
@@ -117,6 +121,7 @@ def test_commands(mode: str, powershell: str, capacity_duration_seconds: int, ru
                 ],
             )
         ],
+        "core": [("core", prefix + [str(ROOT / "scripts" / "test-core.ps1")])],
         "full": [("full", prefix + [str(ROOT / "scripts" / "verify.ps1")])],
         "provider": [("provider", prefix + [str(ROOT / "scripts" / "test-provider-real.ps1")])],
         "capacity": [

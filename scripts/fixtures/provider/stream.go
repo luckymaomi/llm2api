@@ -21,7 +21,7 @@ func (f *fixture) streamResponse(w http.ResponseWriter, r *http.Request, hold, l
 		flusher.Flush()
 		return nil
 	}
-	if err := write(`{"id":"fixture-stream","request_id":"fixture-request","created":1710000100,"model":"fixture-chat","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`); err != nil {
+	if err := write(`{"id":"fixture-stream","request_id":"fixture-request","created":1710000100,"model":"Qwen/Qwen3.5-9B","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`); err != nil {
 		return
 	}
 	chunks := 1
@@ -42,7 +42,7 @@ func (f *fixture) streamResponse(w http.ResponseWriter, r *http.Request, hold, l
 				return
 			}
 		}
-		if err := write(`{"id":"fixture-stream","request_id":"fixture-request","created":1710000100,"model":"fixture-chat","choices":[{"index":0,"delta":{"content":"fixture stream"},"finish_reason":null}]}`); err != nil {
+		if err := write(`{"id":"fixture-stream","request_id":"fixture-request","created":1710000100,"model":"Qwen/Qwen3.5-9B","choices":[{"index":0,"delta":{"content":"fixture stream"},"finish_reason":null}]}`); err != nil {
 			return
 		}
 	}
@@ -60,7 +60,7 @@ func (f *fixture) streamResponse(w http.ResponseWriter, r *http.Request, hold, l
 			return
 		}
 	}
-	if err := write(`{"id":"fixture-stream","request_id":"fixture-request","created":1710000100,"model":"fixture-chat","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}`); err != nil {
+	if err := write(`{"id":"fixture-stream","request_id":"fixture-request","created":1710000100,"model":"Qwen/Qwen3.5-9B","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}`); err != nil {
 		return
 	}
 	if err := write("[DONE]"); err != nil {

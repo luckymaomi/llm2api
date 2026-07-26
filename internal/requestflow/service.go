@@ -12,6 +12,7 @@ import (
 	"github.com/luckymaomi/llm2api/internal/canonical"
 	"github.com/luckymaomi/llm2api/internal/execution"
 	"github.com/luckymaomi/llm2api/internal/providers"
+	"github.com/luckymaomi/llm2api/internal/registry"
 	"github.com/luckymaomi/llm2api/internal/resilience"
 	"github.com/luckymaomi/llm2api/internal/routing"
 )
@@ -200,25 +201,202 @@ func (run *workflowRun) stopExecution() {
 }
 
 func validateCapabilities(model Model, request canonical.ChatRequest) *canonical.Error {
-	unsupported := func(parameter string) *canonical.Error {
-		return &canonical.Error{Kind: canonical.ErrorUnsupportedCapability, Code: "unsupported_capability", Message: "model does not support the requested capability", Parameter: parameter, HTTPStatus: http.StatusBadRequest}
+	unsupported := func(capability, parameter, reason string) *canonical.Error {
+		return &canonical.Error{
+			Kind: canonical.ErrorUnsupportedCapability, Code: "model_capability_unsupported", Message: reason,
+			Parameter: parameter, Model: model.PublicName, Provider: model.ProviderSlug, Capability: capability, HTTPStatus: http.StatusBadRequest,
+		}
+	}
+	if !model.Capabilities.Chat {
+		return unsupported("chat_completions", "model", "the selected model is not available for chat completions")
 	}
 	if request.Stream && !model.Capabilities.Streaming {
-		return unsupported("stream")
+		return unsupported("streaming", "stream", "the selected model does not support streaming")
 	}
 	if len(request.Tools) > 0 && !model.Capabilities.Tools {
-		return unsupported("tools")
+		return unsupported("tools.function_calling", "tools", "the selected model does not support function tools")
 	}
-	if request.Reasoning != nil && !model.Capabilities.Reasoning {
-		return unsupported("thinking")
+	for index, tool := range request.Tools {
+		if tool.Strict != nil && !model.Capabilities.StrictTools {
+			return unsupported("tools.strict_schema", fmt.Sprintf("tools.%d.function.strict", index), "the selected model does not support strict tool schemas")
+		}
 	}
-	if request.ResponseFormat != nil && request.ResponseFormat.Type != canonical.ResponseFormatText && !model.Capabilities.StructuredOutput {
-		return unsupported("response_format")
+	if request.ToolChoice != nil && !containsCapability(model.Capabilities.ToolChoiceModes, string(request.ToolChoice.Mode)) {
+		return unsupported("tools.tool_choice", "tool_choice", "the selected model does not support this tool_choice mode")
+	}
+	if request.ToolChoice != nil && len(model.Capabilities.ToolChoiceModesWithReasoning) > 0 && reasoningEnabledForModel(model.Capabilities, request) && !containsCapability(model.Capabilities.ToolChoiceModesWithReasoning, string(request.ToolChoice.Mode)) {
+		return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "tool_choice_with_thinking", Message: "this model only accepts auto or none tool_choice while thinking is enabled", Parameter: "tool_choice", Model: model.PublicName, Provider: model.ProviderSlug, Capability: "tools.tool_choice", HTTPStatus: http.StatusBadRequest}
+	}
+	if request.ParallelToolCalls != nil && !model.Capabilities.ParallelToolCalls {
+		return unsupported("tools.parallel_tool_calls", "parallel_tool_calls", "the selected model does not support parallel tool calls")
+	}
+	if request.Stream && len(request.Tools) > 0 && !model.Capabilities.ToolStreaming {
+		return unsupported("tools.streaming_tool_calls", "tools", "the selected model does not support streaming tool calls")
+	}
+	for _, message := range request.Messages {
+		for _, part := range message.Content {
+			if part.Type == canonical.ContentPartImageURL && !model.Capabilities.ImageInput {
+				return unsupported("vision.image_url", "messages", "the selected model does not support image URL input")
+			}
+			if part.Type == canonical.ContentPartVideoURL && !model.Capabilities.VideoInput {
+				return unsupported("vision.video_url", "messages", "the selected model does not support video URL input")
+			}
+		}
+	}
+	for index, message := range request.Messages {
+		if !message.Partial {
+			continue
+		}
+		if !model.Capabilities.PartialMode {
+			return unsupported("extensions.partial_mode", "messages", "the selected model does not support partial mode")
+		}
+		if message.Role != canonical.RoleAssistant || index != len(request.Messages)-1 {
+			return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "invalid_partial_mode", Message: "partial mode requires the final message to be an assistant message", Parameter: "messages", HTTPStatus: http.StatusBadRequest}
+		}
+	}
+	if request.PromptCacheKey != "" && !model.Capabilities.PromptCacheKey {
+		return unsupported("extensions.prompt_cache_key", "prompt_cache_key", "the selected model does not support prompt cache keys")
+	}
+	if request.SafetyIdentifier != "" && !model.Capabilities.SafetyIdentifier {
+		return unsupported("extensions.safety_identifier", "safety_identifier", "the selected model does not support safety identifiers")
+	}
+	if request.Reasoning != nil {
+		if !model.Capabilities.Reasoning {
+			return unsupported("reasoning", "thinking", "the selected model does not support thinking or reasoning")
+		}
+		if request.Reasoning.Enabled != nil && model.Capabilities.ReasoningMode != registry.ReasoningToggle && model.Capabilities.ReasoningMode != registry.ReasoningHybrid && model.Capabilities.ReasoningMode != registry.ReasoningAlwaysOn {
+			return unsupported("reasoning.toggle", "thinking", "the selected model does not support explicitly enabling or disabling thinking")
+		}
+		if model.Capabilities.ReasoningAlwaysOn && request.Reasoning.Enabled != nil && !*request.Reasoning.Enabled {
+			return unsupported("reasoning.always_on", "thinking.type", "the selected model always enables reasoning")
+		}
+		if request.Reasoning.Effort != "" && !containsCapability(model.Capabilities.ReasoningEfforts, string(request.Reasoning.Effort)) {
+			return unsupported("reasoning.effort", "reasoning_effort", "the selected model does not support this reasoning effort")
+		}
+		if request.Reasoning.Preserve != nil && !model.Capabilities.ReasoningPreserve {
+			return unsupported("reasoning.preserve", "thinking.keep", "the selected model does not support reasoning replay")
+		}
+		if model.Capabilities.ReasoningAlwaysOn && request.Reasoning.Preserve != nil && !*request.Reasoning.Preserve {
+			return unsupported("reasoning.preserve", "thinking.keep", "the selected model always preserves reasoning")
+		}
+	}
+	if request.ResponseFormat != nil {
+		switch request.ResponseFormat.Type {
+		case canonical.ResponseFormatText:
+		case canonical.ResponseFormatJSONObject:
+			if !model.Capabilities.StructuredOutput {
+				return unsupported("structured_output.json_object", "response_format", "the selected model does not support JSON object output")
+			}
+		case canonical.ResponseFormatJSONSchema:
+			if !model.Capabilities.JSONSchemaOutput {
+				return unsupported("structured_output.json_schema", "response_format", "the selected model does not support JSON Schema output")
+			}
+		}
 	}
 	if request.MaxOutputTokens != nil && model.Capabilities.OutputTokens > 0 && *request.MaxOutputTokens > model.Capabilities.OutputTokens {
-		return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "max_output_tokens_exceeded", Message: "requested output exceeds the model limit", Parameter: "max_completion_tokens", HTTPStatus: http.StatusBadRequest}
+		return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "max_output_tokens_exceeded", Message: "requested output exceeds the model limit", Parameter: "max_completion_tokens", Model: model.PublicName, Provider: model.ProviderSlug, Capability: "limits.output_tokens", HTTPStatus: http.StatusBadRequest}
+	}
+	parameters := model.Capabilities.Parameters
+	if failure := validateIntegerParameter(model, "parameters.max_completion_tokens", "max_completion_tokens", request.MaxOutputTokens, parameters.MaxOutputTokens); failure != nil {
+		return failure
+	}
+	if failure := validateIntegerParameter(model, "parameters.n", "n", request.N, parameters.N); failure != nil {
+		return failure
+	}
+	if failure := validateNumberParameter(model, "parameters.temperature", "temperature", request.Temperature, parameters.Temperature); failure != nil {
+		return failure
+	}
+	if failure := validateNumberParameter(model, "parameters.top_p", "top_p", request.TopP, parameters.TopP); failure != nil {
+		return failure
+	}
+	if failure := validateNumberParameter(model, "parameters.top_k", "top_k", request.TopK, parameters.TopK); failure != nil {
+		return failure
+	}
+	if failure := validateNumberParameter(model, "parameters.presence_penalty", "presence_penalty", request.PresencePenalty, parameters.PresencePenalty); failure != nil {
+		return failure
+	}
+	if failure := validateNumberParameter(model, "parameters.frequency_penalty", "frequency_penalty", request.FrequencyPenalty, parameters.FrequencyPenalty); failure != nil {
+		return failure
+	}
+	if failure := validateIntegerParameter(model, "parameters.thinking_budget", "thinking_budget", request.ThinkingBudget, parameters.ThinkingBudget); failure != nil {
+		return failure
+	}
+	for _, condition := range parameters.SamplingConditions {
+		if condition.ThinkingEnabled != nil && *condition.ThinkingEnabled != reasoningEnabledForModel(model.Capabilities, request) {
+			continue
+		}
+		if condition.TemperatureExact != nil && request.Temperature != nil && *request.Temperature != *condition.TemperatureExact {
+			return parameterInvalid(model, "parameters.temperature", "temperature", "temperature conflicts with the model's thinking-mode requirement")
+		}
+		if condition.TemperatureAtMost != nil && request.Temperature != nil && *request.Temperature <= *condition.TemperatureAtMost && condition.NMaximum != nil && request.N != nil && *request.N > *condition.NMaximum {
+			return parameterInvalid(model, "parameters.n", "n", "n exceeds the model limit for this temperature")
+		}
 	}
 	return nil
+}
+
+func validateIntegerParameter(model Model, capability, parameter string, value *int64, limit providers.IntegerParameterLimit) *canonical.Error {
+	if value == nil {
+		return nil
+	}
+	if !limit.Supported {
+		return &canonical.Error{Kind: canonical.ErrorUnsupportedCapability, Code: "model_capability_unsupported", Message: "the selected model does not support this request parameter", Parameter: parameter, Model: model.PublicName, Provider: model.ProviderSlug, Capability: capability, HTTPStatus: http.StatusBadRequest}
+	}
+	if (limit.Minimum != nil && *value < *limit.Minimum) || (limit.Maximum != nil && *value > *limit.Maximum) || (len(limit.ExactValues) > 0 && !containsIntegerParameter(limit.ExactValues, *value)) {
+		return parameterInvalid(model, capability, parameter, "the request parameter is outside the model's supported range")
+	}
+	return nil
+}
+
+func validateNumberParameter(model Model, capability, parameter string, value *float64, limit providers.NumberParameterLimit) *canonical.Error {
+	if value == nil {
+		return nil
+	}
+	if !limit.Supported {
+		return &canonical.Error{Kind: canonical.ErrorUnsupportedCapability, Code: "model_capability_unsupported", Message: "the selected model does not support this request parameter", Parameter: parameter, Model: model.PublicName, Provider: model.ProviderSlug, Capability: capability, HTTPStatus: http.StatusBadRequest}
+	}
+	if (limit.Minimum != nil && *value < *limit.Minimum) || (limit.Maximum != nil && *value > *limit.Maximum) || (len(limit.ExactValues) > 0 && !containsNumberParameter(limit.ExactValues, *value)) {
+		return parameterInvalid(model, capability, parameter, "the request parameter is outside the model's supported range")
+	}
+	return nil
+}
+
+func parameterInvalid(model Model, capability, parameter, message string) *canonical.Error {
+	return &canonical.Error{Kind: canonical.ErrorInvalidRequest, Code: "model_parameter_invalid", Message: message, Parameter: parameter, Model: model.PublicName, Provider: model.ProviderSlug, Capability: capability, HTTPStatus: http.StatusBadRequest}
+}
+
+func reasoningEnabledForModel(capabilities registry.ModelCapabilities, request canonical.ChatRequest) bool {
+	if request.Reasoning != nil && request.Reasoning.Enabled != nil {
+		return *request.Reasoning.Enabled
+	}
+	return capabilities.ReasoningAlwaysOn || capabilities.ReasoningDefaultEnabled
+}
+
+func containsIntegerParameter(values []int64, value int64) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func containsNumberParameter(values []float64, value float64) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func containsCapability(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) candidateDecision(ctx context.Context, run workflowRun, excluded *[]routing.CandidateID) (Candidate, *healthPermit, *canonical.Error) {

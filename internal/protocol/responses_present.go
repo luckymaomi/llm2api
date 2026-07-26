@@ -32,7 +32,6 @@ func PresentResponseWithID(responseID string, response canonical.ChatResponse, r
 				"id": itemIdentifier("fc", responseID, choiceIndex*1000+callIndex), "type": "function_call", "status": "completed",
 				"call_id": call.ID, "name": call.Function.Name, "arguments": call.Function.Arguments,
 			}
-			presentToolCallMetadata(item, call.ProviderMetadata)
 			output = append(output, item)
 		}
 	}

@@ -23,11 +23,14 @@ func TestStreamUsesTheNextSamePoolKeyBeforeCommitting(t *testing.T) {
 	modelID := uuid.New()
 	poolID := uuid.New()
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	minimumOutputTokens := int64(1)
 	repository := &capacityFailoverRepository{
 		model: Model{
 			ID: modelID, PublicName: "public-model", UpstreamName: "upstream-model", ProviderID: uuid.New(),
-			ProviderKind: providers.KindOpenAICompatible, ProviderBaseURL: "https://provider.example/v1",
-			Capabilities: registry.ModelCapabilities{Chat: true, Streaming: true, ContextTokens: 8192, OutputTokens: 2048},
+			ProviderKind: providers.KindSiliconFlow, ProviderBaseURL: "https://provider.example/v1",
+			Capabilities: registry.ModelCapabilities{Chat: true, Streaming: true, ContextTokens: 8192, OutputTokens: 2048, Parameters: providers.ParameterCapabilities{
+				MaxOutputTokens: providers.IntegerParameterLimit{Supported: true, Minimum: &minimumOutputTokens},
+			}},
 		},
 		candidates: []Candidate{{ID: firstID}, {ID: secondID}},
 	}
@@ -55,9 +58,9 @@ func TestStreamUsesTheNextSamePoolKeyBeforeCommitting(t *testing.T) {
 			}, nil
 		})},
 	}
-	capabilities := providers.NarrowOpenAICompatibleCapabilities()
+	capabilities := providers.SiliconFlowCapabilities()
 	capabilities.Streaming = true
-	adapter, err := providers.NewOpenAICompatible(providers.OpenAICompatibleOptions{
+	adapter, err := providers.NewSiliconFlow(providers.SiliconFlowOptions{
 		BaseURL: "https://provider.example/v1", Capabilities: capabilities,
 	})
 	if err != nil {

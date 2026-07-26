@@ -19,7 +19,8 @@ func (r *RegistryRepository) CreateCredential(ctx context.Context, input registr
 	return r.executeCredentialMutation(ctx, actorID, mutation, func(queries *db.Queries) (registry.Credential, error) {
 		created, err := queries.CreateCredential(ctx, db.CreateCredentialParams{
 			ID: input.ID, ResourcePoolID: input.ResourcePoolID, Name: input.Name, EncryptedSecret: input.EncryptedSecret,
-			RpmLimit: input.RPMLimit, TpmLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit,
+			SecretFingerprint: input.SecretFingerprint,
+			RpmLimit:          input.RPMLimit, TpmLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit,
 		})
 		if err != nil {
 			return registry.Credential{}, translateRegistryError(err)
@@ -49,7 +50,7 @@ func (r *RegistryRepository) UpdateCredential(ctx context.Context, input registr
 			return registry.Credential{}, translateRegistryError(err)
 		}
 		if _, err := queries.UpdateCredential(ctx, db.UpdateCredentialParams{
-			Name: input.Name, ReplaceSecret: input.ReplaceSecret, EncryptedSecret: input.EncryptedSecret,
+			Name: input.Name, ReplaceSecret: input.ReplaceSecret, EncryptedSecret: input.EncryptedSecret, SecretFingerprint: input.SecretFingerprint,
 			RpmLimit: input.RPMLimit, TpmLimit: input.TPMLimit, ConcurrencyLimit: input.ConcurrencyLimit,
 			ID: input.ID, ExpectedUpdatedAt: timestamp(input.ExpectedUpdatedAt),
 		}); err != nil {
@@ -206,6 +207,14 @@ func (r *RegistryRepository) GetCredential(ctx context.Context, id uuid.UUID) (r
 	return credentialByID(ctx, r.queries, id)
 }
 
+func (r *RegistryRepository) GetCredentialBySecretFingerprint(ctx context.Context, secretFingerprint string) (registry.Credential, error) {
+	row, err := r.queries.GetCredentialBySecretFingerprint(ctx, secretFingerprint)
+	if err != nil {
+		return registry.Credential{}, translateRegistryError(err)
+	}
+	return credentialByID(ctx, r.queries, row.ID)
+}
+
 func credentialByID(ctx context.Context, queries *db.Queries, id uuid.UUID) (registry.Credential, error) {
 	row, err := queries.GetCredential(ctx, id)
 	if err != nil {
@@ -243,6 +252,13 @@ func (r *RegistryRepository) ListCredentials(ctx context.Context, includeRetired
 			CooldownUntil: timePointer(row.CooldownUntil), ConsecutiveFailures: row.ConsecutiveFailures, LastSuccessAt: timePointer(row.LastSuccessAt), LastErrorKind: row.LastErrorKind,
 			LastProbeAt: timePointer(row.LastProbeAt), LastProbeLatencyMs: row.LastProbeLatencyMs, LastProbeKind: row.LastProbeKind, LastProbeStatus: row.LastProbeStatus, LastProbeErrorKind: row.LastProbeErrorKind,
 			RetiredAt: timePointer(row.RetiredAt), CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ModelBindings: bindings,
+		}
+		if len(row.UpstreamStatusObservation) > 0 {
+			var observation providers.UpstreamStatusObservation
+			if err := json.Unmarshal(row.UpstreamStatusObservation, &observation); err != nil {
+				return nil, fmt.Errorf("decode upstream status observation: %w", err)
+			}
+			item.UpstreamStatus = &observation
 		}
 		if row.LastCheckedUnixSeconds >= 0 {
 			checked := time.Unix(row.LastCheckedUnixSeconds, 0).UTC()
@@ -300,6 +316,39 @@ func (r *RegistryRepository) RecordCredentialProbe(ctx context.Context, id uuid.
 	audit := auditParams(&actorID, "credential.probed", "provider_credential", id.String(), map[string]any{
 		"status": execution.Status, "error_kind": execution.ErrorKind, "retryable": execution.Retryable,
 		"latency_ms": execution.LatencyMillis, "model_id": execution.ModelID,
+	})
+	audit.RequestID = &requestID
+	if _, err := queries.CreateAuditEvent(ctx, audit); err != nil {
+		return registry.Credential{}, err
+	}
+	credential, err := credentialByID(ctx, queries, id)
+	if err != nil {
+		return registry.Credential{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return registry.Credential{}, translateRegistryError(err)
+	}
+	return credential, nil
+}
+
+func (r *RegistryRepository) RecordCredentialUpstreamStatus(ctx context.Context, id uuid.UUID, observation providers.UpstreamStatusObservation, actorID uuid.UUID, requestID string) (registry.Credential, error) {
+	encoded, err := json.Marshal(observation)
+	if err != nil {
+		return registry.Credential{}, fmt.Errorf("encode upstream status observation: %w", err)
+	}
+	tx, err := r.connections.Postgres.Begin(ctx)
+	if err != nil {
+		return registry.Credential{}, err
+	}
+	defer tx.Rollback(ctx)
+	queries := r.queries.WithTx(tx)
+	if err := queries.UpsertCredentialUpstreamObservation(ctx, db.UpsertCredentialUpstreamObservationParams{
+		CredentialID: id, ObservedAt: timestamp(observation.ObservedAt), Observation: encoded,
+	}); err != nil {
+		return registry.Credential{}, translateRegistryError(err)
+	}
+	audit := auditParams(&actorID, "credential.upstream_status_fetched", "provider_credential", id.String(), map[string]any{
+		"state": observation.State, "scope": observation.Scope, "source": observation.Source,
 	})
 	audit.RequestID = &requestID
 	if _, err := queries.CreateAuditEvent(ctx, audit); err != nil {

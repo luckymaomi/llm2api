@@ -76,6 +76,8 @@ export const accessApi = {
       body: input,
       headers: mutationHeaders(idempotencyKey),
     }),
+  revealKey: (id: string) =>
+    apiClient.request<{ secret: string }>(`${item('keys', id)}/reveal`, { method: 'POST' }),
   deleteKey: (id: string) => apiClient.request<void>(item('keys', id), { method: 'DELETE' }),
   replaceKey: (id: string, idempotencyKey: string) =>
     apiClient.request<CreatedGatewayKey>(`${item('keys', id)}/replacement`, {

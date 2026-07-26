@@ -26,6 +26,8 @@ export default defineConfig({
     proxy: {
       '/api': apiProxyTarget,
       '/v1': apiProxyTarget,
+      '/llms.txt': apiProxyTarget,
+      '/openapi.json': apiProxyTarget,
     },
   },
 })

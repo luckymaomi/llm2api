@@ -48,7 +48,7 @@ func TestProviderCredentialMasterKeyRotationIsAtomicAndIdempotent(t *testing.T) 
 	if _, err := database.ExecContext(ctx, `INSERT INTO resource_pools (id, provider_id, slug, name) VALUES ($1, $2, $3, 'Rotation Pool')`, resourcePoolID, providerID, "rotation-pool-"+resourcePoolID.String()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ExecContext(ctx, `INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret, status) VALUES ($1, $2, 'Rotation Credential', $3, 'active')`, credentialID, resourcePoolID, encrypted); err != nil {
+	if _, err := database.ExecContext(ctx, `INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret, secret_fingerprint, status) VALUES ($1, $2, 'Rotation Credential', $3, $4, 'active')`, credentialID, resourcePoolID, encrypted, credentialFixtureFingerprint(t, credentialID)); err != nil {
 		t.Fatal(err)
 	}
 

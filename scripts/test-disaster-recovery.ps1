@@ -178,16 +178,18 @@ try {
   $masterKey = [Convert]::ToBase64String($masterKeyBytes)
   $sessionPepper = New-RandomHex 32
   $apiKeyPepper = New-RandomHex 32
+  $credentialFingerprintPepper = New-RandomHex 32
   $coordinationSecret = New-RandomHex 32
   $resticPassword = New-RandomHex 32
   $wrongResticPassword = New-RandomHex 32
   $secrets = @(
     $postgresPassword, $valkeyPassword, $masterKey, $sessionPepper,
-    $apiKeyPepper, $coordinationSecret, $resticPassword, $wrongResticPassword
+    $apiKeyPepper, $credentialFingerprintPepper, $coordinationSecret, $resticPassword, $wrongResticPassword
   )
   $httpPort = Get-LLM2APIFreeLoopbackPort
   $httpsPort = Get-LLM2APIFreeLoopbackPort
   $deploymentURL = "https://localhost:$httpsPort"
+  $acceptanceNetwork = Get-LLM2APIAcceptanceNetworkAllocation -Docker $docker -RunID $runID
   $storedGatewayImage = "registry.example.invalid/llm2api@sha256:$('0' * 64)"
   $storedCaddyImage = "registry.example.invalid/caddy@sha256:$('1' * 64)"
   $upgradeCandidateImage = "registry.example.invalid/llm2api@sha256:$('2' * 64)"
@@ -211,15 +213,20 @@ try {
   $recoveredConfigurationRoot = "$linuxRoot/recovered-configuration"
   $runtimeEnvironment = @"
 LLM2API_COMPOSE_PROJECT=$project
+LLM2API_COMPOSE_OVERLAY_FILE=compose.acceptance.yaml
 LLM2API_GATEWAY_IMAGE=$storedGatewayImage
 LLM2API_POSTGRES_IMAGE=postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
 LLM2API_VALKEY_IMAGE=valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02
 LLM2API_CADDY_IMAGE=$storedCaddyImage
 LLM2API_ACTIVE_MASTER_KEY_VERSION=1
 LLM2API_SITE_ADDRESS=https://localhost
+LLM2API_PUBLIC_ORIGIN=$deploymentURL
 LLM2API_ACME_EMAIL=staging@example.invalid
 LLM2API_HTTP_PORT=$httpPort
 LLM2API_HTTPS_PORT=$httpsPort
+LLM2API_ACCEPTANCE_BACKEND_SUBNET=$($acceptanceNetwork.BackendSubnet)
+LLM2API_EDGE_SUBNET=$($acceptanceNetwork.EdgeSubnet)
+LLM2API_TRUSTED_PROXY=$($acceptanceNetwork.ProxyAddress)
 LLM2API_POSTGRES_DB=llm2api
 LLM2API_POSTGRES_USER=llm2api
 LLM2API_POSTGRES_PASSWORD_FILE=$secretRoot/postgres-password
@@ -229,6 +236,7 @@ LLM2API_VALKEY_ACL_FILE=$secretRoot/valkey-acl
 LLM2API_MASTER_KEYS_FILE=$secretRoot/master-keys
 LLM2API_SESSION_PEPPER_FILE=$secretRoot/session-pepper
 LLM2API_API_KEY_PEPPER_FILE=$secretRoot/api-key-pepper
+LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE=$secretRoot/credential-fingerprint-pepper
 LLM2API_COORDINATION_KEY_HASH_SECRET_FILE=$secretRoot/coordination-secret
 "@
   $backupEnvironment = @"
@@ -264,6 +272,7 @@ LLM2API_RESTIC_CHECK_SUBSET=100%
   Write-SeedFile "configuration\secrets\master-keys" "1:$masterKey"
   Write-SeedFile "configuration\secrets\session-pepper" $sessionPepper
   Write-SeedFile "configuration\secrets\api-key-pepper" $apiKeyPepper
+  Write-SeedFile "configuration\secrets\credential-fingerprint-pepper" $credentialFingerprintPepper
   Write-SeedFile "configuration\secrets\coordination-secret" $coordinationSecret
   Write-SeedFile "backup-control\repository" "local:/repository"
   Write-SeedFile "backup-control\nonroot-repository" "local:/repository"
@@ -301,8 +310,8 @@ cp /workspace/deploy/compose.production.yaml /workspace/deploy/compose.acceptanc
 chown 0:0 '$configurationRoot/deployment.env' '$secretRoot/postgres-password'
 chmod 0640 '$configurationRoot/deployment.env'
 chmod 0400 '$secretRoot/postgres-password'
-chown 65532:65532 '$secretRoot/database-url' '$secretRoot/valkey-password' '$secretRoot/master-keys' '$secretRoot/session-pepper' '$secretRoot/api-key-pepper' '$secretRoot/coordination-secret'
-chmod 0400 '$secretRoot/database-url' '$secretRoot/valkey-password' '$secretRoot/master-keys' '$secretRoot/session-pepper' '$secretRoot/api-key-pepper' '$secretRoot/coordination-secret'
+chown 65532:65532 '$secretRoot/database-url' '$secretRoot/valkey-password' '$secretRoot/master-keys' '$secretRoot/session-pepper' '$secretRoot/api-key-pepper' '$secretRoot/credential-fingerprint-pepper' '$secretRoot/coordination-secret'
+chmod 0400 '$secretRoot/database-url' '$secretRoot/valkey-password' '$secretRoot/master-keys' '$secretRoot/session-pepper' '$secretRoot/api-key-pepper' '$secretRoot/credential-fingerprint-pepper' '$secretRoot/coordination-secret'
 chown 999:1000 '$secretRoot/valkey-acl'
 chmod 0400 '$secretRoot/valkey-acl'
 chown 0:0 '$backupControlRoot'/* '$restoreControlRoot'/*
@@ -311,7 +320,7 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   Invoke-Controller $prepareCommand -Quiet | Out-Null
   Invoke-Controller "source /workspace/deploy/backup-lib.sh; verify_runtime_configuration_tree '$configurationRoot'" -Quiet | Out-Null
 
-  $sourceCompose = "source /workspace/deploy/lib.sh; load_llm2api_environment '$configurationRoot/deployment.env'; export LLM2API_GATEWAY_IMAGE='$GatewayImage' LLM2API_CADDY_IMAGE='caddy:2.10.2-alpine' DEPLOY_DIRECTORY='$linuxRoot/deployment'; deployment_compose --file '$linuxRoot/deployment/compose.acceptance.yaml'"
+  $sourceCompose = "source /workspace/deploy/lib.sh; load_llm2api_environment '$configurationRoot/deployment.env'; export LLM2API_GATEWAY_IMAGE='$GatewayImage' LLM2API_CADDY_IMAGE='caddy:2.10.2-alpine' DEPLOY_DIRECTORY='$linuxRoot/deployment'; deployment_compose"
   $sourceStorage = Invoke-Controller "$sourceCompose up --detach --wait postgres valkey" -AllowFailure
   if ($sourceStorage.ExitCode -ne 0) {
     Invoke-Controller "$sourceCompose logs --no-color postgres valkey" -AllowFailure | Out-Null
@@ -438,7 +447,7 @@ chmod 0600 '$backupControlRoot'/* '$restoreControlRoot'/*
   $report.configurationRestored = $true
 
   $recoveredEnvironment = "$recoveredConfigurationRoot/deployment.env"
-  $recoveredCompose = "source /workspace/deploy/lib.sh; load_llm2api_environment '$recoveredEnvironment'; export LLM2API_GATEWAY_IMAGE='$GatewayImage' LLM2API_CADDY_IMAGE='caddy:2.10.2-alpine' DEPLOY_DIRECTORY='$linuxRoot/deployment'; deployment_compose --file '$linuxRoot/deployment/compose.acceptance.yaml'"
+  $recoveredCompose = "source /workspace/deploy/lib.sh; load_llm2api_environment '$recoveredEnvironment'; export LLM2API_GATEWAY_IMAGE='$GatewayImage' LLM2API_CADDY_IMAGE='caddy:2.10.2-alpine' DEPLOY_DIRECTORY='$linuxRoot/deployment'; deployment_compose"
   $restoreDatabaseCommand = "export DEPLOY_DIRECTORY='$linuxRoot/deployment'; bash /workspace/deploy/restore-postgres-linux.sh '$recoveredEnvironment' '$restoredPayloadRoot' llm2api_restored"
   Assert-ControllerFailure $restoreDatabaseCommand "Database restore succeeded without confirmation."
   $activeLock = Start-MaintenanceLock $linuxRoot
@@ -529,13 +538,13 @@ elif [[ -f '$configurationRoot/deployment.env' ]]; then
   load_llm2api_environment '$configurationRoot/deployment.env'
 else
   export LLM2API_GATEWAY_IMAGE=cleanup LLM2API_POSTGRES_IMAGE=cleanup LLM2API_VALKEY_IMAGE=cleanup LLM2API_CADDY_IMAGE=cleanup
-  export LLM2API_ACTIVE_MASTER_KEY_VERSION=1 LLM2API_SITE_ADDRESS=https://localhost LLM2API_ACME_EMAIL=cleanup@example.invalid
+  export LLM2API_ACTIVE_MASTER_KEY_VERSION=1 LLM2API_SITE_ADDRESS=https://localhost LLM2API_PUBLIC_ORIGIN=https://localhost LLM2API_ACME_EMAIL=cleanup@example.invalid
   export LLM2API_POSTGRES_PASSWORD_FILE=/dev/null LLM2API_DATABASE_URL_FILE=/dev/null LLM2API_VALKEY_PASSWORD_FILE=/dev/null LLM2API_VALKEY_ACL_FILE=/dev/null
-  export LLM2API_MASTER_KEYS_FILE=/dev/null LLM2API_SESSION_PEPPER_FILE=/dev/null LLM2API_API_KEY_PEPPER_FILE=/dev/null LLM2API_COORDINATION_KEY_HASH_SECRET_FILE=/dev/null
+  export LLM2API_MASTER_KEYS_FILE=/dev/null LLM2API_SESSION_PEPPER_FILE=/dev/null LLM2API_API_KEY_PEPPER_FILE=/dev/null LLM2API_CREDENTIAL_FINGERPRINT_PEPPER_FILE=/dev/null LLM2API_COORDINATION_KEY_HASH_SECRET_FILE=/dev/null
 fi
 export LLM2API_COMPOSE_PROJECT='$project' DEPLOY_DIRECTORY='$linuxRoot/deployment'
 if [[ -f '$linuxRoot/deployment/compose.production.yaml' ]]; then
-  deployment_compose --file '$linuxRoot/deployment/compose.acceptance.yaml' down --volumes --remove-orphans --timeout 30
+  deployment_compose down --volumes --remove-orphans --timeout 30
 fi
 "@
       Invoke-Controller $cleanupCompose -AllowFailure -Quiet | Out-Null

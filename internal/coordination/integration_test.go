@@ -61,6 +61,36 @@ func TestValkeyRateRetryDeadlineComesFromServerTime(t *testing.T) {
 	}
 }
 
+func TestValkeyRateInspectionDoesNotConsumeAndRefundIsIdempotent(t *testing.T) {
+	coordinator, _, _ := integrationCoordinator(t)
+	limit := BucketLimit{
+		Dimension: Dimension{Scope: ScopeCredential, SubjectID: "credential-capacity"}, Metric: MetricTokens,
+		CapacityTokens: 10, RefillTokens: 1, RefillInterval: time.Hour, RequestedTokens: 8,
+	}
+	acquired, err := coordinator.AcquireRate(context.Background(), []BucketLimit{limit})
+	if err != nil || !acquired.Granted || acquired.Buckets[0].RemainingTokens != 2 {
+		t.Fatalf("AcquireRate() = %#v, %v", acquired, err)
+	}
+	observed, err := coordinator.InspectRate(context.Background(), []BucketLimit{limit})
+	if err != nil || observed.Buckets[0].RemainingTokens != 2 {
+		t.Fatalf("InspectRate() = %#v, %v; inspection must not consume capacity", observed, err)
+	}
+	firstRefund, err := coordinator.RefundRate(context.Background(), "completed-execution-1", []BucketLimit{{
+		Dimension: limit.Dimension, Metric: limit.Metric,
+		CapacityTokens: limit.CapacityTokens, RefillTokens: limit.RefillTokens, RefillInterval: limit.RefillInterval, RequestedTokens: 5,
+	}})
+	if err != nil || !firstRefund.Applied || firstRefund.Buckets[0].RemainingTokens != 7 {
+		t.Fatalf("first RefundRate() = %#v, %v", firstRefund, err)
+	}
+	secondRefund, err := coordinator.RefundRate(context.Background(), "completed-execution-1", []BucketLimit{{
+		Dimension: limit.Dimension, Metric: limit.Metric,
+		CapacityTokens: limit.CapacityTokens, RefillTokens: limit.RefillTokens, RefillInterval: limit.RefillInterval, RequestedTokens: 5,
+	}})
+	if err != nil || secondRefund.Applied || secondRefund.Buckets[0].RemainingTokens != 7 {
+		t.Fatalf("repeated RefundRate() = %#v, %v; repeated refund must be a no-op", secondRefund, err)
+	}
+}
+
 func TestValkeyLeaseIsSharedRenewableAndIdempotentlyReleased(t *testing.T) {
 	firstInstance, client, prefix := integrationCoordinator(t)
 	secret := sha256.Sum256([]byte("coordination-integration:" + prefix))

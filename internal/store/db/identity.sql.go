@@ -184,25 +184,29 @@ func (q *Queries) CountUsers(ctx context.Context, arg CountUsersParams) (int64, 
 }
 
 const createGatewayKey = `-- name: CreateGatewayKey :one
-INSERT INTO gateway_keys (user_id, name, prefix, secret_digest, expires_at)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, name, prefix, secret_digest, expires_at, deleted_at, last_used_at, created_at
+INSERT INTO gateway_keys (id, user_id, name, prefix, secret_digest, encrypted_secret, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, user_id, name, prefix, secret_digest, encrypted_secret, expires_at, deleted_at, last_used_at, created_at
 `
 
 type CreateGatewayKeyParams struct {
-	UserID       uuid.UUID          `json:"user_id"`
-	Name         string             `json:"name"`
-	Prefix       string             `json:"prefix"`
-	SecretDigest []byte             `json:"secret_digest"`
-	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Name            string             `json:"name"`
+	Prefix          string             `json:"prefix"`
+	SecretDigest    []byte             `json:"secret_digest"`
+	EncryptedSecret []byte             `json:"encrypted_secret"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 }
 
 func (q *Queries) CreateGatewayKey(ctx context.Context, arg CreateGatewayKeyParams) (GatewayKey, error) {
 	row := q.db.QueryRow(ctx, createGatewayKey,
+		arg.ID,
 		arg.UserID,
 		arg.Name,
 		arg.Prefix,
 		arg.SecretDigest,
+		arg.EncryptedSecret,
 		arg.ExpiresAt,
 	)
 	var i GatewayKey
@@ -212,6 +216,7 @@ func (q *Queries) CreateGatewayKey(ctx context.Context, arg CreateGatewayKeyPara
 		&i.Name,
 		&i.Prefix,
 		&i.SecretDigest,
+		&i.EncryptedSecret,
 		&i.ExpiresAt,
 		&i.DeletedAt,
 		&i.LastUsedAt,
@@ -316,25 +321,39 @@ func (q *Queries) DeleteGatewayKeysForUser(ctx context.Context, userID uuid.UUID
 	return result.RowsAffected(), nil
 }
 
+const getEncryptedGatewayKey = `-- name: GetEncryptedGatewayKey :one
+SELECT encrypted_secret
+FROM gateway_keys
+WHERE id = $1 AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+`
+
+func (q *Queries) GetEncryptedGatewayKey(ctx context.Context, id uuid.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getEncryptedGatewayKey, id)
+	var encrypted_secret []byte
+	err := row.Scan(&encrypted_secret)
+	return encrypted_secret, err
+}
+
 const getGatewayKeyByDigest = `-- name: GetGatewayKeyByDigest :one
-SELECT key.id, key.user_id, key.name, key.prefix, key.secret_digest, key.expires_at, key.deleted_at, key.last_used_at, key.created_at, member.status AS user_status, member.role AS user_role
+SELECT key.id, key.user_id, key.name, key.prefix, key.secret_digest, key.encrypted_secret, key.expires_at, key.deleted_at, key.last_used_at, key.created_at, member.status AS user_status, member.role AS user_role
 FROM gateway_keys key JOIN users member ON member.id = key.user_id
 WHERE key.secret_digest = $1 AND key.deleted_at IS NULL
   AND (key.expires_at IS NULL OR key.expires_at > now())
 `
 
 type GetGatewayKeyByDigestRow struct {
-	ID           uuid.UUID          `json:"id"`
-	UserID       uuid.UUID          `json:"user_id"`
-	Name         string             `json:"name"`
-	Prefix       string             `json:"prefix"`
-	SecretDigest []byte             `json:"secret_digest"`
-	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
-	LastUsedAt   pgtype.Timestamptz `json:"last_used_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UserStatus   UserStatus         `json:"user_status"`
-	UserRole     UserRole           `json:"user_role"`
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Name            string             `json:"name"`
+	Prefix          string             `json:"prefix"`
+	SecretDigest    []byte             `json:"secret_digest"`
+	EncryptedSecret []byte             `json:"encrypted_secret"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UserStatus      UserStatus         `json:"user_status"`
+	UserRole        UserRole           `json:"user_role"`
 }
 
 func (q *Queries) GetGatewayKeyByDigest(ctx context.Context, secretDigest []byte) (GetGatewayKeyByDigestRow, error) {
@@ -346,6 +365,7 @@ func (q *Queries) GetGatewayKeyByDigest(ctx context.Context, secretDigest []byte
 		&i.Name,
 		&i.Prefix,
 		&i.SecretDigest,
+		&i.EncryptedSecret,
 		&i.ExpiresAt,
 		&i.DeletedAt,
 		&i.LastUsedAt,
@@ -450,24 +470,25 @@ func (q *Queries) GetGatewayKeyMutation(ctx context.Context, arg GetGatewayKeyMu
 }
 
 const getGatewayKeyPrincipalByID = `-- name: GetGatewayKeyPrincipalByID :one
-SELECT key.id, key.user_id, key.name, key.prefix, key.secret_digest, key.expires_at, key.deleted_at, key.last_used_at, key.created_at, member.status AS user_status, member.role AS user_role
+SELECT key.id, key.user_id, key.name, key.prefix, key.secret_digest, key.encrypted_secret, key.expires_at, key.deleted_at, key.last_used_at, key.created_at, member.status AS user_status, member.role AS user_role
 FROM gateway_keys key JOIN users member ON member.id = key.user_id
 WHERE key.id = $1 AND key.deleted_at IS NULL
   AND (key.expires_at IS NULL OR key.expires_at > now())
 `
 
 type GetGatewayKeyPrincipalByIDRow struct {
-	ID           uuid.UUID          `json:"id"`
-	UserID       uuid.UUID          `json:"user_id"`
-	Name         string             `json:"name"`
-	Prefix       string             `json:"prefix"`
-	SecretDigest []byte             `json:"secret_digest"`
-	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
-	LastUsedAt   pgtype.Timestamptz `json:"last_used_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UserStatus   UserStatus         `json:"user_status"`
-	UserRole     UserRole           `json:"user_role"`
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Name            string             `json:"name"`
+	Prefix          string             `json:"prefix"`
+	SecretDigest    []byte             `json:"secret_digest"`
+	EncryptedSecret []byte             `json:"encrypted_secret"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UserStatus      UserStatus         `json:"user_status"`
+	UserRole        UserRole           `json:"user_role"`
 }
 
 func (q *Queries) GetGatewayKeyPrincipalByID(ctx context.Context, id uuid.UUID) (GetGatewayKeyPrincipalByIDRow, error) {
@@ -479,6 +500,7 @@ func (q *Queries) GetGatewayKeyPrincipalByID(ctx context.Context, id uuid.UUID) 
 		&i.Name,
 		&i.Prefix,
 		&i.SecretDigest,
+		&i.EncryptedSecret,
 		&i.ExpiresAt,
 		&i.DeletedAt,
 		&i.LastUsedAt,

@@ -3,25 +3,34 @@ package providers
 import "github.com/luckymaomi/llm2api/internal/canonical"
 
 func NewZhipu() Adapter {
-	return mustNewAdapter("https://open.bigmodel.cn/api/paas/v4", zhipuPolicy())
+	return mustNewAdapter("https://open.bigmodel.cn/api/paas/v4", zhipuPolicy(zhipuCapabilities()))
 }
 
 func NewZhipuWithBaseURL(baseURL string) (Adapter, error) {
-	return newAdapter(baseURL, zhipuPolicy())
+	return NewZhipuWithCapabilities(baseURL, zhipuCapabilities())
 }
 
-func zhipuPolicy() wirePolicy {
-	return wirePolicy{
-		kind: KindZhipu,
-		capabilities: Capabilities{
-			Chat: true, Models: true, Streaming: true, Tools: true, ToolStreaming: true, ToolChoiceAuto: true,
-			JSONOutput: true, ReasoningToggle: true, ReasoningEffort: true, ReasoningContent: true,
-			ReasoningReplay: true, ResponseUsage: true, ResponseRequestID: true,
+func NewZhipuWithCapabilities(baseURL string, capabilities Capabilities) (Adapter, error) {
+	return newAdapter(baseURL, zhipuPolicy(capabilities))
+}
+
+func zhipuCapabilities() Capabilities {
+	return Capabilities{
+		Chat: true, Models: true, Streaming: true, Tools: true, ToolStreaming: true, ToolChoiceAuto: true,
+		JSONOutput: true, ReasoningToggle: true, ReasoningEffort: true, ReasoningContent: true,
+		ReasoningReplay: true, ResponseUsage: true, ResponseRequestID: true,
+		Parameters: ParameterCapabilities{
+			MaxOutputTokens: integerBetween(1, 131_072), Temperature: numberBetween(0, 1), TopP: numberBetween(0.01, 1),
 		},
-		chatPath: "chat/completions", modelsPath: "models", reasoning: reasoningWireZhipu,
+	}
+}
+
+func zhipuPolicy(capabilities Capabilities) wirePolicy {
+	return wirePolicy{
+		kind:         KindZhipu,
+		capabilities: capabilities,
+		chatPath:     "chat/completions", modelsPath: "models", reasoning: reasoningWireZhipu,
 		sendToolStream: true, responseRequestIDBody: true, maxStops: 4,
-		maxOutputTokens: integerRange{set: true, min: 1, max: 131072},
-		temperature:     numberRange{set: true, min: 0, max: 1}, topP: numberRange{set: true, min: 0.01, max: 1},
 		finishReasons: map[string]canonical.FinishReason{"sensitive": canonical.FinishReasonContentFilter},
 		finishReasonErrors: map[string]canonical.ErrorKind{
 			"network_error": canonical.ErrorProviderTemporary, "model_context_window_exceeded": canonical.ErrorInvalidRequest,

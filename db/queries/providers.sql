@@ -121,8 +121,8 @@ WHERE pool_model.resource_pool_id = sqlc.arg(resource_pool_id)
 ORDER BY model.public_name, model.id;
 
 -- name: CreateCredential :one
-INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret, rpm_limit, tpm_limit, concurrency_limit)
-VALUES (sqlc.arg(id), sqlc.arg(resource_pool_id), sqlc.arg(name), sqlc.arg(encrypted_secret), sqlc.narg(rpm_limit), sqlc.narg(tpm_limit), sqlc.narg(concurrency_limit))
+INSERT INTO provider_credentials (id, resource_pool_id, name, encrypted_secret, secret_fingerprint, rpm_limit, tpm_limit, concurrency_limit)
+VALUES (sqlc.arg(id), sqlc.arg(resource_pool_id), sqlc.arg(name), sqlc.arg(encrypted_secret), sqlc.arg(secret_fingerprint), sqlc.narg(rpm_limit), sqlc.narg(tpm_limit), sqlc.narg(concurrency_limit))
 RETURNING *;
 
 -- name: ClaimCredentialMutation :one
@@ -146,6 +146,7 @@ SELECT * FROM provider_credentials WHERE id = sqlc.arg(id) FOR UPDATE;
 UPDATE provider_credentials
 SET name = sqlc.arg(name),
     encrypted_secret = CASE WHEN sqlc.arg(replace_secret)::boolean THEN sqlc.arg(encrypted_secret) ELSE encrypted_secret END,
+	secret_fingerprint = CASE WHEN sqlc.arg(replace_secret)::boolean THEN sqlc.arg(secret_fingerprint) ELSE secret_fingerprint END,
     rpm_limit = sqlc.narg(rpm_limit), tpm_limit = sqlc.narg(tpm_limit), concurrency_limit = sqlc.narg(concurrency_limit),
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE id = sqlc.arg(id) AND status <> 'retired' AND updated_at = sqlc.arg(expected_updated_at)
@@ -187,6 +188,13 @@ SET last_probe_at = sqlc.arg(last_probe_at), last_probe_latency_ms = sqlc.arg(la
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE id = sqlc.arg(id) AND status <> 'retired' RETURNING *;
 
+-- name: UpsertCredentialUpstreamObservation :exec
+INSERT INTO credential_upstream_observations (credential_id, observed_at, observation)
+VALUES (sqlc.arg(credential_id), sqlc.arg(observed_at), sqlc.arg(observation))
+ON CONFLICT (credential_id) DO UPDATE
+SET observed_at = excluded.observed_at, observation = excluded.observation,
+    updated_at = GREATEST(clock_timestamp(), credential_upstream_observations.updated_at + interval '1 microsecond');
+
 -- name: RecordCredentialRuntimeSuccess :exec
 UPDATE provider_credentials
 SET health_status = 'healthy', cooldown_until = NULL, consecutive_failures = 0,
@@ -218,17 +226,27 @@ JOIN resource_pools pool ON pool.id = credential.resource_pool_id
 JOIN providers provider ON provider.id = pool.provider_id
 WHERE credential.id = sqlc.arg(id);
 
+-- name: GetCredentialBySecretFingerprint :one
+SELECT credential.*, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
+       provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url
+FROM provider_credentials credential
+JOIN resource_pools pool ON pool.id = credential.resource_pool_id
+JOIN providers provider ON provider.id = pool.provider_id
+WHERE credential.secret_fingerprint = sqlc.arg(secret_fingerprint);
+
 -- name: GetEncryptedCredential :one
 SELECT encrypted_secret FROM provider_credentials WHERE id = sqlc.arg(id) AND status <> 'retired';
 
 -- name: ListCredentials :many
 SELECT credential.*, pool.provider_id, pool.name AS resource_pool_name, pool.slug AS resource_pool_slug,
        provider.name AS provider_name, provider.kind AS provider_kind, provider.base_url AS provider_base_url,
+       upstream_status.observation AS upstream_status_observation,
        recent.terminal_count, recent.completed_count, recent.last_checked_unix_seconds,
        recent.first_byte_p95_ms, recent.total_latency_p95_ms
 FROM provider_credentials credential
 JOIN resource_pools pool ON pool.id = credential.resource_pool_id
 JOIN providers provider ON provider.id = pool.provider_id
+LEFT JOIN credential_upstream_observations upstream_status ON upstream_status.credential_id = credential.id
 LEFT JOIN LATERAL (
   SELECT count(*) FILTER (WHERE attempt.status IN ('completed', 'failed', 'uncertain')) AS terminal_count,
          count(*) FILTER (WHERE attempt.status = 'completed') AS completed_count,

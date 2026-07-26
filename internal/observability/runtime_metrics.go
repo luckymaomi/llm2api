@@ -61,7 +61,7 @@ func (m *RuntimeMetrics) initialize() {
 			m.coordinationLeases.WithLabelValues(outcome, domain)
 		}
 	}
-	for _, kind := range []providers.Kind{providers.KindAgnes, providers.KindGemini, providers.KindOpenAICompatible, providers.KindZhipu} {
+	for _, kind := range []providers.Kind{providers.KindAgnes, providers.KindSiliconFlow, providers.KindZhipu} {
 		m.providerAttempts.WithLabelValues(string(kind), "succeeded", "none")
 	}
 	for _, operation := range []string{"accept", "complete", "fail", "fail_accepted", "fail_with_usage"} {
@@ -191,6 +191,10 @@ type observedLease struct {
 }
 
 func (l *observedLease) Context() context.Context { return l.next.Context() }
+
+func (l *observedLease) Reconcile(ctx context.Context, actualTokens int64) error {
+	return l.next.Reconcile(ctx, actualTokens)
+}
 
 func (l *observedLease) Release(ctx context.Context) error {
 	err := l.next.Release(ctx)

@@ -64,3 +64,114 @@ for i = 1, #KEYS do
 end
 return result
 `)
+
+var inspectRateScript = redis.NewScript(`
+local clock = redis.call('TIME')
+local now_ms = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
+local result = {now_ms}
+
+for i = 1, #KEYS do
+  local offset = ((i - 1) * 5)
+  local capacity = tonumber(ARGV[offset + 1])
+  local refill = tonumber(ARGV[offset + 2])
+  local interval_ms = tonumber(ARGV[offset + 3])
+  local idle_ttl_ms = tonumber(ARGV[offset + 5])
+  local raw = redis.call('HMGET', KEYS[i], 'tokens', 'updated_ms')
+  local has_tokens = raw[1] ~= false
+  local has_updated = raw[2] ~= false
+  if has_tokens ~= has_updated then
+    return redis.error_reply('CORRUPT_COORDINATION_BUCKET')
+  end
+
+  local tokens = capacity
+  local updated_ms = now_ms
+  local clock_delay_ms = 0
+  if has_tokens then
+    tokens = tonumber(raw[1])
+    updated_ms = tonumber(raw[2])
+    if not tokens or not updated_ms then
+      return redis.error_reply('CORRUPT_COORDINATION_BUCKET')
+    end
+    if updated_ms < 0 or updated_ms > now_ms + idle_ttl_ms then
+      return redis.error_reply('CORRUPT_COORDINATION_BUCKET')
+    end
+    tokens = math.min(capacity, math.max(0, tokens))
+    if now_ms >= updated_ms then
+      tokens = math.min(capacity, tokens + ((now_ms - updated_ms) * refill / interval_ms))
+      updated_ms = now_ms
+    else
+      clock_delay_ms = updated_ms - now_ms
+    end
+  end
+  redis.call('HSET', KEYS[i], 'tokens', tostring(tokens), 'updated_ms', tostring(updated_ms))
+  redis.call('PEXPIRE', KEYS[i], idle_ttl_ms + clock_delay_ms)
+  table.insert(result, math.floor(math.max(0, tokens)))
+end
+return result
+`)
+
+var refundRateScript = redis.NewScript(`
+local clock = redis.call('TIME')
+local now_ms = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
+local marker_ttl_ms = tonumber(ARGV[1])
+local already_applied = redis.call('EXISTS', KEYS[1]) == 1
+local states = {}
+
+for i = 2, #KEYS do
+  local offset = 1 + ((i - 2) * 5)
+  local capacity = tonumber(ARGV[offset + 1])
+  local refill = tonumber(ARGV[offset + 2])
+  local interval_ms = tonumber(ARGV[offset + 3])
+  local refund = tonumber(ARGV[offset + 4])
+  local idle_ttl_ms = tonumber(ARGV[offset + 5])
+  local raw = redis.call('HMGET', KEYS[i], 'tokens', 'updated_ms')
+  local has_tokens = raw[1] ~= false
+  local has_updated = raw[2] ~= false
+  if has_tokens ~= has_updated then
+    return redis.error_reply('CORRUPT_COORDINATION_BUCKET')
+  end
+
+  local tokens = capacity
+  local updated_ms = now_ms
+  local clock_delay_ms = 0
+  if has_tokens then
+    tokens = tonumber(raw[1])
+    updated_ms = tonumber(raw[2])
+    if not tokens or not updated_ms then
+      return redis.error_reply('CORRUPT_COORDINATION_BUCKET')
+    end
+    if updated_ms < 0 or updated_ms > now_ms + idle_ttl_ms then
+      return redis.error_reply('CORRUPT_COORDINATION_BUCKET')
+    end
+    tokens = math.min(capacity, math.max(0, tokens))
+    if now_ms >= updated_ms then
+      tokens = math.min(capacity, tokens + ((now_ms - updated_ms) * refill / interval_ms))
+      updated_ms = now_ms
+    else
+      clock_delay_ms = updated_ms - now_ms
+    end
+  end
+  states[i - 1] = {tokens, updated_ms, refund, idle_ttl_ms + clock_delay_ms, capacity}
+end
+
+local applied = 0
+if not already_applied then
+  local marked = redis.call('SET', KEYS[1], '1', 'NX', 'PX', marker_ttl_ms)
+  if marked then
+    applied = 1
+  end
+end
+
+local result = {applied, now_ms}
+for i = 2, #KEYS do
+  local state = states[i - 1]
+  local remaining = state[1]
+  if applied == 1 then
+    remaining = math.min(state[5], remaining + state[3])
+    redis.call('HSET', KEYS[i], 'tokens', tostring(remaining), 'updated_ms', tostring(state[2]))
+    redis.call('PEXPIRE', KEYS[i], state[4])
+  end
+  table.insert(result, math.floor(math.max(0, remaining)))
+end
+return result
+`)

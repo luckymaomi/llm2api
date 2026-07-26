@@ -2,3 +2,9 @@ services:
   caddy:
     volumes:
       - ./Caddyfile.internal:/etc/caddy/Caddyfile:ro
+
+networks:
+  backend:
+    ipam:
+      config:
+        - subnet: ${LLM2API_ACCEPTANCE_BACKEND_SUBNET:?set an isolated acceptance backend subnet}

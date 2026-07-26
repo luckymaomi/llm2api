@@ -10,11 +10,11 @@ import (
 func TestProviderErrorFixturesProduceStableKinds(t *testing.T) {
 	t.Parallel()
 
-	compatible, err := NewOpenAICompatible(OpenAICompatibleOptions{
-		BaseURL: "https://llm.example/v1", Capabilities: NarrowOpenAICompatibleCapabilities(),
+	silicon, err := NewSiliconFlow(SiliconFlowOptions{
+		BaseURL: "https://llm.example/v1", Capabilities: SiliconFlowCapabilities(),
 	})
 	if err != nil {
-		t.Fatalf("create compatible adapter: %v", err)
+		t.Fatalf("create SiliconFlow adapter: %v", err)
 	}
 	tests := []struct {
 		name       string
@@ -41,7 +41,7 @@ func TestProviderErrorFixturesProduceStableKinds(t *testing.T) {
 			wantKind: canonical.ErrorAuthentication, wantCode: "invalid_api_key", wantReplay: true,
 		},
 		{
-			name: "Compatible invalid parameters", adapter: compatible, statusCode: http.StatusUnprocessableEntity,
+			name: "SiliconFlow invalid parameters", adapter: silicon, statusCode: http.StatusUnprocessableEntity,
 			body:     `{"error":{"message":"Invalid parameter","type":"invalid_request_error","param":"max_tokens","code":"invalid_value"}}`,
 			wantKind: canonical.ErrorInvalidRequest, wantCode: "invalid_value",
 		},
@@ -62,33 +62,5 @@ func TestProviderErrorFixturesProduceStableKinds(t *testing.T) {
 				t.Fatalf("retry-after = %#v", classified.RetryAfter)
 			}
 		})
-	}
-}
-
-func TestGeminiUsesStructuredQuotaAndRetryFacts(t *testing.T) {
-	t.Parallel()
-
-	classified := NewGemini().ClassifyError(http.StatusTooManyRequests, nil, []byte(`{
-		"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"quota exhausted","details":[
-			{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}]},
-			{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"4.250s"}
-		]}
-	}`))
-	if classified.Kind != canonical.ErrorRateLimit || classified.RetryAfter == nil || classified.RetryAfter.DelaySeconds == nil || *classified.RetryAfter.DelaySeconds != 5 {
-		t.Fatalf("classified error = %#v", classified)
-	}
-
-	daily := NewGemini().ClassifyError(http.StatusTooManyRequests, nil, []byte(`{
-		"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"quota exhausted","details":[
-			{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}
-		]}
-	}`))
-	if daily.Kind != canonical.ErrorQuota || !daily.ReplaySafe {
-		t.Fatalf("daily quota error = %#v", daily)
-	}
-
-	unavailable := NewGemini().ClassifyError(http.StatusServiceUnavailable, nil, []byte(`{"error":{"code":503,"status":"UNAVAILABLE","message":"overloaded"}}`))
-	if unavailable.Kind != canonical.ErrorProviderTemporary || !unavailable.ReplaySafe {
-		t.Fatalf("unavailable error = %#v", unavailable)
 	}
 }

@@ -7,6 +7,8 @@ import { DialogFrame } from '@/components/ui/dialog'
 import { Field, Input, NativeSelect } from '@/components/ui/field'
 import { FormProblem } from '@/features/auth/form-problem'
 
+import { ProviderCapabilityTable } from './provider-capability-table'
+
 export function ResourcePoolForm({
   pool,
   open,
@@ -24,6 +26,7 @@ export function ResourcePoolForm({
     queryFn: ({ signal }) => catalogApi.providers(signal),
     enabled: open && pool === null,
   })
+  const selectedProvider = (providers.data ?? []).find((provider) => provider.id === providerId)
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -105,6 +108,9 @@ export function ResourcePoolForm({
               readOnly
             />
           </Field>
+        ) : null}
+        {selectedProvider ? (
+          <ProviderCapabilityTable provider={selectedProvider} models={selectedProvider.models} />
         ) : null}
         <FormProblem error={mutation.error ?? providers.error} />
       </form>

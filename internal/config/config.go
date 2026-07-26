@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -48,6 +49,7 @@ type ProviderProbe struct {
 
 type HTTP struct {
 	Address           string
+	PublicOrigin      string
 	ReadHeaderTimeout time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
@@ -70,19 +72,20 @@ type Valkey struct {
 }
 
 type Security struct {
-	MasterKeys              map[uint32][]byte
-	ActiveMasterKeyVersion  uint32
-	SessionPepper           []byte
-	APIKeyPepper            []byte
-	CoordinationKeyHash     []byte
-	ProviderCABundleFile    string
-	CookieSecure            bool
-	TrustedProxy            string
-	LoginAccountAttempts    int
-	LoginAddressAttempts    int
-	LoginWindow             time.Duration
-	AllowedPrivatePrefixes  []netip.Prefix
-	AllowedResolvedPrefixes []netip.Prefix
+	MasterKeys                  map[uint32][]byte
+	ActiveMasterKeyVersion      uint32
+	SessionPepper               []byte
+	APIKeyPepper                []byte
+	CredentialFingerprintPepper []byte
+	CoordinationKeyHash         []byte
+	ProviderCABundleFile        string
+	CookieSecure                bool
+	TrustedProxy                string
+	LoginAccountAttempts        int
+	LoginAddressAttempts        int
+	LoginWindow                 time.Duration
+	AllowedPrivatePrefixes      []netip.Prefix
+	AllowedResolvedPrefixes     []netip.Prefix
 }
 
 type Capacity struct {
@@ -123,6 +126,7 @@ type Logging struct {
 
 func Load() (Config, error) {
 	profile := Profile(env("LLM2API_PROFILE", string(ProfileDevelopment)))
+	httpAddress := env("LLM2API_HTTP_ADDRESS", "127.0.0.1:8080")
 	databaseURL, err := secretEnv("LLM2API_DATABASE_URL", developmentSecret(profile, "postgres://llm2api:llm2api_dev@127.0.0.1:15432/llm2api?sslmode=disable"))
 	if err != nil {
 		return Config{}, err
@@ -143,6 +147,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	credentialFingerprintPepper, err := secretEnv("LLM2API_CREDENTIAL_FINGERPRINT_PEPPER", developmentSecret(profile, "llm2api-development-credential-fingerprint-pepper"))
+	if err != nil {
+		return Config{}, err
+	}
 	coordinationKeyHash, err := secretEnv("LLM2API_COORDINATION_KEY_HASH_SECRET", developmentSecret(profile, "llm2api-development-coordination-key-hash-secret"))
 	if err != nil {
 		return Config{}, err
@@ -150,7 +158,8 @@ func Load() (Config, error) {
 	cfg := Config{
 		Profile: profile,
 		HTTP: HTTP{
-			Address:           env("LLM2API_HTTP_ADDRESS", "127.0.0.1:8080"),
+			Address:           httpAddress,
+			PublicOrigin:      env("LLM2API_PUBLIC_ORIGIN", developmentPublicOrigin(profile, httpAddress)),
 			ReadHeaderTimeout: durationEnv("LLM2API_HTTP_READ_HEADER_TIMEOUT", 10*time.Second),
 			IdleTimeout:       durationEnv("LLM2API_HTTP_IDLE_TIMEOUT", 90*time.Second),
 			ShutdownTimeout:   durationEnv("LLM2API_HTTP_SHUTDOWN_TIMEOUT", 30*time.Second),
@@ -170,19 +179,20 @@ func Load() (Config, error) {
 			ConnectTimeout: durationEnv("LLM2API_VALKEY_CONNECT_TIMEOUT", 5*time.Second),
 		},
 		Security: Security{
-			MasterKeys:              masterKeys(masterKeyValue),
-			ActiveMasterKeyVersion:  uint32(intEnv("LLM2API_ACTIVE_MASTER_KEY_VERSION", 1)),
-			SessionPepper:           []byte(sessionPepper),
-			APIKeyPepper:            []byte(apiKeyPepper),
-			CoordinationKeyHash:     []byte(coordinationKeyHash),
-			ProviderCABundleFile:    strings.TrimSpace(os.Getenv("LLM2API_PROVIDER_CA_BUNDLE_FILE")),
-			CookieSecure:            boolEnv("LLM2API_COOKIE_SECURE", profile == ProfileProduction),
-			TrustedProxy:            strings.TrimSpace(os.Getenv("LLM2API_TRUSTED_PROXY")),
-			LoginAccountAttempts:    intEnv("LLM2API_LOGIN_ACCOUNT_ATTEMPTS", 5),
-			LoginAddressAttempts:    intEnv("LLM2API_LOGIN_ADDRESS_ATTEMPTS", 30),
-			LoginWindow:             durationEnv("LLM2API_LOGIN_WINDOW", 10*time.Minute),
-			AllowedPrivatePrefixes:  prefixListEnv("LLM2API_ALLOWED_PRIVATE_NETWORKS"),
-			AllowedResolvedPrefixes: prefixListEnv("LLM2API_ALLOWED_RESOLVED_NETWORKS"),
+			MasterKeys:                  masterKeys(masterKeyValue),
+			ActiveMasterKeyVersion:      uint32(intEnv("LLM2API_ACTIVE_MASTER_KEY_VERSION", 1)),
+			SessionPepper:               []byte(sessionPepper),
+			APIKeyPepper:                []byte(apiKeyPepper),
+			CredentialFingerprintPepper: []byte(credentialFingerprintPepper),
+			CoordinationKeyHash:         []byte(coordinationKeyHash),
+			ProviderCABundleFile:        strings.TrimSpace(os.Getenv("LLM2API_PROVIDER_CA_BUNDLE_FILE")),
+			CookieSecure:                boolEnv("LLM2API_COOKIE_SECURE", profile == ProfileProduction),
+			TrustedProxy:                strings.TrimSpace(os.Getenv("LLM2API_TRUSTED_PROXY")),
+			LoginAccountAttempts:        intEnv("LLM2API_LOGIN_ACCOUNT_ATTEMPTS", 5),
+			LoginAddressAttempts:        intEnv("LLM2API_LOGIN_ADDRESS_ATTEMPTS", 30),
+			LoginWindow:                 durationEnv("LLM2API_LOGIN_WINDOW", 10*time.Minute),
+			AllowedPrivatePrefixes:      prefixListEnv("LLM2API_ALLOWED_PRIVATE_NETWORKS"),
+			AllowedResolvedPrefixes:     prefixListEnv("LLM2API_ALLOWED_RESOLVED_NETWORKS"),
 		},
 		ProviderProbe: ProviderProbe{
 			Timeout:          durationEnv("LLM2API_PROVIDER_PROBE_TIMEOUT", 15*time.Second),
@@ -237,6 +247,9 @@ func (c Config) Validate() error {
 	if _, _, err := net.SplitHostPort(c.HTTP.Address); err != nil {
 		problems = append(problems, fmt.Errorf("LLM2API_HTTP_ADDRESS: %w", err))
 	}
+	if err := validatePublicOrigin(c.HTTP.PublicOrigin); err != nil {
+		problems = append(problems, fmt.Errorf("LLM2API_PUBLIC_ORIGIN: %w", err))
+	}
 	if c.Database.URL == "" {
 		problems = append(problems, errors.New("LLM2API_DATABASE_URL is required"))
 	}
@@ -262,6 +275,9 @@ func (c Config) Validate() error {
 	}
 	if len(c.Security.APIKeyPepper) < 32 {
 		problems = append(problems, errors.New("LLM2API_API_KEY_PEPPER must contain at least 32 bytes"))
+	}
+	if len(c.Security.CredentialFingerprintPepper) < 32 {
+		problems = append(problems, errors.New("LLM2API_CREDENTIAL_FINGERPRINT_PEPPER must contain at least 32 bytes"))
 	}
 	if len(c.Security.CoordinationKeyHash) < 32 {
 		problems = append(problems, errors.New("LLM2API_COORDINATION_KEY_HASH_SECRET must contain at least 32 bytes"))
@@ -343,6 +359,34 @@ func developmentSecret(profile Profile, value string) string {
 		return ""
 	}
 	return value
+}
+
+func developmentPublicOrigin(profile Profile, address string) string {
+	if profile == ProfileProduction {
+		return ""
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || host == "" || host == "0.0.0.0" || host == "::" {
+		return ""
+	}
+	return "http://" + net.JoinHostPort(host, port)
+}
+
+func validatePublicOrigin(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
+		return errors.New("must be an absolute HTTP or HTTPS origin")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("must use HTTP or HTTPS")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return errors.New("must contain only an origin without credentials, path, query, or fragment")
+	}
+	if parsed.Hostname() == "" {
+		return errors.New("must contain a host")
+	}
+	return nil
 }
 
 func secretEnv(key, fallback string) (string, error) {

@@ -77,11 +77,10 @@ type wireStreamDelta struct {
 }
 
 type wireToolCallDelta struct {
-	Index        *int                  `json:"index"`
-	ID           string                `json:"id"`
-	Type         string                `json:"type"`
-	Function     wireToolFunctionDelta `json:"function"`
-	ExtraContent *toolCallExtraContent `json:"extra_content,omitempty"`
+	Index    *int                  `json:"index"`
+	ID       string                `json:"id"`
+	Type     string                `json:"type"`
+	Function wireToolFunctionDelta `json:"function"`
 }
 
 type wireToolFunctionDelta struct {
@@ -163,18 +162,10 @@ func (a *openAIAdapter) parseChoice(choice wireResponseChoice) (canonical.ChatCh
 			if toolCall.ID == "" || toolCall.Type != "function" || !toolNamePattern.MatchString(toolCall.Function.Name) {
 				return canonical.ChatChoice{}, a.contractError("invalid_tool_call", "provider returned an invalid tool call", nil)
 			}
-			parsedCall := canonical.ToolCall{
+			message.ToolCalls = append(message.ToolCalls, canonical.ToolCall{
 				ID: toolCall.ID, Type: toolCall.Type,
 				Function: canonical.ToolFunctionCall{Name: toolCall.Function.Name, Arguments: toolCall.Function.Arguments},
-			}
-			if a.policy.decodeToolCallMetadata != nil {
-				metadata, err := a.policy.decodeToolCallMetadata(toolCall)
-				if err != nil {
-					return canonical.ChatChoice{}, err
-				}
-				parsedCall.ProviderMetadata = metadata
-			}
-			message.ToolCalls = append(message.ToolCalls, parsedCall)
+			})
 		}
 	}
 	if len(message.Content) == 0 && len(message.ToolCalls) == 0 && message.Reasoning == nil {
