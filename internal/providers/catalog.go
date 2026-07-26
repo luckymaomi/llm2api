@@ -249,6 +249,7 @@ var defaultCatalog = mustCatalog([]Definition{
 			zhipuTextModel("glm-5.1", 0, 0, false, true),
 			zhipuTextModel("glm-5", 0, 0, false, true),
 			zhipuTextModel("glm-5-turbo", 0, 0, false, false),
+			zhipuTextModel("glm-4.7-flash", 200_000, 131_072, false, true),
 			zhipuTextModel("glm-4.7", 0, 0, false, true),
 			zhipuTextModel("glm-4.6", 0, 0, false, false),
 			zhipuTextModel("glm-4.5", 0, 0, false, false),
@@ -263,7 +264,7 @@ var defaultCatalog = mustCatalog([]Definition{
 		Contract: ContractInfo{
 			ReferenceURL: "https://apihub.agnes-ai.com/v1", ContractSnapshot: "2026-07-22 live API wire",
 			VerifiedAt: "2026-07-22", VerifiedModels: []string{"agnes-2.0-flash"},
-			LiveCapabilities: []string{"models", "chat", "stream", "tools", "reasoning", "usage", "cancel"}, Status: VerificationVerified,
+			LiveCapabilities: []string{"models", "chat", "stream", "tools", "streaming_tools", "reasoning", "usage", "cancel"}, Status: VerificationVerified,
 		},
 		Presets: []ProviderPreset{{
 			ID: "agnes", Slug: "agnes", Name: "Agnes", BaseURL: "https://apihub.agnes-ai.com/v1",

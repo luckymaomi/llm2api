@@ -76,8 +76,8 @@ Provider 是代码拥有的能力目录，不是管理员安装的业务对象�
 
 | Provider | kind | 现场模型 | 已证明合同 |
 | --- | --- | --- | --- |
-| Agnes | `agnes` | `agnes-2.0-flash` | models、chat、stream、tools、thinking、usage、取消与未知边界 |
-| 智谱 GLM | `zhipu` | `glm-5.2` | models、chat、stream、tools、reasoning、usage、结构化 quota 与同池接管 |
+| Agnes | `agnes` | `agnes-2.0-flash` | models、chat、stream、tools、流式工具、thinking、usage、取消与未知边界 |
+| 智谱 GLM | `zhipu` | `glm-4.7-flash`、`glm-5.2` | models、chat、stream、tools、reasoning、usage、结构化 quota 与同池接管 |
 | 硅基流动 | `siliconflow` | `Qwen/Qwen3.5-9B` | models、chat、stream、tools、reasoning、usage 与标准 SDK |
 | Kimi | `kimi` | `kimi-k3` | models、chat、stream、工具与流式工具、thinking、图片/视频、JSON Schema、Partial、缓存键、安全标识、官方余额端点 |
 

@@ -482,6 +482,7 @@ DROP TABLE IF EXISTS gateway_keys;
 DROP TABLE IF EXISTS resource_pool_mutations;
 DROP TABLE IF EXISTS resource_pool_models;
 DROP TABLE IF EXISTS resource_pools;
+DROP TABLE IF EXISTS upstream_capacity_scopes;
 DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS providers;
 DROP TABLE IF EXISTS sessions;

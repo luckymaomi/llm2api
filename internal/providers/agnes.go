@@ -14,7 +14,7 @@ func NewAgnesWithCapabilities(baseURL string, capabilities Capabilities) (Adapte
 
 func agnesCapabilities() Capabilities {
 	return Capabilities{
-		Chat: true, Models: true, Streaming: true, Tools: true,
+		Chat: true, Models: true, Streaming: true, Tools: true, ToolStreaming: true,
 		ToolChoiceAuto: true, ToolChoiceNamed: true, ImageInput: true, ReasoningToggle: true,
 		ResponseUsage: true, StreamUsage: true,
 		Parameters: ParameterCapabilities{

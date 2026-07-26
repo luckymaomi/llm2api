@@ -14,7 +14,7 @@ func TestProviderCapabilitiesDescribeExecutableContracts(t *testing.T) {
 		t.Fatalf("Zhipu capabilities = %#v", zhipu)
 	}
 	agnes := NewAgnes().Capabilities()
-	if !agnes.Chat || !agnes.Models || !agnes.Streaming || !agnes.Tools || !agnes.ReasoningToggle || !agnes.ResponseUsage || !agnes.StreamUsage {
+	if !agnes.Chat || !agnes.Models || !agnes.Streaming || !agnes.Tools || !agnes.ToolStreaming || !agnes.ReasoningToggle || !agnes.ResponseUsage || !agnes.StreamUsage {
 		t.Fatalf("Agnes capabilities = %#v", agnes)
 	}
 	kimi := NewKimi().Capabilities()
